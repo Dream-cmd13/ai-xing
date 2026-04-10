@@ -284,26 +284,24 @@ const ReviewView: React.FC = () => {
     if (!dept) return [];
     
     const year = parseInt(currentPeriodLabel.split('-')[0]);
-    // For weekly/monthly review, we usually review against Quarterly or Annual OKRs.
-    // Let's assume we review against the current Quarter's OKRs.
-    // Simple logic to map month/week to quarter:
+    
     let quarter = 'Q1';
     if (activeTab === 'monthly') {
       const month = parseInt(currentPeriodLabel.split('-M')[1]);
       if (month >= 4 && month <= 6) quarter = 'Q2';
-      if (month >= 7 && month <= 9) quarter = 'Q3';
-      if (month >= 10) quarter = 'Q4';
+      else if (month >= 7 && month <= 9) quarter = 'Q3';
+      else if (month >= 10) quarter = 'Q4';
     } else {
-      // Week logic is complex, defaulting to Q1 for simplicity or need a helper
-      // For now, let's just show Annual OKRs or all Quarterly OKRs?
-      // Let's show Annual + All Quarters for context
+      const week = parseInt(currentPeriodLabel.split('-W')[1]);
+      if (week >= 14 && week <= 26) quarter = 'Q2';
+      else if (week >= 27 && week <= 39) quarter = 'Q3';
+      else if (week >= 40) quarter = 'Q4';
     }
 
-    // Return flattened list of OKRs for the year
     const okrs: any[] = [];
     if (dept.okrs?.[year]) {
       Object.entries(dept.okrs[year]).forEach(([period, list]: [string, any[]]) => {
-        if (period !== 'Annual') {
+        if (period === quarter) {
           (list || []).forEach(o => okrs.push({ ...o, period }));
         }
       });
