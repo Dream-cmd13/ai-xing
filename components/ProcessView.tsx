@@ -10,7 +10,7 @@ import { IMEInput, IMETextarea } from './IMEInput';
 import { 
   X, Plus, Trash2, Layers, ChevronLeft, ChevronRight, 
   ArrowUpRight, CheckCircle2, Settings, History, Send, Info, User, Users, Target, RotateCcw, Layout,
-  GitMerge, PlayCircle, StopCircle, Save, WifiOff, CheckCircle, Clock, AlertTriangle, Check, Lock, Loader2
+  GitMerge, PlayCircle, StopCircle, Save, WifiOff, CheckCircle, Clock, AlertTriangle, Check, Lock, Loader2, Search
 } from 'lucide-react';
 
 
@@ -37,6 +37,47 @@ const CompactSipoc: React.FC<{ title: string, items: string[], onClick: () => vo
     </div>
   </div>
 );
+
+const filterRolesByKeyword = (roles: string[], keyword: string) => {
+  const query = keyword.trim().toLowerCase();
+  if (!query) return roles;
+  return roles.filter(role => role.toLowerCase().includes(query));
+};
+
+const DetailedSipocCard: React.FC<{ title: string, items: string[], onClick: () => void }> = ({ title, items, onClick }) => {
+  const visibleItems = items.slice(0, 3);
+  const remainingCount = Math.max(items.length - visibleItems.length, 0);
+
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="w-full p-4 bg-slate-50 border rounded-2xl cursor-pointer hover:border-brand-300 transition-all flex flex-col gap-3 shadow-sm text-left"
+    >
+      <div className="flex items-center justify-between gap-3">
+        <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">{title}</span>
+        <span className="text-[9px] font-black text-brand-600">{items.length} 项</span>
+      </div>
+      {items.length === 0 ? (
+        <span className="text-[11px] text-slate-300 italic leading-relaxed">点击录入内容...</span>
+      ) : (
+        <div className="space-y-2">
+          {visibleItems.map((item, index) => (
+            <div
+              key={`${title}-${index}-${item}`}
+              className="bg-white border border-slate-200 rounded-xl px-3 py-2 text-[11px] font-bold text-slate-600 leading-relaxed break-words line-clamp-2"
+            >
+              {item}
+            </div>
+          ))}
+          {remainingCount > 0 && (
+            <div className="text-[10px] font-black text-brand-600">另有 {remainingCount} 项，点击查看全部</div>
+          )}
+        </div>
+      )}
+    </button>
+  );
+};
 
 interface LobbyProcessEntry {
   id: string;
@@ -86,7 +127,10 @@ const ProcessView: React.FC = () => {
   const [editModal, setEditModal] = useState<{ nodeId: string, field: keyof SIPOC | 'label', title: string } | null>(null);
   const [dragInfo, setDragInfo] = useState<{ nodeId: string, startX: number, startY: number, nodeX: number, nodeY: number } | null>(null);
   const [localNodePos, setLocalNodePos] = useState<{ id: string, x: number, y: number } | null>(null);
+  const [showOwnerRoleDropdown, setShowOwnerRoleDropdown] = useState(false);
   const [showAssistantRoleDropdown, setShowAssistantRoleDropdown] = useState(false);
+  const [ownerRoleSearch, setOwnerRoleSearch] = useState('');
+  const [assistantRoleSearch, setAssistantRoleSearch] = useState('');
   
   // Custom Modal states for confirmations
   const [confirmDeleteNode, setConfirmDeleteNode] = useState(false);
@@ -138,6 +182,29 @@ const ProcessView: React.FC = () => {
   }, [currentProcess, subProcessPath]);
 
   const selectedNode = useMemo(() => currentContext.nodes.find(n => n.id === selectedNodeId), [currentContext.nodes, selectedNodeId]);
+
+  const filteredOwnerRoles = useMemo(() => {
+    const matchedRoles = filterRolesByKeyword(availableRoles, ownerRoleSearch);
+    const currentOwner = selectedNode?.sipoc.ownerRole;
+    if (currentOwner && !matchedRoles.includes(currentOwner)) {
+      return [currentOwner, ...matchedRoles];
+    }
+    return matchedRoles;
+  }, [availableRoles, ownerRoleSearch, selectedNode?.sipoc.ownerRole]);
+
+  const filteredAssistantRoles = useMemo(() => {
+    const candidateRoles = availableRoles.filter(role => role !== selectedNode?.sipoc.ownerRole);
+    const matchedRoles = filterRolesByKeyword(candidateRoles, assistantRoleSearch);
+    const selectedAssistantRoles = (selectedNode?.sipoc.assistantRoles || []).filter(role => !matchedRoles.includes(role));
+    return [...selectedAssistantRoles, ...matchedRoles];
+  }, [availableRoles, selectedNode?.sipoc.ownerRole, selectedNode?.sipoc.assistantRoles, assistantRoleSearch]);
+
+  useEffect(() => {
+    setOwnerRoleSearch('');
+    setAssistantRoleSearch('');
+    setShowOwnerRoleDropdown(false);
+    setShowAssistantRoleDropdown(false);
+  }, [selectedNodeId]);
 
   const updateCurrentData = useCallback((newNodes: ProcessNode[], newLinks: ProcessLink[]) => {
     if (!currentProcessId || !currentProcess) return;
@@ -476,21 +543,65 @@ const ProcessView: React.FC = () => {
 
               {selectedNode.type !== 'start' && selectedNode.type !== 'end' && (
                 <>
-                  <div className="space-y-4">
+                  <div className="space-y-4 relative">
                     <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest">执行角色 (岗位)</label>
-                    <select 
-                      className="w-full p-3 bg-slate-50 border rounded-xl text-xs font-black outline-none focus:border-brand-500 appearance-none disabled:opacity-50" 
-                      value={selectedNode.sipoc.ownerRole || ''} 
-                      disabled={!permissions.update}
-                      onChange={e => {
-                        const newOwner = e.target.value;
-                        const newAssistantRoles = (selectedNode.sipoc.assistantRoles || []).filter(r => r !== newOwner);
-                        updateNode(selectedNode.id, { sipoc: { ...selectedNode.sipoc, ownerRole: newOwner, assistantRoles: newAssistantRoles } });
-                      }}
+                    <div
+                      className={`w-full p-3 bg-slate-50 border rounded-xl min-h-[42px] transition-all flex items-center justify-between gap-2 ${permissions.update ? 'cursor-pointer hover:border-brand-300' : 'opacity-50 cursor-not-allowed'}`}
+                      onClick={() => permissions.update && setShowOwnerRoleDropdown(!showOwnerRoleDropdown)}
                     >
-                      <option value="">未选择岗位</option>
-                      {availableRoles.map(r => <option key={r} value={r}>{r}</option>)}
-                    </select>
+                      {selectedNode.sipoc.ownerRole ? (
+                        <span className="text-xs font-bold text-slate-700">{selectedNode.sipoc.ownerRole}</span>
+                      ) : (
+                        <span className="text-xs text-slate-400 font-bold">选择执行角色...</span>
+                      )}
+                      <Search size={14} className="text-slate-300 shrink-0" />
+                    </div>
+                    {showOwnerRoleDropdown && (
+                      <div className="absolute top-full left-0 w-full bg-white border border-slate-200 rounded-xl shadow-xl z-50 mt-2 p-2 animate-in zoom-in-95">
+                        <div className="relative mb-2">
+                          <IMEInput
+                            className="w-full pl-10 pr-3 py-2.5 bg-slate-50 border rounded-xl text-xs font-bold outline-none focus:border-brand-500"
+                            value={ownerRoleSearch}
+                            placeholder="搜索执行角色..."
+                            onChange={e => setOwnerRoleSearch(e.target.value)}
+                          />
+                          <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-300" />
+                        </div>
+                        <div className="max-h-40 overflow-y-auto custom-scrollbar space-y-1">
+                          <div
+                            onClick={() => {
+                              updateNode(selectedNode.id, { sipoc: { ...selectedNode.sipoc, ownerRole: '' } });
+                              setShowOwnerRoleDropdown(false);
+                              setOwnerRoleSearch('');
+                            }}
+                            className={`flex items-center justify-between p-2 rounded-lg text-xs font-bold cursor-pointer transition-all ${!selectedNode.sipoc.ownerRole ? 'bg-brand-50 text-brand-600' : 'hover:bg-slate-50 text-slate-600'}`}
+                          >
+                            未选择岗位
+                            {!selectedNode.sipoc.ownerRole && <Check size={14} className="text-brand-600" />}
+                          </div>
+                          {filteredOwnerRoles.map(r => (
+                            <div
+                              key={r}
+                              onClick={() => {
+                                const newAssistantRoles = (selectedNode.sipoc.assistantRoles || []).filter(role => role !== r);
+                                updateNode(selectedNode.id, { sipoc: { ...selectedNode.sipoc, ownerRole: r, assistantRoles: newAssistantRoles } });
+                                setShowOwnerRoleDropdown(false);
+                                setOwnerRoleSearch('');
+                              }}
+                              className={`flex items-center justify-between p-2 rounded-lg text-xs font-bold cursor-pointer transition-all ${selectedNode.sipoc.ownerRole === r ? 'bg-brand-50 text-brand-600' : 'hover:bg-slate-50 text-slate-600'}`}
+                            >
+                              {r}
+                              {selectedNode.sipoc.ownerRole === r && <Check size={14} className="text-brand-600" />}
+                            </div>
+                          ))}
+                          {availableRoles.length === 0 && <div className="text-center py-4 text-[10px] text-slate-400 italic">暂无岗位可选</div>}
+                          {ownerRoleSearch.trim() && filteredOwnerRoles.length === 0 && <div className="text-center py-4 text-[10px] text-slate-400 italic">暂无匹配岗位</div>}
+                        </div>
+                      </div>
+                    )}
+                    {showOwnerRoleDropdown && (
+                      <div className="fixed inset-0 z-40" onClick={() => setShowOwnerRoleDropdown(false)} />
+                    )}
                   </div>
 
                   <div className="space-y-4 relative">
@@ -511,8 +622,18 @@ const ProcessView: React.FC = () => {
                     </div>
                     
                     {showAssistantRoleDropdown && (
-                      <div className="absolute top-full left-0 w-full bg-white border border-slate-200 rounded-xl shadow-xl z-50 mt-2 max-h-48 overflow-y-auto p-2 custom-scrollbar animate-in zoom-in-95">
-                        {availableRoles.filter(r => r !== selectedNode.sipoc.ownerRole).map(r => {
+                      <div className="absolute top-full left-0 w-full bg-white border border-slate-200 rounded-xl shadow-xl z-50 mt-2 p-2 animate-in zoom-in-95">
+                        <div className="relative mb-2">
+                          <IMEInput
+                            className="w-full pl-10 pr-3 py-2.5 bg-slate-50 border rounded-xl text-xs font-bold outline-none focus:border-brand-500"
+                            value={assistantRoleSearch}
+                            placeholder="搜索辅助岗位..."
+                            onChange={e => setAssistantRoleSearch(e.target.value)}
+                          />
+                          <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-300" />
+                        </div>
+                        <div className="max-h-40 overflow-y-auto custom-scrollbar space-y-1">
+                        {filteredAssistantRoles.map(r => {
                           const isSelected = selectedNode.sipoc.assistantRoles?.includes(r);
                           return (
                             <div 
@@ -526,6 +647,8 @@ const ProcessView: React.FC = () => {
                           );
                         })}
                         {availableRoles.filter(r => r !== selectedNode.sipoc.ownerRole).length === 0 && <div className="text-center py-4 text-[10px] text-slate-400 italic">暂无岗位可选</div>}
+                        {assistantRoleSearch.trim() && filteredAssistantRoles.length === 0 && <div className="text-center py-4 text-[10px] text-slate-400 italic">暂无匹配岗位</div>}
+                      </div>
                       </div>
                     )}
                     {showAssistantRoleDropdown && (
@@ -550,15 +673,18 @@ const ProcessView: React.FC = () => {
                   </div>
                   <div className="space-y-3">
                     <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest">SIPOC 要素控制</label>
-                    <div className="grid grid-cols-2 gap-3">
-                        <CompactSipoc title="S - 来源" items={selectedNode.sipoc.source || []} onClick={() => setEditModal({ nodeId: selectedNode.id, field: 'source', title: 'S - 来源对象' })} />
-                        <CompactSipoc title="I - 输入" items={selectedNode.sipoc.inputs || []} onClick={() => setEditModal({ nodeId: selectedNode.id, field: 'inputs', title: 'I - 输入要素' })} />
-                        <CompactSipoc title="O - 输出" items={selectedNode.sipoc.outputs || []} onClick={() => setEditModal({ nodeId: selectedNode.id, field: 'outputs', title: 'O - 输出产物' })} />
-                        <CompactSipoc title="C - 输出对象" items={selectedNode.sipoc.customers || []} onClick={() => setEditModal({ nodeId: selectedNode.id, field: 'customers', title: 'C - 输出对象' })} />
+                    <div className="grid grid-cols-1 gap-3">
+                        <DetailedSipocCard title="S - 来源" items={selectedNode.sipoc.source || []} onClick={() => setEditModal({ nodeId: selectedNode.id, field: 'source', title: 'S - 来源对象' })} />
+                        <DetailedSipocCard title="I - 输入" items={selectedNode.sipoc.inputs || []} onClick={() => setEditModal({ nodeId: selectedNode.id, field: 'inputs', title: 'I - 输入要素' })} />
+                        <DetailedSipocCard title="O - 输出" items={selectedNode.sipoc.outputs || []} onClick={() => setEditModal({ nodeId: selectedNode.id, field: 'outputs', title: 'O - 输出产物' })} />
+                        <DetailedSipocCard title="C - 输出对象" items={selectedNode.sipoc.customers || []} onClick={() => setEditModal({ nodeId: selectedNode.id, field: 'customers', title: 'C - 输出对象' })} />
                     </div>
                     <div onClick={() => setEditModal({ nodeId: selectedNode.id, field: 'standard', title: 'P - 作业标准' })} className="p-4 bg-slate-50 border rounded-2xl cursor-pointer hover:border-brand-300 transition-all">
-                      <span className="text-[9px] font-black text-slate-400 uppercase">P - 作业标准</span>
-                      <div className="text-[10px] mt-2 italic text-slate-500 leading-relaxed line-clamp-3" dangerouslySetInnerHTML={{ __html: selectedNode.sipoc.standard || "点击录入标准文档内容..." }} />
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="text-[9px] font-black text-slate-400 uppercase">P - 作业标准</span>
+                        <span className="text-[9px] font-black text-brand-600">{selectedNode.sipoc.standard ? '已填写' : '待填写'}</span>
+                      </div>
+                      <div className="text-[10px] mt-2 italic text-slate-500 leading-relaxed line-clamp-5" dangerouslySetInnerHTML={{ __html: selectedNode.sipoc.standard || "点击录入标准文档内容..." }} />
                     </div>
                   </div>
                 </>
