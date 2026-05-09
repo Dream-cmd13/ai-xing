@@ -8,6 +8,9 @@ import { pinyin } from 'pinyin-pro';
 // 加载环境变量
 dotenv.config();
 
+
+//使用前先在终端去配置url和key
+
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
