@@ -11,7 +11,7 @@ dotenv.config();
 
 //使用前先在终端去配置url和key
 
-const supabaseUrl = process.env.SUPABASE_URL;
+const supabaseUrl = process.env.VITE_SUPABASE_URL;
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
 if (!supabaseUrl || !supabaseServiceKey) {
@@ -50,34 +50,45 @@ async function addUser() {
       .from('departments')
       .select('id, name');
 
-    if (deptError) throw new Error(`获取部门失败: ${deptError.message}`);
+    if (deptError) {
+      console.warn(`⚠️ 获取部门失败: ${deptError.message}。将跳过部门选择。`);
+    }
 
-    console.log('🏢 可用部门列表:');
-    departments.forEach((d, index) => {
-      console.log(`   [${index + 1}] ${d.name}`);
-    });
-
-    const deptInput = await rl.question(`\n🏷️ 请输入部门编号(1-${departments.length}) 或 直接输入部门全称: `);
-    
     let departmentId = null;
-    let departmentName = '';
-    
-    // 尝试按数字索引匹配
-    const deptIndex = parseInt(deptInput) - 1;
-    if (!isNaN(deptIndex) && departments[deptIndex]) {
-      departmentId = departments[deptIndex].id;
-      departmentName = departments[deptIndex].name;
-    } else {
-      // 尝试按名称严格匹配
-      const matchedDept = departments.find(d => d.name === deptInput.trim());
-      if (matchedDept) {
-        departmentId = matchedDept.id;
-        departmentName = matchedDept.name;
-      } else {
-        throw new Error('找不到匹配的部门，请重新运行脚本。');
+    let departmentName = '无部门';
+
+    if (departments && departments.length > 0) {
+      console.log('🏢 可用部门列表:');
+      departments.forEach((d, index) => {
+        console.log(`   [${index + 1}] ${d.name}`);
+      });
+
+      const deptInput = await rl.question(`\n🏷️ 请输入部门编号(1-${departments.length})、部门全称 或 直接回车跳过: `);
+      
+      if (deptInput.trim()) {
+        // 尝试按数字索引匹配
+        const deptIndex = parseInt(deptInput) - 1;
+        if (!isNaN(deptIndex) && departments[deptIndex]) {
+          departmentId = departments[deptIndex].id;
+          departmentName = departments[deptIndex].name;
+        } else {
+          // 尝试按名称严格匹配
+          const matchedDept = departments.find(d => d.name === deptInput.trim());
+          if (matchedDept) {
+            departmentId = matchedDept.id;
+            departmentName = matchedDept.name;
+          } else {
+            console.log('⚠️ 找不到匹配的部门，将设为无部门。');
+          }
+        }
       }
     }
-    console.log(`   ✅ 已选择部门: ${departmentName} (${departmentId})`);
+    
+    if (departmentId) {
+      console.log(`   ✅ 已选择部门: ${departmentName} (${departmentId})`);
+    } else {
+      console.log(`   ✅ 未选择部门`);
+    }
 
     // 3. 询问角色
     let role = 'User'; // 默认为普通用户

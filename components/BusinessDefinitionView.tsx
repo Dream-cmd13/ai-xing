@@ -246,7 +246,7 @@ const BusinessDefinitionView: React.FC = () => {
                   <div>
                     <IMETextarea 
                       className="w-full bg-slate-50 p-4 rounded-xl text-sm font-bold text-slate-700 outline-none focus:border-brand-300 border border-transparent min-h-[100px] resize-none"
-                      placeholder="如：客户需求 -> 报价 -> 摸具开发 -> 打样 -> 样品承认..."
+                      placeholder="如：客户需求 -> 报价 -> 模具开发 -> 打样 -> 样品承认..."
                       value={activeBusiness.businessFormat || ''}
                       onChange={e => handleUpdateBusiness(activeBusiness.id, { businessFormat: e.target.value })}
                       disabled={!permissions.update}
