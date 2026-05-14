@@ -61,7 +61,8 @@ const LoginView: React.FC = () => {
     setIsLoading(true);
     
     try {
-      const email = `${username.trim()}@app.local`.toLowerCase();
+      const account = username.trim().toLowerCase();
+      const email = account.includes('@') ? account : `${account}@app.local`;
       const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
         email,
         password
