@@ -32,6 +32,8 @@ const App: React.FC = () => {
     const handleAuthChange = async (session: any) => {
       const { isAuthenticated: currentIsAuthenticated } = useAuthStore.getState();
       const userId = session?.user?.id;
+      const email = (session?.user?.email || '').toLowerCase();
+      const accountFromEmail = email.includes('@') ? email.split('@')[0] : email;
 
       if (userId) {
         // If already processed this user and we are authenticated, don't reload everything
@@ -48,9 +50,26 @@ const App: React.FC = () => {
         try {
           const workspace = await getWorkspace();
           if (workspace) {
-            // Find user by auth_id instead of username
-            const user = workspace.users?.find(u => u.auth_id === userId);
+            // Prefer auth_id mapping, fallback to username for legacy records.
+            const user = workspace.users?.find((u) => {
+              if (u.auth_id === userId) return true;
+              if (!accountFromEmail) return false;
+              return (u.username || '').toLowerCase() === accountFromEmail;
+            });
             if (user) {
+              // Backfill auth_id so subsequent logins can map directly.
+              if (user.auth_id !== userId) {
+                const { error: bindError } = await supabase
+                  .from('users')
+                  .update({ auth_id: userId })
+                  .eq('id', user.id);
+                if (bindError) {
+                  console.warn('Failed to backfill auth_id for user', bindError);
+                } else {
+                  user.auth_id = userId;
+                }
+              }
+
               lastProcessedUserIdRef.current = userId;
               login(user);
               const initialProcesses = workspace.processes || [];
@@ -92,7 +111,7 @@ const App: React.FC = () => {
                 }
               });
             } else {
-              console.warn("User not found in workspace data");
+              console.warn("User not found in workspace data, auth session will not be activated");
             }
           }
         } catch (e) {
