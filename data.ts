@@ -1,14 +1,10 @@
 
 import { AppState, User, Department, ProcessDefinition, CompanyStrategy, BusinessDefinition, WeeklyPAD, SystemRole, PADEntry } from "./types";
-import { supabase } from "./supabase";
+import { isSupabaseConfigured, supabase } from "./supabase";
 
 /**
  * StratFlow AI 数据持久化层 (Data Access Layer) - Supabase Relational Version (Single Tenant)
  */
-
-const isSupabaseConfigured = () => {
-  return import.meta.env.VITE_SUPABASE_URL && import.meta.env.VITE_SUPABASE_ANON_KEY;
-};
 
 const handleSupabaseError = (error: any) => {
   const message = error?.message || String(error);
@@ -595,5 +591,4 @@ export const deleteTask = async (taskId: string): Promise<void> => {
     handleSupabaseError(e);
   }
 };
-
 

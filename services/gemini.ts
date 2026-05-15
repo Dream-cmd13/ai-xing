@@ -1,11 +1,11 @@
-import { supabase } from "../supabase";
+import { isSupabaseConfigured, supabase } from "../supabase";
 import { AISettings } from "../types";
 
 const callAI = async (settings: AISettings | undefined, prompt: string): Promise<string> => {
   try {
     // Check if Supabase is configured
-    if (!import.meta.env.VITE_SUPABASE_URL || !import.meta.env.VITE_SUPABASE_ANON_KEY) {
-      console.error("Supabase configuration missing. Please set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY in Settings.");
+    if (!isSupabaseConfigured()) {
+      console.error("Supabase configuration missing. Please set VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY (or VITE_SUPABASE_ANON_KEY) in Settings.");
       return "AI 调用失败: Supabase 配置缺失。请在系统设置中配置 Supabase URL 和 Anon Key。";
     }
 
