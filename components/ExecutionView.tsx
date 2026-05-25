@@ -36,7 +36,7 @@ const ExecutionView: React.FC = () => {
   const actions = useAppActions();
   const permissions = usePermissions('execution');
   const { 
-    handleSave, saveStateDirectly, executeAtomicOperation, 
+    handleSave, executeAtomicOperation, 
     handleSetDepartments: setDepartments, handleSetUsers: setUsers, 
     handleSetSystemRoles: setSystemRoles, handleSetAISettings: setAISettings, 
     handleSetBusinesses: setBusinesses, setProcessData, updateProcessProps, 
@@ -273,22 +273,18 @@ const ExecutionView: React.FC = () => {
     setIsDirty(true);
     
     // Immediate save to database using atomic operations
-    if (executeAtomicOperation) {
-      executeAtomicOperation(async () => {
-        if (isNewTask) {
-          const savedEntries: PADEntry[] = [];
-          for (const entry of entriesToAdd) {
-            savedEntries.push(await addTask(entry));
-          }
-          setTasks([...state.tasks, ...savedEntries]);
-        } else {
-          const savedTask = await updateTask(newTask.id, newTask);
-          setTasks(state.tasks.map(t => t.id === newTask.id ? savedTask : t));
+    executeAtomicOperation(async () => {
+      if (isNewTask) {
+        const savedEntries: PADEntry[] = [];
+        for (const entry of entriesToAdd) {
+          savedEntries.push(await addTask(entry));
         }
-      });
-    } else if (saveStateDirectly) {
-      saveStateDirectly({ ...state, tasks });
-    }
+        setTasks([...state.tasks, ...savedEntries]);
+      } else {
+        const savedTask = await updateTask(newTask.id, newTask);
+        setTasks(state.tasks.map(t => t.id === newTask.id ? savedTask : t));
+      }
+    });
 
     // Show success message with location and week info
     const ownerName = state.users.find(u => u.id === targetOwnerId)?.name || '个人';
@@ -329,13 +325,9 @@ const ExecutionView: React.FC = () => {
     setIsDirty(true);
     
     // Immediate save to database using atomic operations
-    if (executeAtomicOperation) {
-      executeAtomicOperation(async () => {
-        await deleteDbTask(taskId);
-      });
-    } else if (saveStateDirectly) {
-      saveStateDirectly({ ...state, tasks: updatedTasks });
-    }
+    executeAtomicOperation(async () => {
+      await deleteDbTask(taskId);
+    });
     
     setTaskModal({ ...taskModal, isOpen: false });
     showNotification('任务已删除', 'info');

@@ -2,7 +2,6 @@ import React, { useEffect } from 'react';
 import { useAppStore } from './store/useAppStore';
 import { supabase } from './supabase';
 import { AppState, CompanyStrategy, BusinessDefinition, Department, ProcessDefinition, PADEntry } from './types';
-import { toast } from 'sonner';
 import { matchesPendingMutation, normalizeForConflictComparison } from './syncConflictGuard';
 
 const mapPayloadToState = (table: string, data: any) => {
@@ -63,9 +62,9 @@ const mapPayloadToState = (table: string, data: any) => {
         version: data.version,
         isActive: data.is_active,
         type: data.type,
-        owner: data.owner,
-        coOwner: data.co_owner,
-        objective: data.objective,
+        owner: data.owner ?? '',
+        coOwner: data.co_owner ?? '',
+        objective: data.objective ?? '',
         nodes: typeof data.nodes === 'string' ? JSON.parse(data.nodes) : (data.nodes || []),
         links: typeof data.links === 'string' ? JSON.parse(data.links) : (data.links || []),
         history: typeof data.history === 'string' ? JSON.parse(data.history) : (data.history || []),
@@ -76,13 +75,13 @@ const mapPayloadToState = (table: string, data: any) => {
       return {
         id: data.id,
         name: data.name,
-        managerName: data.manager_name,
-        responsibilities: data.responsibilities,
+        managerName: data.manager_name ?? '',
+        responsibilities: data.responsibilities ?? '',
         roles: typeof data.roles === 'string' ? JSON.parse(data.roles) : (data.roles || []),
         roleMembers: typeof data.role_members === 'string' ? JSON.parse(data.role_members) : (data.role_members || {}),
-        attributes: typeof data.attributes === 'string' ? JSON.parse(data.attributes) : data.attributes,
-        subDepartments: typeof data.sub_departments === 'string' ? JSON.parse(data.sub_departments) : data.sub_departments,
-        okrs: typeof data.okrs === 'string' ? JSON.parse(data.okrs) : data.okrs,
+        attributes: data.attributes ?? '',
+        subDepartments: typeof data.sub_departments === 'string' ? JSON.parse(data.sub_departments) : (data.sub_departments || []),
+        okrs: typeof data.okrs === 'string' ? JSON.parse(data.okrs) : (data.okrs || {}),
         reviews: typeof data.reviews === 'string' ? JSON.parse(data.reviews) : (data.reviews || {}),
         updatedAt: data.updated_at,
         rowVersion: typeof data.row_version === 'number' ? data.row_version : Number(data.row_version || 0)
@@ -101,133 +100,113 @@ export const useRealtimeSync = (
 
     const channel = supabase.channel('workspace-sync');
 
+    const hasUnsavedChanges = () => {
+      const store = useAppStore.getState() as any;
+      return Boolean(store.isDirty);
+    };
+
+    const shouldKeepLocalArray = (table: string, itemId: string | undefined, currentData: any[]) => {
+      if (!itemId || !hasUnsavedChanges()) return false;
+      const store = useAppStore.getState() as any;
+      const localItem = currentData.find(item => item.id === itemId);
+      if (!localItem) return false;
+
+      let lastSavedItem = null;
+      if (table === 'businesses') {
+        lastSavedItem = store.lastSavedBusinesses.find((item: any) => item.id === itemId);
+      } else if (table === 'departments') {
+        lastSavedItem = store.lastSavedDepartments.find((item: any) => item.id === itemId);
+      } else if (table === 'processes') {
+        lastSavedItem = store.lastSavedProcesses.find((item: any) => item.id === itemId);
+      } else if (table === 'tasks') {
+        lastSavedItem = (store.tasks || []).find((item: any) => item.id === itemId);
+      }
+
+      if (!lastSavedItem) return false;
+      return normalizeForConflictComparison(localItem) !== normalizeForConflictComparison(lastSavedItem);
+    };
+
+    const shouldKeepLocalStrategy = () => {
+      const store = useAppStore.getState() as any;
+      if (!store.isDirty || !store.lastSavedStrategy) return false;
+      return normalizeForConflictComparison(store.strategy) !== normalizeForConflictComparison(store.lastSavedStrategy);
+    };
+
+    const applyArrayChange = (payload: any, updatedData: any[], mappedNew: any) => {
+      switch (payload.eventType) {
+        case 'INSERT':
+          if (!updatedData.find(item => item.id === mappedNew.id)) {
+            updatedData.push(mappedNew);
+          }
+          break;
+        case 'UPDATE':
+          updatedData = updatedData.map(item => item.id === mappedNew.id ? mappedNew : item);
+          break;
+        case 'DELETE':
+          updatedData = updatedData.filter(item => item.id !== payload.old.id);
+          break;
+      }
+      return updatedData;
+    };
+
     const handleTableChange = (table: string, payload: any) => {
       const mappedNew = mapPayloadToState(table, payload.new);
       const mappedOld = payload.old ? mapPayloadToState(table, payload.old) : null;
 
       setState(prevState => {
         const newState = { ...prevState } as any;
-        
-        const isEqualIgnoringMetadata = (a: any, b: any) => {
-          if (!a || !b) return a === b;
-          return normalizeForConflictComparison(a) === normalizeForConflictComparison(b);
-        };
 
-        // Granular Sync Guard for Strategy
         if (table === 'strategy') {
           if (payload.eventType === 'UPDATE' || payload.eventType === 'INSERT') {
-            const currentStrategy = prevState.strategy || { mission: '', vision: '', customerIssues: '', employeeIssues: '', companyOKRs: {} };
-            const lastSavedStrategy = newState.lastSavedStrategy;
             const isPendingEcho = matchesPendingMutation('strategy', mappedNew.id || 'default', mappedNew);
-            
-            const isEcho = isPendingEcho || isEqualIgnoringMetadata(mappedNew, currentStrategy);
-            if (isEcho) {
-              newState.strategy = mappedNew;
+
+            if (isPendingEcho) {
               newState.lastSavedStrategy = mappedNew;
+              if (!shouldKeepLocalStrategy()) {
+                newState.strategy = mappedNew;
+              }
               return newState;
             }
 
-            const hasLocalChanges = lastSavedStrategy && !isEqualIgnoringMetadata(currentStrategy, lastSavedStrategy);
-            if (hasLocalChanges) {
-              toast.warning('战略数据已被他人更新，请刷新后再继续保存。');
-              console.log('Realtime: Skipping strategy update due to local changes');
+            if (shouldKeepLocalStrategy()) {
               return prevState;
             }
 
-            // Timestamp check for strategy
-            if (currentStrategy.updatedAt && mappedNew.updatedAt) {
-              const localTs = typeof currentStrategy.updatedAt === 'number' ? currentStrategy.updatedAt : new Date(currentStrategy.updatedAt).getTime();
-              const serverTs = typeof mappedNew.updatedAt === 'number' ? mappedNew.updatedAt : new Date(mappedNew.updatedAt).getTime();
-              if (serverTs <= localTs) {
-                return prevState;
-              }
-            }
-
-            const updatedStrategy = { ...currentStrategy };
-            const payloadKeys = Object.keys(payload.new);
-            
-            if (payloadKeys.includes('mission')) updatedStrategy.mission = mappedNew.mission;
-            if (payloadKeys.includes('vision')) updatedStrategy.vision = mappedNew.vision;
-            if (payloadKeys.includes('customer_issues')) updatedStrategy.customerIssues = mappedNew.customerIssues;
-            if (payloadKeys.includes('employee_issues')) updatedStrategy.employeeIssues = mappedNew.employeeIssues;
-            if (payloadKeys.includes('company_okrs')) updatedStrategy.companyOKRs = mappedNew.companyOKRs;
-
-            newState.strategy = updatedStrategy as CompanyStrategy;
-            newState.lastSavedStrategy = updatedStrategy as CompanyStrategy;
+            newState.strategy = mappedNew as CompanyStrategy;
+            newState.lastSavedStrategy = mappedNew as CompanyStrategy;
           }
           return newState;
         }
 
         const stateKey = table as keyof AppState;
         const currentData = prevState[stateKey] as any[];
-        
         if (!Array.isArray(currentData)) return prevState;
 
-        let updatedData = [...currentData];
+        const itemId = mappedNew?.id || mappedOld?.id;
+        const isPendingEcho = mappedNew && itemId ? matchesPendingMutation(table, itemId, mappedNew) : false;
 
-        // Granular Sync Guard for Departments and other arrays
-        if (table === 'departments' || table === 'processes' || table === 'businesses') {
-          const itemId = mappedNew?.id || mappedOld?.id;
-          const localItem = currentData.find(item => item.id === itemId);
-          
-          let lastSavedItem = null;
+        if (isPendingEcho) {
           if (table === 'businesses') {
-            lastSavedItem = newState.lastSavedBusinesses.find((item: any) => item.id === itemId);
+            newState.lastSavedBusinesses = currentData.map(item => item.id === mappedNew.id ? mappedNew : item);
           } else if (table === 'departments') {
-            lastSavedItem = newState.lastSavedDepartments.find((item: any) => item.id === itemId);
+            newState.lastSavedDepartments = currentData.map(item => item.id === mappedNew.id ? mappedNew : item);
           } else if (table === 'processes') {
-            lastSavedItem = newState.lastSavedProcesses.find((item: any) => item.id === itemId);
-          }
-          
-          const hasLocalChanges = localItem && lastSavedItem && !isEqualIgnoringMetadata(localItem, lastSavedItem);
-          const isPendingEcho = mappedNew && itemId ? matchesPendingMutation(table, itemId, mappedNew) : false;
-          const isEcho = Boolean(mappedNew && localItem && isEqualIgnoringMetadata(localItem, mappedNew)) || isPendingEcho;
-
-          if (isEcho) {
-            if (table === 'businesses') {
-              newState.lastSavedBusinesses = currentData.map(item => item.id === mappedNew.id ? mappedNew : item);
-            } else if (table === 'departments') {
-              newState.lastSavedDepartments = currentData.map(item => item.id === mappedNew.id ? mappedNew : item);
-            } else if (table === 'processes') {
-              newState.lastSavedProcesses = currentData.map(item => item.id === mappedNew.id ? mappedNew : item);
-            }
-            newState[stateKey] = currentData.map(item => item.id === mappedNew.id ? mappedNew : item) as any;
-            return newState;
+            newState.lastSavedProcesses = currentData.map(item => item.id === mappedNew.id ? mappedNew : item);
           }
 
-          if (hasLocalChanges && (payload.eventType === 'UPDATE' || payload.eventType === 'DELETE')) {
-            toast.warning(`${table} 数据已被他人更新，请刷新后再继续保存。`);
-            console.log(`Realtime: Skipping ${table} update for ${localItem.id} due to local changes`);
-            return prevState;
+          if (!shouldKeepLocalArray(table, itemId, currentData)) {
+            newState[stateKey] = applyArrayChange(payload, [...currentData], mappedNew) as any;
+          } else {
+            newState[stateKey] = currentData;
           }
-
-          // Timestamp check for processes, businesses to avoid older updates overwriting newer local state
-          if ((table === 'processes' || table === 'businesses') && localItem && mappedNew && mappedNew.updatedAt) {
-            const localTs = typeof localItem.updatedAt === 'number' ? localItem.updatedAt : new Date(localItem.updatedAt).getTime();
-            const serverTs = typeof mappedNew.updatedAt === 'number' ? mappedNew.updatedAt : new Date(mappedNew.updatedAt).getTime();
-            if (serverTs <= localTs) {
-              return prevState;
-            }
-          }
+          return newState;
         }
 
-        switch (payload.eventType) {
-          case 'INSERT':
-            if (!updatedData.find(item => item.id === mappedNew.id)) {
-              updatedData.push(mappedNew);
-            }
-            break;
-          case 'UPDATE':
-            updatedData = updatedData.map(item => 
-              item.id === mappedNew.id ? mappedNew : item
-            );
-            break;
-          case 'DELETE':
-            updatedData = updatedData.filter(item => 
-              item.id !== payload.old.id
-            );
-            break;
+        if (shouldKeepLocalArray(table, itemId, currentData)) {
+          return prevState;
         }
+
+        let updatedData = applyArrayChange(payload, [...currentData], mappedNew);
 
         newState[stateKey] = updatedData as any;
 

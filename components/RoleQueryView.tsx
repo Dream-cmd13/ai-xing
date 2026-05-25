@@ -30,7 +30,7 @@ const RoleQueryView: React.FC = () => {
   const actions = useAppActions();
   const permissions = usePermissions('roles');
   const { 
-    handleSave, saveStateDirectly, executeAtomicOperation, 
+    handleSave, 
     handleSetDepartments: setDepartments, handleSetUsers: setUsers, 
     handleSetSystemRoles: setSystemRoles, handleSetAISettings: setAISettings, 
     handleSetBusinesses: setBusinesses, setProcessData, updateProcessProps, 

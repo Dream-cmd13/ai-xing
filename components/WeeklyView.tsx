@@ -25,7 +25,7 @@ const WeeklyView: React.FC = () => {
   const actions = useAppActions();
   const permissions = usePermissions('execution');
   const { 
-    handleSave, saveStateDirectly, executeAtomicOperation, 
+    handleSave, executeAtomicOperation, 
     handleSetDepartments: setDepartments, handleSetUsers: setUsers, 
     handleSetSystemRoles: setSystemRoles, handleSetAISettings: setAISettings, 
     handleSetBusinesses: setBusinesses, setProcessData, updateProcessProps, 
@@ -121,13 +121,9 @@ const WeeklyView: React.FC = () => {
     if (taskToDelete) {
       const newTasks = state.tasks.filter(t => t.id !== taskToDelete.id);
       setTasks(newTasks);
-      if (executeAtomicOperation) {
-        executeAtomicOperation(async () => {
-          await deleteDbTask(taskToDelete.id);
-        });
-      } else {
-        await saveStateDirectly({ ...state, tasks: newTasks });
-      }
+      executeAtomicOperation(async () => {
+        await deleteDbTask(taskToDelete.id);
+      });
       showNotification('任务已删除');
     }
     setDeleteConfirmIndex(null);
@@ -173,13 +169,9 @@ const WeeklyView: React.FC = () => {
       const taskToDelete = currentTasks[index];
       const newTasks = state.tasks.filter(t => t.id !== taskToDelete.id);
       setTasks(newTasks);
-      if (executeAtomicOperation) {
-        executeAtomicOperation(async () => {
-          await deleteDbTask(taskToDelete.id);
-        });
-      } else {
-        await saveStateDirectly({ ...state, tasks: newTasks });
-      }
+      executeAtomicOperation(async () => {
+        await deleteDbTask(taskToDelete.id);
+      });
       setDeleteConfirmIndex(null);
       showNotification('任务已从您的计划中移除');
     }
@@ -190,13 +182,9 @@ const WeeklyView: React.FC = () => {
       const taskToDelete = currentTasks[taskModal.index];
       const newTasks = state.tasks.filter(t => t.id !== taskToDelete.id);
       setTasks(newTasks);
-      if (executeAtomicOperation) {
-        executeAtomicOperation(async () => {
-          await deleteDbTask(taskToDelete.id);
-        });
-      } else {
-        await saveStateDirectly({ ...state, tasks: newTasks });
-      }
+      executeAtomicOperation(async () => {
+        await deleteDbTask(taskToDelete.id);
+      });
       showNotification('任务已删除', 'info');
     }
     setTaskModal({ ...taskModal, isOpen: false });
@@ -256,22 +244,18 @@ const WeeklyView: React.FC = () => {
     
     setTasks(tasks);
     
-    if (executeAtomicOperation) {
-      executeAtomicOperation(async () => {
-        if (taskModal.index !== null) {
-          const savedTask = await updateTask(newData.id, newData);
-          setTasks(state.tasks.map(t => t.id === newData.id ? savedTask : t));
-        } else {
-          const savedEntries: PADEntry[] = [];
-          for (const entry of entriesToAdd) {
-            savedEntries.push(await addTask(entry));
-          }
-          setTasks([...state.tasks, ...savedEntries]);
+    executeAtomicOperation(async () => {
+      if (taskModal.index !== null) {
+        const savedTask = await updateTask(newData.id, newData);
+        setTasks(state.tasks.map(t => t.id === newData.id ? savedTask : t));
+      } else {
+        const savedEntries: PADEntry[] = [];
+        for (const entry of entriesToAdd) {
+          savedEntries.push(await addTask(entry));
         }
-      });
-    } else {
-      await saveStateDirectly({ ...state, tasks });
-    }
+        setTasks([...state.tasks, ...savedEntries]);
+      }
+    });
     
     showNotification('任务已成功保存');
 

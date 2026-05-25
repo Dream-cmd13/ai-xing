@@ -31,7 +31,7 @@ const OkrReviewDashboard: React.FC = () => {
     });
   };
   const { 
-    handleSave, saveStateDirectly, executeAtomicOperation, 
+    handleSave, 
     handleSetDepartments: setDepartments, handleSetUsers: setUsers, 
     handleSetSystemRoles: setSystemRoles, handleSetAISettings: setAISettings, 
     handleSetBusinesses: setBusinesses, setProcessData, updateProcessProps, 
