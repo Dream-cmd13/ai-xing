@@ -74,13 +74,13 @@ const mapDepartmentRow = (d: any): Department => {
   return {
     id: d.id,
     name: d.name,
-    managerName: d.manager_name,
-    responsibilities: d.responsibilities,
+    managerName: d.manager_name ?? '',
+    responsibilities: d.responsibilities ?? '',
     roles: d.roles || [],
     roleMembers,
-    attributes: d.attributes,
-    subDepartments: d.sub_departments,
-    okrs: d.okrs,
+    attributes: d.attributes ?? '',
+    subDepartments: d.sub_departments || [],
+    okrs: d.okrs || {},
     reviews: reviewsMap,
     updatedAt: d.updated_at,
     rowVersion: normalizeRowVersion(d.row_version)
@@ -95,9 +95,9 @@ const mapProcessRow = (p: any): ProcessDefinition => ({
   version: p.version,
   isActive: p.is_active,
   type: p.type,
-  owner: p.owner,
-  coOwner: p.co_owner,
-  objective: p.objective,
+  owner: p.owner ?? '',
+  coOwner: p.co_owner ?? '',
+  objective: p.objective ?? '',
   nodes: p.nodes || [],
   links: p.links || [],
   history: p.history || [],
@@ -612,10 +612,10 @@ export const addDepartment = async (dept: Department): Promise<Department> => {
   if (!isSupabaseConfigured()) throw new Error("Supabase not configured")
   try {
     const { data, error } = await supabase.from('departments').upsert({
-      id: dept.id, name: dept.name, manager_name: dept.managerName || null,
-      responsibilities: dept.responsibilities || null, roles: dept.roles || [],
-      role_members: dept.roleMembers || null, attributes: dept.attributes || null,
-      sub_departments: dept.subDepartments || null, okrs: dept.okrs || null, reviews: null,
+      id: dept.id, name: dept.name, manager_name: dept.managerName ?? '',
+      responsibilities: dept.responsibilities ?? '', roles: dept.roles || [],
+      role_members: dept.roleMembers ?? {}, attributes: dept.attributes ?? '',
+      sub_departments: dept.subDepartments ?? [], okrs: dept.okrs ?? {}, reviews: dept.reviews ?? {},
       updated_at: Date.now(), row_version: 0
     }).select('*').single();
     if (error) throw error;
@@ -632,14 +632,14 @@ export const updateDepartment = async (id: string, updates: Partial<Department>)
     const currentRowVersion = normalizeRowVersion(updates.rowVersion);
     const dbUpdates: any = {};
     if (updates.name !== undefined) dbUpdates.name = updates.name;
-    if (updates.managerName !== undefined) dbUpdates.manager_name = updates.managerName || null;
-    if (updates.responsibilities !== undefined) dbUpdates.responsibilities = updates.responsibilities || null;
+    if (updates.managerName !== undefined) dbUpdates.manager_name = updates.managerName ?? '';
+    if (updates.responsibilities !== undefined) dbUpdates.responsibilities = updates.responsibilities ?? '';
     if (updates.roles !== undefined) dbUpdates.roles = updates.roles || [];
-    if (updates.roleMembers !== undefined) dbUpdates.role_members = updates.roleMembers || null;
-    if (updates.attributes !== undefined) dbUpdates.attributes = updates.attributes || null;
-    if (updates.subDepartments !== undefined) dbUpdates.sub_departments = updates.subDepartments || null;
-    if (updates.okrs !== undefined) dbUpdates.okrs = updates.okrs || null;
-    if (updates.reviews !== undefined) dbUpdates.reviews = updates.reviews || null;
+    if (updates.roleMembers !== undefined) dbUpdates.role_members = updates.roleMembers ?? {};
+    if (updates.attributes !== undefined) dbUpdates.attributes = updates.attributes ?? '';
+    if (updates.subDepartments !== undefined) dbUpdates.sub_departments = updates.subDepartments ?? [];
+    if (updates.okrs !== undefined) dbUpdates.okrs = updates.okrs ?? {};
+    if (updates.reviews !== undefined) dbUpdates.reviews = updates.reviews ?? {};
     dbUpdates.updated_at = Date.now();
     dbUpdates.row_version = currentRowVersion + 1;
 

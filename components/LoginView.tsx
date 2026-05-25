@@ -21,7 +21,7 @@ const LoginView: React.FC = () => {
   const actions = useAppActions();
   const permissions = usePermissions('process');
   const { 
-    handleSave, saveStateDirectly, executeAtomicOperation, 
+    handleSave, 
     handleSetDepartments: setDepartments, handleSetUsers: setUsers, 
     handleSetSystemRoles: setSystemRoles, handleSetAISettings: setAISettings, 
     handleSetBusinesses: setBusinesses, setProcessData, updateProcessProps, 

@@ -2,6 +2,7 @@ import React, { useEffect, useRef } from 'react';
 import { BrowserRouter } from 'react-router-dom';
 import { Toaster } from 'sonner';
 import { AppRoutes } from './router/AppRoutes';
+import { UnsavedChangesGuard } from './components/UnsavedChangesGuard';
 import { useAuthStore } from '@/store/useAuthStore';
 import { useAppStore } from '@/store/useAppStore';
 import { getWorkspace } from '@/data';
@@ -162,6 +163,7 @@ const App: React.FC = () => {
   return (
     <BrowserRouter>
       <Toaster position="top-center" richColors />
+      <UnsavedChangesGuard />
       <AppRoutes />
     </BrowserRouter>
   );

@@ -32,7 +32,7 @@ const PeriodAlignmentView: React.FC<PeriodAlignmentViewProps> = ({
   const actions = useAppActions();
   const permissions = usePermissions('execution');
   const { 
-    handleSave, saveStateDirectly, executeAtomicOperation, 
+    handleSave, 
     handleSetDepartments: setDepartments, handleSetUsers: setUsers, 
     handleSetSystemRoles: setSystemRoles, handleSetAISettings: setAISettings, 
     handleSetBusinesses: setBusinesses, setProcessData, updateProcessProps, 
@@ -69,7 +69,7 @@ const PeriodAlignmentView: React.FC<PeriodAlignmentViewProps> = ({
     for (let i = start; i <= end; i++) {
       weeks.push({
         id: `${selectedYear}-W${i.toString().padStart(2, '0')}`,
-        label: `第 ${i} 周`,
+        label: `�?${i} 周`,
         isCurrent: selectedYear === currentYear && i === currentWeekNum
       });
     }
@@ -159,7 +159,7 @@ const PeriodAlignmentView: React.FC<PeriodAlignmentViewProps> = ({
           {/* Grid Header */}
           <div className="flex border-b sticky top-0 bg-white z-10">
             <div className="w-80 shrink-0 p-4 font-black text-xs text-slate-400 uppercase tracking-widest bg-slate-50 border-r">
-              目标与关键结果 (OKR)
+              目标与关键结�?(OKR)
             </div>
             {visibleWeeks.map(w => (
               <div key={w.id} className={`flex-1 min-w-0 p-4 font-black text-xs text-center border-r min-w-[200px] ${w.isCurrent ? 'bg-indigo-50 text-indigo-600' : 'bg-slate-50 text-slate-400'}`}>
@@ -231,8 +231,7 @@ const PeriodAlignmentView: React.FC<PeriodAlignmentViewProps> = ({
             
             {okrs.length === 0 && (
               <div className="p-12 text-center text-slate-400 italic">
-                该周期暂无 OKR 数据，请先在“部门 OKR”中制定目标。
-              </div>
+                该周期暂�?OKR 数据，请先在“部�?OKR”中制定目标�?              </div>
             )}
           </div>
         </div>

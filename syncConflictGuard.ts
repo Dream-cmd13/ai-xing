@@ -7,7 +7,7 @@ type PendingMutation = {
 };
 
 const PENDING_TTL_MS = 15000;
-const pendingMutations = new Map<string, PendingMutation>();
+const pendingMutations = new Map<string, PendingMutation[]>();
 
 const metadataKeys = new Set(['updatedAt', 'updated_at', 'rowVersion', 'row_version']);
 
@@ -35,9 +35,12 @@ const buildKey = (table: string, id: string) => `${table}:${id}`;
 
 const cleanupExpired = () => {
   const now = Date.now();
-  for (const [key, mutation] of pendingMutations.entries()) {
-    if (now - mutation.createdAt > PENDING_TTL_MS) {
+  for (const [key, mutations] of pendingMutations.entries()) {
+    const validMutations = mutations.filter((mutation) => now - mutation.createdAt <= PENDING_TTL_MS);
+    if (validMutations.length === 0) {
       pendingMutations.delete(key);
+    } else {
+      pendingMutations.set(key, validMutations);
     }
   }
 };
@@ -49,13 +52,16 @@ export const markPendingMutation = (
   currentRowVersion?: number | null
 ) => {
   cleanupExpired();
-  pendingMutations.set(buildKey(table, id), {
+  const key = buildKey(table, id);
+  const existingMutations = pendingMutations.get(key) || [];
+  existingMutations.push({
     table,
     id,
     normalized: normalizeForConflictComparison(payload),
     expectedRowVersion: currentRowVersion == null ? null : currentRowVersion + 1,
     createdAt: Date.now()
   });
+  pendingMutations.set(key, existingMutations);
 };
 
 export const clearPendingMutation = (table: string, id: string) => {
@@ -64,20 +70,29 @@ export const clearPendingMutation = (table: string, id: string) => {
 
 export const matchesPendingMutation = (table: string, id: string, payload: any): boolean => {
   cleanupExpired();
-  const pending = pendingMutations.get(buildKey(table, id));
-  if (!pending) return false;
+  const key = buildKey(table, id);
+  const pendingList = pendingMutations.get(key);
+  if (!pendingList || pendingList.length === 0) return false;
 
   const normalizedPayload = normalizeForConflictComparison(payload);
   const payloadRowVersion =
     typeof payload?.rowVersion === 'number' ? payload.rowVersion : Number(payload?.rowVersion ?? NaN);
 
-  const rowVersionMatches =
-    pending.expectedRowVersion == null ||
-    Number.isNaN(payloadRowVersion) ||
-    payloadRowVersion === pending.expectedRowVersion;
+  const matchedIndex = pendingList.findIndex((pending) => {
+    const rowVersionMatches =
+      pending.expectedRowVersion == null ||
+      Number.isNaN(payloadRowVersion) ||
+      payloadRowVersion === pending.expectedRowVersion;
+    return rowVersionMatches && normalizedPayload === pending.normalized;
+  });
 
-  if (rowVersionMatches && normalizedPayload === pending.normalized) {
-    pendingMutations.delete(buildKey(table, id));
+  if (matchedIndex >= 0) {
+    const remaining = pendingList.filter((_, index) => index !== matchedIndex);
+    if (remaining.length === 0) {
+      pendingMutations.delete(key);
+    } else {
+      pendingMutations.set(key, remaining);
+    }
     return true;
   }
 

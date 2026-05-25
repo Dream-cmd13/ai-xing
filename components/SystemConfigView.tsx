@@ -17,7 +17,7 @@ const SystemConfigView: React.FC = () => {
   const actions = useAppActions();
   const permissions = usePermissions('system-config');
   const { 
-    handleSave, saveStateDirectly, executeAtomicOperation, 
+    submitAISettings,
     handleSetDepartments: setDepartments, handleSetUsers: setUsers, 
     handleSetSystemRoles: setSystemRoles, handleSetAISettings: setAISettings, 
     handleSetBusinesses: setBusinesses, setProcessData, updateProcessProps, 
@@ -63,11 +63,10 @@ const SystemConfigView: React.FC = () => {
   };
 
   const handleSaveConfig = () => {
-    setAISettings({
+    submitAISettings({
       selectedModelId,
       configs
     });
-    handleSave();
   };
 
   return (
