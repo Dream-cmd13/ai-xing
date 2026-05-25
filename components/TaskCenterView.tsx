@@ -442,7 +442,7 @@ const TaskCenterView: React.FC = () => {
                 className={`px-6 py-2.5 rounded-xl text-xs font-black uppercase flex items-center gap-2 transition-all shadow-md ${showSaveSuccess ? 'bg-emerald-50 text-emerald-600' : isDirty ? 'bg-slate-800 text-white hover:bg-slate-900 shadow-slate-100' : 'bg-slate-100 text-slate-400 cursor-default'}`}
               >
                 {isSaving ? <Loader2 className="animate-spin" size={16}/> : showSaveSuccess ? <CheckCircle size={16}/> : <Save size={16} />} 
-                {showSaveSuccess ? '已存档' : isDirty ? '立即存档' : '已是最新'}
+                {showSaveSuccess ? '已保存' : isDirty ? '立即保存' : '已是最新'}
               </button>
             </div>
           )}

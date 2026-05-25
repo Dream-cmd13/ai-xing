@@ -92,7 +92,7 @@ const BusinessDefinitionView: React.FC = () => {
             className={`flex-1 md:flex-none flex items-center justify-center gap-2 px-6 py-2.5 rounded-xl text-xs font-black uppercase transition-all shadow-lg ${showSaveSuccess ? 'bg-emerald-50 text-emerald-600 shadow-emerald-100' : isDirty ? 'bg-brand-600 text-white shadow-brand-200 hover:bg-brand-700' : 'bg-slate-100 text-slate-400 cursor-default'}`}
           >
             {isSaving ? <Loader2 className="animate-spin" size={16}/> : showSaveSuccess ? <CheckCircle size={16}/> : <Save size={16}/>}
-            {showSaveSuccess ? '已存档' : isDirty ? '立即存档' : '已是最新'}
+            {showSaveSuccess ? '已保存' : isDirty ? '立即保存' : '已是最新'}
           </button>
         </div>
       </div>

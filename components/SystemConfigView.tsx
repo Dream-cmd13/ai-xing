@@ -90,7 +90,7 @@ const SystemConfigView: React.FC = () => {
           ) : (
             <Save size={16} />
           )}
-          {showSaveSuccess ? '已存档' : isDirty ? '立即存档' : '已是最新'}
+          {showSaveSuccess ? '已保存' : isDirty ? '立即保存' : '已是最新'}
         </button>
       </div>
 

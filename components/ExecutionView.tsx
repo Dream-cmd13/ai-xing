@@ -402,7 +402,7 @@ const ExecutionView: React.FC = () => {
                     className={`flex-1 md:flex-none justify-center px-6 py-2.5 rounded-xl text-[10px] md:text-xs font-black uppercase flex items-center gap-2 transition-all shadow-md ${showSaveSuccess ? 'bg-emerald-50 text-emerald-600' : isDirty ? 'bg-brand-600 text-white hover:bg-brand-700 shadow-brand-100' : 'bg-slate-100 text-slate-400 cursor-default'}`}
                   >
                     {isSaving ? <Loader2 className="animate-spin" size={16}/> : showSaveSuccess ? <CheckCircle size={16}/> : <Save size={16} />} 
-                    {showSaveSuccess ? '已存档' : isDirty ? '立即存档' : '已是最新'}
+                    {showSaveSuccess ? '已保存' : isDirty ? '立即保存' : '已是最新'}
                   </button>
                 )}
              </div>
