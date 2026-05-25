@@ -10,6 +10,8 @@ import { updateTask, deleteTask as deleteDbTask } from '../data';
 import { Calendar, Building2, ClipboardCheck, Save, CheckCircle, Loader2, Target, TrendingUp, MessageSquare, FileText, AlertCircle, Lock, Download, RefreshCw } from 'lucide-react';
 import TaskModal from './TaskModal';
 import { getVisibleDepartments, canViewTask } from '../utils/permissions';
+import { isTaskInMonthlyPeriod, isTaskInWeeklyPeriod } from '../utils/taskPeriods.js';
+import { readTaskReviewState, updateTaskReviewState } from '../utils/reviewTaskState.js';
 
 
 
@@ -248,23 +250,17 @@ const ReviewView: React.FC = () => {
   const [deptTasks, setDeptTasks] = useState<PADEntry[]>([]);
 
   const loadDeptTasks = () => {
-    if (!selectedDeptId) return;
+    if (!selectedDeptId) {
+      setDeptTasks([]);
+      return;
+    }
     const tasks: PADEntry[] = [];
     const seen = new Set<string>();
     
     (state.tasks || []).forEach(task => {
-      let inPeriod = false;
-      if (activeTab === 'weekly') {
-        inPeriod = task.targetWeeks?.includes(selectedWeek) || false;
-      } else {
-        const [year, monthStr] = selectedMonth.split('-M');
-        const month = parseInt(monthStr);
-        inPeriod = task.targetWeeks?.some(w => {
-          const [y, wStr] = w.split('-W');
-          const week = parseInt(wStr);
-          return y === year && Math.ceil(week / 4.33) === month;
-        }) || false;
-      }
+      const inPeriod = activeTab === 'weekly'
+        ? isTaskInWeeklyPeriod(task.targetWeeks, selectedWeek)
+        : isTaskInMonthlyPeriod(task.targetWeeks, selectedMonth);
       
       if (!inPeriod) return;
       if (!canViewTask(task, currentUser, state.users, state.systemRoles || [])) return;
@@ -493,18 +489,10 @@ const ReviewView: React.FC = () => {
                           <div className="text-center py-8 text-slate-400 text-sm italic font-medium">暂无关联任务</div>
                         ) : (
                           deptTasks.map(task => {
-                            let okrId = '';
-                            let krIdx = -1;
-                            if (task.alignedKrId) {
-                              const parts = task.alignedKrId.split('-kr-');
-                              okrId = parts[0];
-                              krIdx = parseInt(parts[1]);
-                            }
-                            
-                            const currentReview = okrReviews[okrId] || { progress: 0, krReviews: [], lessonsLearned: '', methodology: '', nextSteps: '' };
-                            const krReview = currentReview.krReviews?.[krIdx] || { comment: '', progress: 0, status: 'on-track' };
-                            const evaluation = krReview.taskEvaluations?.[task.id] || '';
-                            const score = krReview.taskScores?.[task.id] || 0;
+                            const {
+                              evaluation,
+                              score,
+                            } = readTaskReviewState(okrReviews, task);
                             const owner = state.users.find(u => u.id === task.ownerId);
 
                             return (
@@ -549,13 +537,11 @@ const ReviewView: React.FC = () => {
                                       className="w-full bg-slate-50 border border-slate-100 rounded-xl px-4 py-2.5 text-xs font-medium text-slate-700 outline-none focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500 transition-all"
                                       value={evaluation}
                                       onChange={e => {
-                                        if (!okrId || krIdx === -1) return;
-                                        const newKrReviews = [...(currentReview.krReviews || [])];
-                                        while(newKrReviews.length <= krIdx) newKrReviews.push({ comment: '', progress: 0, status: 'on-track' });
-                                        const taskEvals = { ...(newKrReviews[krIdx].taskEvaluations || {}) };
-                                        taskEvals[task.id] = e.target.value;
-                                        newKrReviews[krIdx] = { ...newKrReviews[krIdx], taskEvaluations: taskEvals };
-                                        updateOkrReviews({ ...okrReviews, [okrId]: { ...currentReview, krReviews: newKrReviews } });
+                                        updateOkrReviews(
+                                          updateTaskReviewState(okrReviews, task, {
+                                            evaluation: e.target.value,
+                                          })
+                                        );
                                       }}
                                     />
                                   </div>
@@ -567,13 +553,11 @@ const ReviewView: React.FC = () => {
                                       className="w-full bg-transparent text-sm font-black text-brand-600 outline-none text-right"
                                       value={score}
                                       onChange={e => handleNumberInput(e.target.value, (val) => {
-                                        if (!okrId || krIdx === -1) return;
-                                        const newKrReviews = [...(currentReview.krReviews || [])];
-                                        while(newKrReviews.length <= krIdx) newKrReviews.push({ comment: '', progress: 0, status: 'on-track' });
-                                        const taskScores = { ...(newKrReviews[krIdx].taskScores || {}) };
-                                        taskScores[task.id] = val;
-                                        newKrReviews[krIdx] = { ...newKrReviews[krIdx], taskScores: taskScores };
-                                        updateOkrReviews({ ...okrReviews, [okrId]: { ...currentReview, krReviews: newKrReviews } });
+                                        updateOkrReviews(
+                                          updateTaskReviewState(okrReviews, task, {
+                                            score: val,
+                                          })
+                                        );
                                       }, 100)}
                                       onFocus={e => e.target.select()}
                                     />

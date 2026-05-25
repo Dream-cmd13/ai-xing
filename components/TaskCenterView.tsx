@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import TaskModal from './TaskModal';
 import { getVisibleDepartments, canViewTask } from '../utils/permissions';
+import { ensureTaskTargetWeeks } from '../utils/taskPeriods.js';
 
 
 
@@ -96,7 +97,10 @@ const TaskCenterView: React.FC = () => {
   };
 
   const saveTask = (status: string = 'draft', keepOpen: boolean = false) => {
-    const newTask = { ...taskModal.data, status } as PADEntry;
+    const newTask = ensureTaskTargetWeeks(
+      { ...taskModal.data, status } as PADEntry,
+      taskModal.weekId
+    ) as PADEntry;
     const targetOwnerId = newTask.ownerId || currentUser.id;
 
     const isNewTask = !state.tasks.some(e => e.id === newTask.id);
