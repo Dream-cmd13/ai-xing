@@ -3,6 +3,7 @@ import { useAppStore } from './store/useAppStore';
 import { supabase } from './supabase';
 import { AppState, CompanyStrategy, BusinessDefinition, Department, ProcessDefinition, PADEntry } from './types';
 import { toast } from 'sonner';
+import { matchesPendingMutation, normalizeForConflictComparison } from './syncConflictGuard';
 
 const mapPayloadToState = (table: string, data: any) => {
   if (!data) return data;
@@ -107,14 +108,9 @@ export const useRealtimeSync = (
       setState(prevState => {
         const newState = { ...prevState } as any;
         
-        // Helper to compare objects ignoring metadata
         const isEqualIgnoringMetadata = (a: any, b: any) => {
           if (!a || !b) return a === b;
-          const strip = (obj: any) => {
-            const { updatedAt, updated_at, rowVersion, row_version, id, ...rest } = obj;
-            return JSON.stringify(rest);
-          };
-          return strip(a) === strip(b);
+          return normalizeForConflictComparison(a) === normalizeForConflictComparison(b);
         };
 
         // Granular Sync Guard for Strategy
@@ -122,9 +118,9 @@ export const useRealtimeSync = (
           if (payload.eventType === 'UPDATE' || payload.eventType === 'INSERT') {
             const currentStrategy = prevState.strategy || { mission: '', vision: '', customerIssues: '', employeeIssues: '', companyOKRs: {} };
             const lastSavedStrategy = newState.lastSavedStrategy;
+            const isPendingEcho = matchesPendingMutation('strategy', mappedNew.id || 'default', mappedNew);
             
-            // Use robust comparison for echo check
-            const isEcho = isEqualIgnoringMetadata(mappedNew, currentStrategy);
+            const isEcho = isPendingEcho || isEqualIgnoringMetadata(mappedNew, currentStrategy);
             if (isEcho) {
               newState.strategy = mappedNew;
               newState.lastSavedStrategy = mappedNew;
@@ -171,22 +167,23 @@ export const useRealtimeSync = (
 
         // Granular Sync Guard for Departments and other arrays
         if (table === 'departments' || table === 'processes' || table === 'businesses') {
-          const localItem = currentData.find(item => item.id === (mappedNew?.id || mappedOld?.id));
+          const itemId = mappedNew?.id || mappedOld?.id;
+          const localItem = currentData.find(item => item.id === itemId);
           
           let lastSavedItem = null;
           if (table === 'businesses') {
-            lastSavedItem = newState.lastSavedBusinesses.find((item: any) => item.id === (mappedNew?.id || mappedOld?.id));
+            lastSavedItem = newState.lastSavedBusinesses.find((item: any) => item.id === itemId);
           } else if (table === 'departments') {
-            lastSavedItem = newState.lastSavedDepartments.find((item: any) => item.id === (mappedNew?.id || mappedOld?.id));
+            lastSavedItem = newState.lastSavedDepartments.find((item: any) => item.id === itemId);
           } else if (table === 'processes') {
-            lastSavedItem = newState.lastSavedProcesses.find((item: any) => item.id === (mappedNew?.id || mappedOld?.id));
+            lastSavedItem = newState.lastSavedProcesses.find((item: any) => item.id === itemId);
           }
           
           const hasLocalChanges = localItem && lastSavedItem && !isEqualIgnoringMetadata(localItem, lastSavedItem);
-          const isEcho = mappedNew && localItem && isEqualIgnoringMetadata(localItem, mappedNew);
+          const isPendingEcho = mappedNew && itemId ? matchesPendingMutation(table, itemId, mappedNew) : false;
+          const isEcho = Boolean(mappedNew && localItem && isEqualIgnoringMetadata(localItem, mappedNew)) || isPendingEcho;
 
           if (isEcho) {
-            // Update lastSaved to match server's version (including timestamps)
             if (table === 'businesses') {
               newState.lastSavedBusinesses = currentData.map(item => item.id === mappedNew.id ? mappedNew : item);
             } else if (table === 'departments') {
@@ -194,6 +191,7 @@ export const useRealtimeSync = (
             } else if (table === 'processes') {
               newState.lastSavedProcesses = currentData.map(item => item.id === mappedNew.id ? mappedNew : item);
             }
+            newState[stateKey] = currentData.map(item => item.id === mappedNew.id ? mappedNew : item) as any;
             return newState;
           }
 

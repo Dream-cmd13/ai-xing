@@ -10,6 +10,7 @@ import {
   deleteDepartment as deleteDbDepartment, saveAISettings
 } from '@/data';
 import { ProcessDefinition, ProcessHistory } from '@/types';
+import { clearPendingMutation, markPendingMutation, normalizeForConflictComparison } from '@/syncConflictGuard';
 
 export const useAppActions = () => {
   const store = useAppStore();
@@ -36,6 +37,7 @@ export const useAppActions = () => {
       savingTimeoutRef.current = setTimeout(() => store.setIsSaving(true), 300);
       
       try {
+        markPendingMutation('strategy', 'default', strategyToSave, strategyToSave.rowVersion);
         const savedStrategy = await updateStrategy(strategyToSave);
         if (savingTimeoutRef.current) {
           clearTimeout(savingTimeoutRef.current);
@@ -55,6 +57,7 @@ export const useAppActions = () => {
         store.setBackendError(null);
         store.setIsDirty(false);
       } catch (error: any) {
+        clearPendingMutation('strategy', 'default');
         if (savingTimeoutRef.current) {
           clearTimeout(savingTimeoutRef.current);
           savingTimeoutRef.current = null;
@@ -74,6 +77,7 @@ export const useAppActions = () => {
       savingTimeoutRef.current = setTimeout(() => store.setIsSaving(true), 300);
       
       try {
+        markPendingMutation('processes', id, processToSave, processToSave.rowVersion);
         const savedProcess = await updateDbProcess(id, processToSave);
         if (savingTimeoutRef.current) {
           clearTimeout(savingTimeoutRef.current);
@@ -94,6 +98,7 @@ export const useAppActions = () => {
         store.setBackendError(null);
         store.setIsDirty(false);
       } catch (error: any) {
+        clearPendingMutation('processes', id);
         if (savingTimeoutRef.current) {
           clearTimeout(savingTimeoutRef.current);
           savingTimeoutRef.current = null;
@@ -118,7 +123,15 @@ export const useAppActions = () => {
         for (const newDept of deptsToSave) {
           const oldDept = oldDepts.find(d => d.id === newDept.id);
           if (!oldDept) savedDepartments.push(await addDbDepartment(newDept));
-          else if (JSON.stringify(oldDept) !== JSON.stringify(newDept)) savedDepartments.push(await updateDbDepartment(newDept.id, newDept));
+          else if (normalizeForConflictComparison(oldDept) !== normalizeForConflictComparison(newDept)) {
+            markPendingMutation('departments', newDept.id, newDept, newDept.rowVersion);
+            try {
+              savedDepartments.push(await updateDbDepartment(newDept.id, newDept));
+            } catch (error) {
+              clearPendingMutation('departments', newDept.id);
+              throw error;
+            }
+          }
           else savedDepartments.push(oldDept);
         }
         store.setState({ departments: savedDepartments });
@@ -131,7 +144,7 @@ export const useAppActions = () => {
       } finally {
         store.setIsSaving(false);
         // Only clear dirty if the current departments in store matches what we just saved
-        if (JSON.stringify(stateRef.current.departments) === JSON.stringify(deptsToSave)) {
+        if (normalizeForConflictComparison(stateRef.current.departments) === normalizeForConflictComparison(deptsToSave)) {
           store.setIsDirty(false);
         }
       }
@@ -175,6 +188,7 @@ export const useAppActions = () => {
     
     store.setIsSaving(true);
     try {
+      markPendingMutation('strategy', 'default', stateRef.current.strategy, stateRef.current.strategy?.rowVersion);
       const savedStrategy = await updateStrategy(stateRef.current.strategy);
       store.setState({ strategy: savedStrategy });
 
@@ -193,7 +207,13 @@ export const useAppActions = () => {
           if (isNew) {
             nextProcesses[processIndex] = await addDbProcess(process);
           } else {
+            markPendingMutation('processes', id, process, process.rowVersion);
+            try {
             nextProcesses[processIndex] = await updateDbProcess(id, process);
+            } catch (error) {
+              clearPendingMutation('processes', id);
+              throw error;
+            }
           }
         }
       }
@@ -215,8 +235,14 @@ export const useAppActions = () => {
         const oldDept = oldDepts.find(d => d.id === newDept.id);
         if (!oldDept) {
           savedDepartments.push(await addDbDepartment(newDept));
-        } else if (JSON.stringify(oldDept) !== JSON.stringify(newDept)) {
-          savedDepartments.push(await updateDbDepartment(newDept.id, newDept));
+        } else if (normalizeForConflictComparison(oldDept) !== normalizeForConflictComparison(newDept)) {
+          markPendingMutation('departments', newDept.id, newDept, newDept.rowVersion);
+          try {
+            savedDepartments.push(await updateDbDepartment(newDept.id, newDept));
+          } catch (error) {
+            clearPendingMutation('departments', newDept.id);
+            throw error;
+          }
         } else {
           savedDepartments.push(oldDept);
         }
@@ -236,6 +262,7 @@ export const useAppActions = () => {
       setTimeout(() => store.setShowSaveSuccess(false), 3000);
       store.setBackendError(null);
     } catch (error: any) {
+      clearPendingMutation('strategy', 'default');
       store.setIsSaving(false);
       store.setBackendError(error.message || "保存失败");
     }
@@ -276,7 +303,7 @@ export const useAppActions = () => {
       for (const newUser of newUsers) {
         const oldUser = oldUsers.find(u => u.id === newUser.id);
         if (!oldUser) savedUsers.push(await addDbUser(newUser));
-        else if (JSON.stringify(oldUser) !== JSON.stringify(newUser)) savedUsers.push(await updateDbUser(newUser.id, newUser));
+        else if (normalizeForConflictComparison(oldUser) !== normalizeForConflictComparison(newUser)) savedUsers.push(await updateDbUser(newUser.id, newUser));
         else savedUsers.push(oldUser);
       }
       store.setState({ users: savedUsers });
@@ -295,7 +322,7 @@ export const useAppActions = () => {
       for (const newRole of newRoles) {
         const oldRole = oldRoles.find(r => r.id === newRole.id);
         if (!oldRole) savedRoles.push(await addSystemRole(newRole));
-        else if (JSON.stringify(oldRole) !== JSON.stringify(newRole)) savedRoles.push(await updateSystemRole(newRole.id, newRole));
+        else if (normalizeForConflictComparison(oldRole) !== normalizeForConflictComparison(newRole)) savedRoles.push(await updateSystemRole(newRole.id, newRole));
         else savedRoles.push(oldRole);
       }
       store.setState({ systemRoles: savedRoles });
@@ -306,6 +333,7 @@ export const useAppActions = () => {
   const handleSetAISettings = (newAISettings: any) => {
     store.setAISettings(newAISettings);
     executeAtomicOperation(async () => {
+      markPendingMutation('settings', 'default', { ...stateRef.current.aiSettings, ...newAISettings }, stateRef.current.aiSettings?.rowVersion);
       const savedSettings = await saveAISettings({
         ...stateRef.current.aiSettings,
         ...newAISettings
@@ -326,7 +354,15 @@ export const useAppActions = () => {
       for (const newBiz of businesses) {
         const oldBiz = oldBusinesses.find(b => b.id === newBiz.id);
         if (!oldBiz) savedBusinesses.push(await addBusiness(newBiz));
-        else if (JSON.stringify(oldBiz) !== JSON.stringify(newBiz)) savedBusinesses.push(await updateBusiness(newBiz.id, newBiz));
+        else if (normalizeForConflictComparison(oldBiz) !== normalizeForConflictComparison(newBiz)) {
+          markPendingMutation('businesses', newBiz.id, newBiz, newBiz.rowVersion);
+          try {
+            savedBusinesses.push(await updateBusiness(newBiz.id, newBiz));
+          } catch (error) {
+            clearPendingMutation('businesses', newBiz.id);
+            throw error;
+          }
+        }
         else savedBusinesses.push(oldBiz);
       }
       store.setState({ businesses: savedBusinesses });
@@ -386,7 +422,14 @@ export const useAppActions = () => {
     dirtyProcessIdsRef.current.add(id);
     
     executeAtomicOperation(async () => {
-      const savedProcess = await updateDbProcess(id, { ...processToPublish, version, isActive: true, history: newHistory });
+      markPendingMutation('processes', id, { ...processToPublish, version, isActive: true, history: newHistory }, processToPublish.rowVersion);
+      let savedProcess;
+      try {
+        savedProcess = await updateDbProcess(id, { ...processToPublish, version, isActive: true, history: newHistory });
+      } catch (error) {
+        clearPendingMutation('processes', id);
+        throw error;
+      }
       const nextProcesses = stateRef.current.processes.map(p => p.id === id ? savedProcess : p);
       store.setState({ processes: nextProcesses });
       store.setLastSavedProcesses(nextProcesses);
@@ -407,7 +450,14 @@ export const useAppActions = () => {
     dirtyProcessIdsRef.current.add(procId);
     
     executeAtomicOperation(async () => {
-      const savedProcess = await updateDbProcess(procId, { ...processToRollback, nodes: newNodes, links: newLinks });
+      markPendingMutation('processes', procId, { ...processToRollback, nodes: newNodes, links: newLinks }, processToRollback.rowVersion);
+      let savedProcess;
+      try {
+        savedProcess = await updateDbProcess(procId, { ...processToRollback, nodes: newNodes, links: newLinks });
+      } catch (error) {
+        clearPendingMutation('processes', procId);
+        throw error;
+      }
       const nextProcesses = stateRef.current.processes.map(p => p.id === procId ? savedProcess : p);
       store.setState({ processes: nextProcesses });
       store.setLastSavedProcesses(nextProcesses);
