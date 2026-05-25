@@ -82,7 +82,9 @@ const App: React.FC = () => {
                 vision: workspace.strategy?.vision || '',
                 customerIssues: workspace.strategy?.customerIssues || '',
                 employeeIssues: workspace.strategy?.employeeIssues || '',
-                companyOKRs: workspace.strategy?.companyOKRs || {}
+                companyOKRs: workspace.strategy?.companyOKRs || {},
+                updatedAt: workspace.strategy?.updatedAt,
+                rowVersion: workspace.strategy?.rowVersion || 0
               };
               
               setLastSavedProcesses(initialProcesses);

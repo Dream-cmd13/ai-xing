@@ -7,7 +7,7 @@ import {
   deleteProcess as deleteDbProcess, updateStrategy, addBusiness, updateBusiness, deleteBusiness, 
   addUser as addDbUser, updateUser as updateDbUser, deleteUser as deleteDbUser, addSystemRole, 
   updateSystemRole, deleteSystemRole, addDepartment as addDbDepartment, updateDepartment as updateDbDepartment, 
-  deleteDepartment as deleteDbDepartment 
+  deleteDepartment as deleteDbDepartment, saveAISettings
 } from '@/data';
 import { ProcessDefinition, ProcessHistory } from '@/types';
 
@@ -36,13 +36,14 @@ export const useAppActions = () => {
       savingTimeoutRef.current = setTimeout(() => store.setIsSaving(true), 300);
       
       try {
-        await updateStrategy(strategyToSave);
+        const savedStrategy = await updateStrategy(strategyToSave);
         if (savingTimeoutRef.current) {
           clearTimeout(savingTimeoutRef.current);
           savingTimeoutRef.current = null;
         }
         store.setIsSaving(false);
-        store.setLastSavedStrategy(strategyToSave);
+        store.setState({ strategy: savedStrategy });
+        store.setLastSavedStrategy(savedStrategy);
         store.setShowSaveSuccess(true);
         
         if (saveSuccessTimeoutRef.current) clearTimeout(saveSuccessTimeoutRef.current);
@@ -73,13 +74,15 @@ export const useAppActions = () => {
       savingTimeoutRef.current = setTimeout(() => store.setIsSaving(true), 300);
       
       try {
-        await updateDbProcess(id, processToSave);
+        const savedProcess = await updateDbProcess(id, processToSave);
         if (savingTimeoutRef.current) {
           clearTimeout(savingTimeoutRef.current);
           savingTimeoutRef.current = null;
         }
         store.setIsSaving(false);
-        store.setLastSavedProcesses(stateRef.current.processes);
+        const nextProcesses = stateRef.current.processes.map(p => p.id === id ? savedProcess : p);
+        store.setState({ processes: nextProcesses });
+        store.setLastSavedProcesses(nextProcesses);
         store.setShowSaveSuccess(true);
         
         if (saveSuccessTimeoutRef.current) clearTimeout(saveSuccessTimeoutRef.current);
@@ -111,12 +114,15 @@ export const useAppActions = () => {
         const currentIds = new Set(deptsToSave.map(d => d.id));
         const toDelete = oldDepts.filter(d => !currentIds.has(d.id));
         for (const d of toDelete) await deleteDbDepartment(d.id);
+        const savedDepartments: any[] = [];
         for (const newDept of deptsToSave) {
           const oldDept = oldDepts.find(d => d.id === newDept.id);
-          if (!oldDept) await addDbDepartment(newDept);
-          else if (JSON.stringify(oldDept) !== JSON.stringify(newDept)) await updateDbDepartment(newDept.id, newDept);
+          if (!oldDept) savedDepartments.push(await addDbDepartment(newDept));
+          else if (JSON.stringify(oldDept) !== JSON.stringify(newDept)) savedDepartments.push(await updateDbDepartment(newDept.id, newDept));
+          else savedDepartments.push(oldDept);
         }
-        store.setLastSavedDepartments(deptsToSave);
+        store.setState({ departments: savedDepartments });
+        store.setLastSavedDepartments(savedDepartments);
         store.setShowSaveSuccess(true);
         setTimeout(() => store.setShowSaveSuccess(false), 3000);
         store.setBackendError(null);
@@ -169,18 +175,25 @@ export const useAppActions = () => {
     
     store.setIsSaving(true);
     try {
-      await updateStrategy(stateRef.current.strategy);
-      await saveWorkspace(stateRef.current);
+      const savedStrategy = await updateStrategy(stateRef.current.strategy);
+      store.setState({ strategy: savedStrategy });
+
+      if (stateRef.current.aiSettings) {
+        const savedSettings = await saveAISettings(stateRef.current.aiSettings);
+        store.setState({ aiSettings: savedSettings });
+      }
       
       const dirtyIds = Array.from(dirtyProcessIdsRef.current);
+      const nextProcesses = [...stateRef.current.processes];
       for (const id of dirtyIds as string[]) {
-        const process = stateRef.current.processes.find(p => p.id === id);
+        const processIndex = nextProcesses.findIndex(p => p.id === id);
+        const process = processIndex >= 0 ? nextProcesses[processIndex] : null;
         if (process) {
           const isNew = !store.lastSavedProcesses.some(p => p.id === id);
           if (isNew) {
-            await addDbProcess(process);
+            nextProcesses[processIndex] = await addDbProcess(process);
           } else {
-            await updateDbProcess(id, process);
+            nextProcesses[processIndex] = await updateDbProcess(id, process);
           }
         }
       }
@@ -197,17 +210,22 @@ export const useAppActions = () => {
       for (const d of toDelete) {
         await deleteDbDepartment(d.id);
       }
+      const savedDepartments: any[] = [];
       for (const newDept of newDepts) {
         const oldDept = oldDepts.find(d => d.id === newDept.id);
         if (!oldDept) {
-          await addDbDepartment(newDept);
+          savedDepartments.push(await addDbDepartment(newDept));
         } else if (JSON.stringify(oldDept) !== JSON.stringify(newDept)) {
-          await updateDbDepartment(newDept.id, newDept);
+          savedDepartments.push(await updateDbDepartment(newDept.id, newDept));
+        } else {
+          savedDepartments.push(oldDept);
         }
       }
       
-      store.setLastSavedDepartments(newDepts);
-      store.setLastSavedProcesses(stateRef.current.processes);
+      store.setState({ processes: nextProcesses, departments: savedDepartments });
+      store.setLastSavedStrategy(savedStrategy);
+      store.setLastSavedDepartments(savedDepartments);
+      store.setLastSavedProcesses(nextProcesses);
       store.setLastSavedBusinesses(stateRef.current.businesses);
       dirtyProcessIdsRef.current.clear();
       deletedProcessIdsRef.current.clear();
@@ -228,7 +246,12 @@ export const useAppActions = () => {
     store.setState(newState);
     store.setIsDirty(true);
     executeAtomicOperation(async () => {
-      await saveWorkspace(newState);
+      if (newState.aiSettings) {
+        const savedSettings = await saveAISettings(newState.aiSettings);
+        store.setState({ aiSettings: savedSettings });
+      } else {
+        await saveWorkspace(newState);
+      }
       store.setIsDirty(false);
     });
   };
@@ -249,12 +272,15 @@ export const useAppActions = () => {
       const currentIds = new Set(newUsers.map(u => u.id));
       const toDelete = oldUsers.filter(u => !currentIds.has(u.id));
       for (const u of toDelete) await deleteDbUser(u.id);
+      const savedUsers: any[] = [];
       for (const newUser of newUsers) {
         const oldUser = oldUsers.find(u => u.id === newUser.id);
-        if (!oldUser) await addDbUser(newUser);
-        else if (JSON.stringify(oldUser) !== JSON.stringify(newUser)) await updateDbUser(newUser.id, newUser);
+        if (!oldUser) savedUsers.push(await addDbUser(newUser));
+        else if (JSON.stringify(oldUser) !== JSON.stringify(newUser)) savedUsers.push(await updateDbUser(newUser.id, newUser));
+        else savedUsers.push(oldUser);
       }
-      store.setLastSavedUsers(newUsers);
+      store.setState({ users: savedUsers });
+      store.setLastSavedUsers(savedUsers);
     });
   };
 
@@ -265,19 +291,26 @@ export const useAppActions = () => {
       const currentIds = new Set(newRoles.map(r => r.id));
       const toDelete = oldRoles.filter(r => !currentIds.has(r.id));
       for (const r of toDelete) await deleteSystemRole(r.id);
+      const savedRoles: any[] = [];
       for (const newRole of newRoles) {
         const oldRole = oldRoles.find(r => r.id === newRole.id);
-        if (!oldRole) await addSystemRole(newRole);
-        else if (JSON.stringify(oldRole) !== JSON.stringify(newRole)) await updateSystemRole(newRole.id, newRole);
+        if (!oldRole) savedRoles.push(await addSystemRole(newRole));
+        else if (JSON.stringify(oldRole) !== JSON.stringify(newRole)) savedRoles.push(await updateSystemRole(newRole.id, newRole));
+        else savedRoles.push(oldRole);
       }
-      store.setLastSavedSystemRoles(newRoles);
+      store.setState({ systemRoles: savedRoles });
+      store.setLastSavedSystemRoles(savedRoles);
     });
   };
 
   const handleSetAISettings = (newAISettings: any) => {
     store.setAISettings(newAISettings);
     executeAtomicOperation(async () => {
-      await saveWorkspace(stateRef.current);
+      const savedSettings = await saveAISettings({
+        ...stateRef.current.aiSettings,
+        ...newAISettings
+      });
+      store.setState({ aiSettings: savedSettings });
       store.setIsDirty(false);
     });
   };
@@ -289,12 +322,15 @@ export const useAppActions = () => {
       const currentIds = new Set(businesses.map(b => b.id));
       const toDelete = oldBusinesses.filter(b => !currentIds.has(b.id));
       for (const d of toDelete) await deleteBusiness(d.id);
+      const savedBusinesses: any[] = [];
       for (const newBiz of businesses) {
         const oldBiz = oldBusinesses.find(b => b.id === newBiz.id);
-        if (!oldBiz) await addBusiness(newBiz);
-        else if (JSON.stringify(oldBiz) !== JSON.stringify(newBiz)) await updateBusiness(newBiz.id, newBiz);
+        if (!oldBiz) savedBusinesses.push(await addBusiness(newBiz));
+        else if (JSON.stringify(oldBiz) !== JSON.stringify(newBiz)) savedBusinesses.push(await updateBusiness(newBiz.id, newBiz));
+        else savedBusinesses.push(oldBiz);
       }
-      store.setLastSavedBusinesses(businesses);
+      store.setState({ businesses: savedBusinesses });
+      store.setLastSavedBusinesses(savedBusinesses);
     });
   };
 
@@ -322,8 +358,10 @@ export const useAppActions = () => {
     store.addProcess(newProcess);
     dirtyProcessIdsRef.current.add(newProcess.id);
     executeAtomicOperation(async () => {
-      await addDbProcess(newProcess);
-      store.setLastSavedProcesses(stateRef.current.processes);
+      const savedProcess = await addDbProcess(newProcess);
+      const nextProcesses = stateRef.current.processes.map(p => p.id === newProcess.id ? savedProcess : p);
+      store.setState({ processes: nextProcesses });
+      store.setLastSavedProcesses(nextProcesses);
     });
   };
 
@@ -348,7 +386,10 @@ export const useAppActions = () => {
     dirtyProcessIdsRef.current.add(id);
     
     executeAtomicOperation(async () => {
-      await updateDbProcess(id, { version, isActive: true, history: newHistory });
+      const savedProcess = await updateDbProcess(id, { ...processToPublish, version, isActive: true, history: newHistory });
+      const nextProcesses = stateRef.current.processes.map(p => p.id === id ? savedProcess : p);
+      store.setState({ processes: nextProcesses });
+      store.setLastSavedProcesses(nextProcesses);
     });
   };
 
@@ -366,16 +407,16 @@ export const useAppActions = () => {
     dirtyProcessIdsRef.current.add(procId);
     
     executeAtomicOperation(async () => {
-      await updateDbProcess(procId, { nodes: newNodes, links: newLinks, updatedAt: Date.now() });
+      const savedProcess = await updateDbProcess(procId, { ...processToRollback, nodes: newNodes, links: newLinks });
+      const nextProcesses = stateRef.current.processes.map(p => p.id === procId ? savedProcess : p);
+      store.setState({ processes: nextProcesses });
+      store.setLastSavedProcesses(nextProcesses);
     });
   };
 
   const handleSetTasks = (newTasks: any[]) => {
     store.setTasks(newTasks);
-    executeAtomicOperation(async () => {
-      await saveWorkspace(stateRef.current);
-      store.setIsDirty(false);
-    });
+    store.setIsDirty(true);
   };
 
   const handleSetStrategy = (strategyPartial: any, autoSave = true) => {

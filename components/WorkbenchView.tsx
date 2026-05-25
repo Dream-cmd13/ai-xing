@@ -204,11 +204,14 @@ const WorkbenchView: React.FC = () => {
     if (executeAtomicOperation) {
       executeAtomicOperation(async () => {
         if (isNewTask) {
+          const savedEntries: PADEntry[] = [];
           for (const entry of entriesToAdd) {
-            await addTask(entry);
+            savedEntries.push(await addTask(entry));
           }
+          setTasks([...state.tasks, ...savedEntries]);
         } else {
-          await updateTask(newTask.id, newTask);
+          const savedTask = await updateTask(newTask.id, newTask);
+          setTasks(state.tasks.map(t => t.id === newTask.id ? savedTask : t));
         }
       });
     } else if (saveStateDirectly) {

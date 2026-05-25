@@ -2,6 +2,7 @@ import React, { useEffect } from 'react';
 import { useAppStore } from './store/useAppStore';
 import { supabase } from './supabase';
 import { AppState, CompanyStrategy, BusinessDefinition, Department, ProcessDefinition, PADEntry } from './types';
+import { toast } from 'sonner';
 
 const mapPayloadToState = (table: string, data: any) => {
   if (!data) return data;
@@ -14,7 +15,8 @@ const mapPayloadToState = (table: string, data: any) => {
         customerIssues: data.customer_issues || '',
         employeeIssues: data.employee_issues || '',
         companyOKRs: typeof data.company_okrs === 'string' ? JSON.parse(data.company_okrs) : (data.company_okrs || {}),
-        updatedAt: data.updated_at
+        updatedAt: data.updated_at,
+        rowVersion: typeof data.row_version === 'number' ? data.row_version : Number(data.row_version || 0)
       };
     case 'businesses':
       return {
@@ -25,7 +27,8 @@ const mapPayloadToState = (table: string, data: any) => {
         customerNeeds: data.customer_needs,
         surfaceProductPower: data.surface_product_power,
         coreProductPower: data.core_product_power,
-        updatedAt: data.updated_at
+        updatedAt: data.updated_at,
+        rowVersion: typeof data.row_version === 'number' ? data.row_version : Number(data.row_version || 0)
       };
     case 'tasks':
       return {
@@ -46,7 +49,9 @@ const mapPayloadToState = (table: string, data: any) => {
         logs: data.logs || [],
         plan: data.plan,
         action: data.action,
-        deliverable: data.deliverable
+        deliverable: data.deliverable,
+        updatedAt: data.updated_at,
+        rowVersion: typeof data.row_version === 'number' ? data.row_version : Number(data.row_version || 0)
       };
     case 'processes':
       return {
@@ -63,7 +68,8 @@ const mapPayloadToState = (table: string, data: any) => {
         nodes: typeof data.nodes === 'string' ? JSON.parse(data.nodes) : (data.nodes || []),
         links: typeof data.links === 'string' ? JSON.parse(data.links) : (data.links || []),
         history: typeof data.history === 'string' ? JSON.parse(data.history) : (data.history || []),
-        updatedAt: data.updated_at
+        updatedAt: data.updated_at,
+        rowVersion: typeof data.row_version === 'number' ? data.row_version : Number(data.row_version || 0)
       };
     case 'departments':
       return {
@@ -76,7 +82,9 @@ const mapPayloadToState = (table: string, data: any) => {
         attributes: typeof data.attributes === 'string' ? JSON.parse(data.attributes) : data.attributes,
         subDepartments: typeof data.sub_departments === 'string' ? JSON.parse(data.sub_departments) : data.sub_departments,
         okrs: typeof data.okrs === 'string' ? JSON.parse(data.okrs) : data.okrs,
-        reviews: typeof data.reviews === 'string' ? JSON.parse(data.reviews) : (data.reviews || {})
+        reviews: typeof data.reviews === 'string' ? JSON.parse(data.reviews) : (data.reviews || {}),
+        updatedAt: data.updated_at,
+        rowVersion: typeof data.row_version === 'number' ? data.row_version : Number(data.row_version || 0)
       };
     default:
       return data;
@@ -103,7 +111,7 @@ export const useRealtimeSync = (
         const isEqualIgnoringMetadata = (a: any, b: any) => {
           if (!a || !b) return a === b;
           const strip = (obj: any) => {
-            const { updatedAt, updated_at, id, ...rest } = obj;
+            const { updatedAt, updated_at, rowVersion, row_version, id, ...rest } = obj;
             return JSON.stringify(rest);
           };
           return strip(a) === strip(b);
@@ -118,12 +126,14 @@ export const useRealtimeSync = (
             // Use robust comparison for echo check
             const isEcho = isEqualIgnoringMetadata(mappedNew, currentStrategy);
             if (isEcho) {
-              newState.lastSavedStrategy = currentStrategy;
+              newState.strategy = mappedNew;
+              newState.lastSavedStrategy = mappedNew;
               return newState;
             }
 
             const hasLocalChanges = lastSavedStrategy && !isEqualIgnoringMetadata(currentStrategy, lastSavedStrategy);
             if (hasLocalChanges) {
+              toast.warning('战略数据已被他人更新，请刷新后再继续保存。');
               console.log('Realtime: Skipping strategy update due to local changes');
               return prevState;
             }
@@ -188,6 +198,7 @@ export const useRealtimeSync = (
           }
 
           if (hasLocalChanges && (payload.eventType === 'UPDATE' || payload.eventType === 'DELETE')) {
+            toast.warning(`${table} 数据已被他人更新，请刷新后再继续保存。`);
             console.log(`Realtime: Skipping ${table} update for ${localItem.id} due to local changes`);
             return prevState;
           }

@@ -97,7 +97,6 @@ export const useAppStore = create<AppStoreState>((set) => ({
   setDepartments: (departments) => set({ departments, isDirty: true }),
   setUsers: (users) => set({ users, isDirty: true }),
   setSystemRoles: (systemRoles) => set({ systemRoles, isDirty: true }),
-  setAISettings: (aiSettings) => set({ aiSettings, isDirty: true }),
   setBusinesses: (businesses) => set({ 
     businesses: businesses.map(b => ({ ...b, updatedAt: Date.now() })), 
     isDirty: true 
@@ -105,6 +104,10 @@ export const useAppStore = create<AppStoreState>((set) => ({
   setTasks: (tasks) => set({ tasks, isDirty: true }),
   setStrategy: (strategyPartial) => set((state) => ({ 
     strategy: { ...state.strategy, ...strategyPartial, updatedAt: Date.now() },
+    isDirty: true
+  })),
+  setAISettings: (aiSettings) => set((state) => ({
+    aiSettings: { ...state.aiSettings, ...aiSettings, updatedAt: Date.now() },
     isDirty: true
   })),
   

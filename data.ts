@@ -1,5 +1,5 @@
 
-import { AppState, User, Department, ProcessDefinition, CompanyStrategy, BusinessDefinition, WeeklyPAD, SystemRole, PADEntry } from "./types";
+import { AppState, User, Department, ProcessDefinition, CompanyStrategy, BusinessDefinition, SystemRole, PADEntry, AISettings } from "./types";
 import { isSupabaseConfigured, supabase } from "./supabase";
 
 /**
@@ -20,8 +20,194 @@ const handleSupabaseError = (error: any) => {
   throw new Error(message || "未知数据库错误");
 };
 
+const buildConflictError = (entityLabel: string) =>
+  new Error(`${entityLabel}已被其他人修改，请先刷新最新数据后再重试。`);
+
+const normalizeRowVersion = (value: any) =>
+  typeof value === 'number' ? value : Number(value || 0);
+
+const normalizeUpdatedAt = (value: any) =>
+  typeof value === 'number' ? value : Number(value || Date.now());
+
+const mapSettingsRow = (settingsData: any): AISettings => ({
+  selectedModelId: settingsData?.ai_settings?.selectedModelId || 'gemini',
+  configs: settingsData?.ai_settings?.configs || [
+    { id: 'gemini', name: 'Gemini 3 Flash Preview', type: 'gemini', apiKey: 'ENV_KEY' }
+  ],
+  updatedAt: settingsData?.updated_at,
+  rowVersion: normalizeRowVersion(settingsData?.row_version)
+});
+
+const mapUserRow = (u: any): User => {
+  const reviewsMap: Record<string, any[]> = {};
+  if (u.reviews) {
+    Object.assign(reviewsMap, u.reviews);
+  }
+
+  return {
+    id: u.id,
+    auth_id: u.auth_id,
+    username: u.username,
+    name: u.name,
+    role: u.role,
+    departmentId: u.department_id,
+    padPermissions: u.pad_permissions,
+    reviews: reviewsMap,
+    systemRoleIds: u.system_role_ids,
+    customPermissions: u.custom_permissions,
+    updatedAt: u.updated_at,
+    rowVersion: normalizeRowVersion(u.row_version)
+  };
+};
+
+const mapDepartmentRow = (d: any): Department => {
+  const roleMembers: Record<string, string[]> = {};
+  if (d.role_members) {
+    Object.assign(roleMembers, d.role_members);
+  }
+
+  const reviewsMap: Record<string, any[]> = {};
+  if (d.reviews) {
+    Object.assign(reviewsMap, d.reviews);
+  }
+
+  return {
+    id: d.id,
+    name: d.name,
+    managerName: d.manager_name,
+    responsibilities: d.responsibilities,
+    roles: d.roles || [],
+    roleMembers,
+    attributes: d.attributes,
+    subDepartments: d.sub_departments,
+    okrs: d.okrs,
+    reviews: reviewsMap,
+    updatedAt: d.updated_at,
+    rowVersion: normalizeRowVersion(d.row_version)
+  };
+};
+
+const mapProcessRow = (p: any): ProcessDefinition => ({
+  id: p.id,
+  name: p.name,
+  category: p.category,
+  level: p.level,
+  version: p.version,
+  isActive: p.is_active,
+  type: p.type,
+  owner: p.owner,
+  coOwner: p.co_owner,
+  objective: p.objective,
+  nodes: p.nodes || [],
+  links: p.links || [],
+  history: p.history || [],
+  updatedAt: normalizeUpdatedAt(p.updated_at),
+  rowVersion: normalizeRowVersion(p.row_version)
+});
+
+const mapStrategyRow = (strategy: any): CompanyStrategy => ({
+  mission: strategy?.mission || '',
+  vision: strategy?.vision || '',
+  customerIssues: strategy?.customer_issues || '',
+  employeeIssues: strategy?.employee_issues || '',
+  companyOKRs: strategy?.company_okrs || {},
+  updatedAt: strategy?.updated_at,
+  rowVersion: normalizeRowVersion(strategy?.row_version)
+});
+
+const mapBusinessRow = (b: any): BusinessDefinition => ({
+  id: b.id,
+  name: b.name,
+  businessFormat: b.business_format,
+  customerPersona: b.customer_persona,
+  customerNeeds: b.customer_needs,
+  surfaceProductPower: b.surface_product_power,
+  coreProductPower: b.core_product_power,
+  updatedAt: b.updated_at,
+  rowVersion: normalizeRowVersion(b.row_version)
+});
+
+const mapSystemRoleRow = (r: any): SystemRole => ({
+  id: r.id,
+  name: r.name,
+  description: r.description,
+  permissions: r.permissions,
+  updatedAt: r.updated_at,
+  rowVersion: normalizeRowVersion(r.row_version)
+});
+
+const mapTaskRow = (t: any): PADEntry => ({
+  id: t.id,
+  title: t.title,
+  status: t.status,
+  priority: t.priority,
+  ownerId: t.owner_id,
+  departmentId: t.department_id,
+  visibility: t.visibility,
+  alignedKrId: t.aligned_kr_id,
+  targetWeeks: t.target_weeks || [],
+  startDate: t.start_date,
+  dueDate: t.due_date,
+  tags: t.tags || [],
+  participantIds: t.participant_ids || [],
+  approverIds: t.approver_ids || [],
+  logs: t.logs || [],
+  plan: t.plan,
+  action: t.action,
+  deliverable: t.deliverable,
+  updatedAt: t.updated_at,
+  rowVersion: normalizeRowVersion(t.row_version)
+});
+
+export const saveAISettings = async (settings: AISettings): Promise<AISettings> => {
+  if (!isSupabaseConfigured()) throw new Error("Supabase not configured");
+
+  const nextUpdatedAt = Date.now();
+  const currentRowVersion = normalizeRowVersion(settings.rowVersion);
+  const payload = {
+    ai_settings: {
+      selectedModelId: settings.selectedModelId,
+      configs: settings.configs
+    },
+    updated_at: nextUpdatedAt,
+    row_version: currentRowVersion + 1
+  };
+
+  try {
+    const existing = await supabase.from('settings').select('id').eq('id', 'default').maybeSingle();
+    if (existing.error && existing.error.code !== 'PGRST116' && existing.error.code !== '42P01') {
+      throw existing.error;
+    }
+
+    if (!existing.data) {
+      const { data, error } = await supabase
+        .from('settings')
+        .insert({ id: 'default', ...payload })
+        .select('*')
+        .single();
+      if (error) throw error;
+      return mapSettingsRow(data);
+    }
+
+    const { data, error } = await supabase
+      .from('settings')
+      .update(payload)
+      .eq('id', 'default')
+      .eq('row_version', currentRowVersion)
+      .select('*')
+      .maybeSingle();
+
+    if (error) throw error;
+    if (!data) throw buildConflictError('系统设置');
+    return mapSettingsRow(data);
+  } catch (e) {
+    handleSupabaseError(e);
+    throw e;
+  }
+};
+
 /**
- * 持久化保存整个工作空间的状态 (拆分到各个关系表)
+ * 持久化保存整个工作空间的状�?(拆分到各个关系表)
  */
 export const saveWorkspace = async (state: AppState): Promise<void> => {
   if (!isSupabaseConfigured()) throw new Error("Supabase not configured");
@@ -29,7 +215,7 @@ export const saveWorkspace = async (state: AppState): Promise<void> => {
   try {
     // 0. AI Settings
     if (state.aiSettings) {
-      await supabase.from('settings').upsert({ id: 'default', ai_settings: state.aiSettings });
+      await saveAISettings(state.aiSettings);
     }
 
     // 1. Users - Removed from full sync, now using atomic operations
@@ -51,7 +237,7 @@ export const saveWorkspace = async (state: AppState): Promise<void> => {
 };
 
 /**
- * 读取企业的工作空间数据 (从各个关系表组装)
+ * 读取企业的工作空间数�?(从各个关系表组装)
  */
 export const getWorkspace = async (): Promise<AppState | null> => {
   if (!isSupabaseConfigured()) {
@@ -113,78 +299,14 @@ export const getWorkspace = async (): Promise<AppState | null> => {
     const tasks = tasksRes.data || [];
 
     const appState: AppState = {
-      users: (users || []).map(u => {
-        const reviewsMap: Record<string, any[]> = {};
-        if (u.reviews) {
-          Object.assign(reviewsMap, u.reviews);
-        }
-
-        return {
-          id: u.id, auth_id: u.auth_id, username: u.username, name: u.name, role: u.role,
-          departmentId: u.department_id, padPermissions: u.pad_permissions, reviews: reviewsMap,
-          systemRoleIds: u.system_role_ids, customPermissions: u.custom_permissions
-        };
-      }),
-      departments: (departments || []).map(d => {
-        const rolesList = d.roles || [];
-        const roleMembers: Record<string, string[]> = {};
-        if (d.role_members) {
-          Object.assign(roleMembers, d.role_members);
-        }
-
-        const reviewsMap: Record<string, any[]> = {};
-        if (d.reviews) {
-          Object.assign(reviewsMap, d.reviews);
-        }
-
-        return {
-          id: d.id, name: d.name, managerName: d.manager_name, responsibilities: d.responsibilities,
-          roles: rolesList, roleMembers: roleMembers, attributes: d.attributes,
-          subDepartments: d.sub_departments, okrs: d.okrs, reviews: reviewsMap
-        };
-      }),
-      processes: (processes || []).map(p => ({
-        id: p.id, name: p.name, category: p.category, level: p.level, version: p.version,
-        isActive: p.is_active, type: p.type, owner: p.owner, coOwner: p.co_owner,
-        objective: p.objective, nodes: p.nodes, links: p.links, history: p.history, updatedAt: p.updated_at
-      })),
-      strategy: strategy ? {
-        mission: strategy.mission, vision: strategy.vision, customerIssues: strategy.customer_issues,
-        employeeIssues: strategy.employee_issues, companyOKRs: strategy.company_okrs
-      } : { mission: '', vision: '', customerIssues: '', employeeIssues: '', companyOKRs: {} },
-      businesses: (businesses || []).map(b => ({
-        id: b.id, name: b.name, businessFormat: b.business_format, customerPersona: b.customer_persona,
-        customerNeeds: b.customer_needs, surfaceProductPower: b.surface_product_power, coreProductPower: b.core_product_power
-      })),
-      tasks: (tasks || []).map(t => ({
-        id: t.id,
-        title: t.title,
-        status: t.status,
-        priority: t.priority,
-        ownerId: t.owner_id,
-        departmentId: t.department_id,
-        visibility: t.visibility,
-        alignedKrId: t.aligned_kr_id,
-        targetWeeks: t.target_weeks || [],
-        startDate: t.start_date,
-        dueDate: t.due_date,
-        tags: t.tags || [],
-        participantIds: t.participant_ids || [],
-        approverIds: t.approver_ids || [],
-        logs: t.logs || [],
-        plan: t.plan,
-        action: t.action,
-        deliverable: t.deliverable
-      })),
-      systemRoles: (systemRoles || []).map(r => ({
-        id: r.id, name: r.name, description: r.description, permissions: r.permissions
-      })),
-      aiSettings: settingsData?.ai_settings || {
-        selectedModelId: 'gemini',
-        configs: [
-          { id: 'gemini', name: 'Gemini 3 Flash Preview', type: 'gemini', apiKey: 'ENV_KEY' }
-        ]
-      }
+      users: (users || []).map(mapUserRow),
+      departments: (departments || []).map(mapDepartmentRow),
+      processes: (processes || []).map(mapProcessRow),
+      strategy: strategy ? mapStrategyRow(strategy) : { mission: '', vision: '', customerIssues: '', employeeIssues: '', companyOKRs: {}, rowVersion: 0 },
+      businesses: (businesses || []).map(mapBusinessRow),
+      tasks: (tasks || []).map(mapTaskRow),
+      systemRoles: (systemRoles || []).map(mapSystemRoleRow),
+      aiSettings: mapSettingsRow(settingsData)
     };
 
     return appState;
@@ -218,14 +340,7 @@ export const getFilteredTasks = async (filters: {
     const { data, error } = await query;
     if (error) throw error;
     
-    return (data || []).map(t => ({
-      id: t.id, title: t.title, status: t.status, priority: t.priority,
-      ownerId: t.owner_id, departmentId: t.department_id, visibility: t.visibility,
-      alignedKrId: t.aligned_kr_id, targetWeeks: t.target_weeks, startDate: t.start_date,
-      dueDate: t.due_date, tags: t.tags, participantIds: t.participant_ids,
-      approverIds: t.approver_ids, logs: t.logs, plan: t.plan, action: t.action,
-      deliverable: t.deliverable
-    }));
+    return (data || []).map(mapTaskRow);
   } catch (e) {
     handleSupabaseError(e);
     return [];
@@ -251,11 +366,7 @@ export const getFilteredUsers = async (filters: {
     const { data, error } = await query;
     if (error) throw error;
     
-    return (data || []).map(u => ({
-      id: u.id, auth_id: u.auth_id, username: u.username, name: u.name, role: u.role,
-      departmentId: u.department_id, padPermissions: u.pad_permissions,
-      systemRoleIds: u.system_role_ids, customPermissions: u.custom_permissions
-    }));
+    return (data || []).map(mapUserRow);
   } catch (e) {
     handleSupabaseError(e);
     return [];
@@ -265,44 +376,77 @@ export const getFilteredUsers = async (filters: {
 /**
  * Atomic Strategy Operations
  */
-export const updateStrategy = async (strategy: Partial<CompanyStrategy>): Promise<void> => {
-  if (!isSupabaseConfigured()) return;
+export const updateStrategy = async (strategy: Partial<CompanyStrategy>): Promise<CompanyStrategy> => {
+  if (!isSupabaseConfigured()) throw new Error("Supabase not configured");
   try {
-    const dbUpdates: any = { id: 'default' };
+    const currentRowVersion = normalizeRowVersion(strategy.rowVersion);
+    const nextUpdatedAt = Date.now();
+    const dbUpdates: any = {
+      updated_at: nextUpdatedAt,
+      row_version: currentRowVersion + 1
+    };
     if (strategy.mission !== undefined) dbUpdates.mission = strategy.mission;
     if (strategy.vision !== undefined) dbUpdates.vision = strategy.vision;
     if (strategy.customerIssues !== undefined) dbUpdates.customer_issues = strategy.customerIssues;
     if (strategy.employeeIssues !== undefined) dbUpdates.employee_issues = strategy.employeeIssues;
     if (strategy.companyOKRs !== undefined) dbUpdates.company_okrs = strategy.companyOKRs;
 
-    const { error } = await supabase.from('strategy').upsert(dbUpdates);
+    const existing = await supabase.from('strategy').select('id').eq('id', 'default').maybeSingle();
+    if (existing.error && existing.error.code !== 'PGRST116' && existing.error.code !== '42P01') {
+      throw existing.error;
+    }
+
+    if (!existing.data) {
+      const { data, error } = await supabase
+        .from('strategy')
+        .insert({ id: 'default', ...dbUpdates })
+        .select('*')
+        .single();
+      if (error) throw error;
+      return mapStrategyRow(data);
+    }
+
+    const { data, error } = await supabase
+      .from('strategy')
+      .update(dbUpdates)
+      .eq('id', 'default')
+      .eq('row_version', currentRowVersion)
+      .select('*')
+      .maybeSingle();
+
     if (error) throw error;
+    if (!data) throw buildConflictError('战略');
+    return mapStrategyRow(data);
   } catch (e) {
     handleSupabaseError(e);
+    throw e;
   }
 };
 
 /**
  * Atomic Business Operations
  */
-export const addBusiness = async (business: BusinessDefinition): Promise<void> => {
-  if (!isSupabaseConfigured()) return;
+export const addBusiness = async (business: BusinessDefinition): Promise<BusinessDefinition> => {
+  if (!isSupabaseConfigured()) throw new Error("Supabase not configured")
   try {
-    const { error } = await supabase.from('businesses').upsert({
+    const { data, error } = await supabase.from('businesses').upsert({
       id: business.id, name: business.name, business_format: business.businessFormat || '',
       customer_persona: business.customerPersona || '', customer_needs: business.customerNeeds || '',
       surface_product_power: business.surfaceProductPower || '', core_product_power: business.coreProductPower || '',
-      updated_at: Date.now()
-    });
+      updated_at: Date.now(), row_version: 0
+    }).select('*').single();
     if (error) throw error;
+    return mapBusinessRow(data);
   } catch (e) {
     handleSupabaseError(e);
+    throw e;
   }
 };
 
-export const updateBusiness = async (id: string, updates: Partial<BusinessDefinition>): Promise<void> => {
-  if (!isSupabaseConfigured()) return;
+export const updateBusiness = async (id: string, updates: Partial<BusinessDefinition>): Promise<BusinessDefinition> => {
+  if (!isSupabaseConfigured()) throw new Error("Supabase not configured")
   try {
+    const currentRowVersion = normalizeRowVersion(updates.rowVersion);
     const dbUpdates: any = {};
     if (updates.name !== undefined) dbUpdates.name = updates.name;
     if (updates.businessFormat !== undefined) dbUpdates.business_format = updates.businessFormat;
@@ -311,16 +455,26 @@ export const updateBusiness = async (id: string, updates: Partial<BusinessDefini
     if (updates.surfaceProductPower !== undefined) dbUpdates.surface_product_power = updates.surfaceProductPower;
     if (updates.coreProductPower !== undefined) dbUpdates.core_product_power = updates.coreProductPower;
     dbUpdates.updated_at = Date.now();
+    dbUpdates.row_version = currentRowVersion + 1;
 
-    const { error } = await supabase.from('businesses').update(dbUpdates).eq('id', id);
+    const { data, error } = await supabase
+      .from('businesses')
+      .update(dbUpdates)
+      .eq('id', id)
+      .eq('row_version', currentRowVersion)
+      .select('*')
+      .maybeSingle();
     if (error) throw error;
+    if (!data) throw buildConflictError('业务定义');
+    return mapBusinessRow(data);
   } catch (e) {
     handleSupabaseError(e);
+    throw e;
   }
 };
 
 export const deleteBusiness = async (id: string): Promise<void> => {
-  if (!isSupabaseConfigured()) return;
+  if (!isSupabaseConfigured()) throw new Error("Supabase not configured")
   try {
     const { error } = await supabase.from('businesses').delete().eq('id', id);
     if (error) throw error;
@@ -332,36 +486,50 @@ export const deleteBusiness = async (id: string): Promise<void> => {
 /**
  * Atomic System Role Operations
  */
-export const addSystemRole = async (role: SystemRole): Promise<void> => {
-  if (!isSupabaseConfigured()) return;
+export const addSystemRole = async (role: SystemRole): Promise<SystemRole> => {
+  if (!isSupabaseConfigured()) throw new Error("Supabase not configured")
   try {
-    const { error } = await supabase.from('system_roles').upsert({
+    const { data, error } = await supabase.from('system_roles').upsert({
       id: role.id, name: role.name, description: role.description || '',
-      permissions: role.permissions || {}
-    });
+      permissions: role.permissions || {}, updated_at: Date.now(), row_version: 0
+    }).select('*').single();
     if (error) throw error;
+    return mapSystemRoleRow(data);
   } catch (e) {
     handleSupabaseError(e);
+    throw e;
   }
 };
 
-export const updateSystemRole = async (id: string, updates: Partial<SystemRole>): Promise<void> => {
-  if (!isSupabaseConfigured()) return;
+export const updateSystemRole = async (id: string, updates: Partial<SystemRole>): Promise<SystemRole> => {
+  if (!isSupabaseConfigured()) throw new Error("Supabase not configured")
   try {
+    const currentRowVersion = normalizeRowVersion(updates.rowVersion);
     const dbUpdates: any = {};
     if (updates.name !== undefined) dbUpdates.name = updates.name;
     if (updates.description !== undefined) dbUpdates.description = updates.description;
     if (updates.permissions !== undefined) dbUpdates.permissions = updates.permissions;
+    dbUpdates.updated_at = Date.now();
+    dbUpdates.row_version = currentRowVersion + 1;
 
-    const { error } = await supabase.from('system_roles').update(dbUpdates).eq('id', id);
+    const { data, error } = await supabase
+      .from('system_roles')
+      .update(dbUpdates)
+      .eq('id', id)
+      .eq('row_version', currentRowVersion)
+      .select('*')
+      .maybeSingle();
     if (error) throw error;
+    if (!data) throw buildConflictError('系统角色');
+    return mapSystemRoleRow(data);
   } catch (e) {
     handleSupabaseError(e);
+    throw e;
   }
 };
 
 export const deleteSystemRole = async (id: string): Promise<void> => {
-  if (!isSupabaseConfigured()) return;
+  if (!isSupabaseConfigured()) throw new Error("Supabase not configured")
   try {
     const { error } = await supabase.from('system_roles').delete().eq('id', id);
     if (error) throw error;
@@ -373,24 +541,28 @@ export const deleteSystemRole = async (id: string): Promise<void> => {
 /**
  * Atomic Process Operations
  */
-export const addProcess = async (process: ProcessDefinition): Promise<void> => {
-  if (!isSupabaseConfigured()) return;
+export const addProcess = async (process: ProcessDefinition): Promise<ProcessDefinition> => {
+  if (!isSupabaseConfigured()) throw new Error("Supabase not configured")
   try {
-    const { error } = await supabase.from('processes').upsert({
+    const { data, error } = await supabase.from('processes').upsert({
       id: process.id, name: process.name, category: process.category, level: process.level,
       version: process.version, is_active: process.isActive, type: process.type, owner: process.owner,
       co_owner: process.coOwner, objective: process.objective, nodes: process.nodes || [],
-      links: process.links || [], history: process.history || [], updated_at: process.updatedAt
-    });
+      links: process.links || [], history: process.history || [], updated_at: process.updatedAt,
+      row_version: 0
+    }).select('*').single();
     if (error) throw error;
+    return mapProcessRow(data);
   } catch (e) {
     handleSupabaseError(e);
+    throw e;
   }
 };
 
-export const updateProcess = async (id: string, updates: Partial<ProcessDefinition>): Promise<void> => {
-  if (!isSupabaseConfigured()) return;
+export const updateProcess = async (id: string, updates: Partial<ProcessDefinition>): Promise<ProcessDefinition> => {
+  if (!isSupabaseConfigured()) throw new Error("Supabase not configured")
   try {
+    const currentRowVersion = normalizeRowVersion(updates.rowVersion);
     const dbUpdates: any = {};
     if (updates.name !== undefined) dbUpdates.name = updates.name;
     if (updates.category !== undefined) dbUpdates.category = updates.category;
@@ -404,17 +576,27 @@ export const updateProcess = async (id: string, updates: Partial<ProcessDefiniti
     if (updates.nodes !== undefined) dbUpdates.nodes = updates.nodes || [];
     if (updates.links !== undefined) dbUpdates.links = updates.links || [];
     if (updates.history !== undefined) dbUpdates.history = updates.history || [];
-    if (updates.updatedAt !== undefined) dbUpdates.updated_at = updates.updatedAt;
+    dbUpdates.updated_at = Date.now();
+    dbUpdates.row_version = currentRowVersion + 1;
 
-    const { error } = await supabase.from('processes').update(dbUpdates).eq('id', id);
+    const { data, error } = await supabase
+      .from('processes')
+      .update(dbUpdates)
+      .eq('id', id)
+      .eq('row_version', currentRowVersion)
+      .select('*')
+      .maybeSingle();
     if (error) throw error;
+    if (!data) throw buildConflictError('流程');
+    return mapProcessRow(data);
   } catch (e) {
     handleSupabaseError(e);
+    throw e;
   }
 };
 
 export const deleteProcess = async (id: string): Promise<void> => {
-  if (!isSupabaseConfigured()) return;
+  if (!isSupabaseConfigured()) throw new Error("Supabase not configured")
   try {
     const { error } = await supabase.from('processes').delete().eq('id', id);
     if (error) throw error;
@@ -426,24 +608,28 @@ export const deleteProcess = async (id: string): Promise<void> => {
 /**
  * Atomic Department Operations
  */
-export const addDepartment = async (dept: Department): Promise<void> => {
-  if (!isSupabaseConfigured()) return;
+export const addDepartment = async (dept: Department): Promise<Department> => {
+  if (!isSupabaseConfigured()) throw new Error("Supabase not configured")
   try {
-    const { error } = await supabase.from('departments').upsert({
+    const { data, error } = await supabase.from('departments').upsert({
       id: dept.id, name: dept.name, manager_name: dept.managerName || null,
       responsibilities: dept.responsibilities || null, roles: dept.roles || [],
       role_members: dept.roleMembers || null, attributes: dept.attributes || null,
-      sub_departments: dept.subDepartments || null, okrs: dept.okrs || null, reviews: null
-    });
+      sub_departments: dept.subDepartments || null, okrs: dept.okrs || null, reviews: null,
+      updated_at: Date.now(), row_version: 0
+    }).select('*').single();
     if (error) throw error;
+    return mapDepartmentRow(data);
   } catch (e) {
     handleSupabaseError(e);
+    throw e;
   }
 };
 
-export const updateDepartment = async (id: string, updates: Partial<Department>): Promise<void> => {
-  if (!isSupabaseConfigured()) return;
+export const updateDepartment = async (id: string, updates: Partial<Department>): Promise<Department> => {
+  if (!isSupabaseConfigured()) throw new Error("Supabase not configured")
   try {
+    const currentRowVersion = normalizeRowVersion(updates.rowVersion);
     const dbUpdates: any = {};
     if (updates.name !== undefined) dbUpdates.name = updates.name;
     if (updates.managerName !== undefined) dbUpdates.manager_name = updates.managerName || null;
@@ -454,16 +640,27 @@ export const updateDepartment = async (id: string, updates: Partial<Department>)
     if (updates.subDepartments !== undefined) dbUpdates.sub_departments = updates.subDepartments || null;
     if (updates.okrs !== undefined) dbUpdates.okrs = updates.okrs || null;
     if (updates.reviews !== undefined) dbUpdates.reviews = updates.reviews || null;
+    dbUpdates.updated_at = Date.now();
+    dbUpdates.row_version = currentRowVersion + 1;
 
-    const { error } = await supabase.from('departments').update(dbUpdates).eq('id', id);
+    const { data, error } = await supabase
+      .from('departments')
+      .update(dbUpdates)
+      .eq('id', id)
+      .eq('row_version', currentRowVersion)
+      .select('*')
+      .maybeSingle();
     if (error) throw error;
+    if (!data) throw buildConflictError('部门');
+    return mapDepartmentRow(data);
   } catch (e) {
     handleSupabaseError(e);
+    throw e;
   }
 };
 
 export const deleteDepartment = async (id: string): Promise<void> => {
-  if (!isSupabaseConfigured()) return;
+  if (!isSupabaseConfigured()) throw new Error("Supabase not configured")
   try {
     const { error } = await supabase.from('departments').delete().eq('id', id);
     if (error) throw error;
@@ -475,24 +672,28 @@ export const deleteDepartment = async (id: string): Promise<void> => {
 /**
  * Atomic User Operations
  */
-export const addUser = async (user: User): Promise<void> => {
-  if (!isSupabaseConfigured()) return;
+export const addUser = async (user: User): Promise<User> => {
+  if (!isSupabaseConfigured()) throw new Error("Supabase not configured")
   try {
-    const { error } = await supabase.from('users').upsert({
+    const { data, error } = await supabase.from('users').upsert({
       id: user.id, username: user.username,
       name: user.name, role: user.role, department_id: user.departmentId || null,
       pad_permissions: user.padPermissions || null, reviews: null,
-      system_role_ids: user.systemRoleIds || null, custom_permissions: user.customPermissions || null
-    });
+      system_role_ids: user.systemRoleIds || null, custom_permissions: user.customPermissions || null,
+      auth_id: user.auth_id || null, updated_at: Date.now(), row_version: 0
+    }).select('*').single();
     if (error) throw error;
+    return mapUserRow(data);
   } catch (e) {
     handleSupabaseError(e);
+    throw e;
   }
 };
 
-export const updateUser = async (id: string, updates: Partial<User>): Promise<void> => {
-  if (!isSupabaseConfigured()) return;
+export const updateUser = async (id: string, updates: Partial<User>): Promise<User> => {
+  if (!isSupabaseConfigured()) throw new Error("Supabase not configured")
   try {
+    const currentRowVersion = normalizeRowVersion(updates.rowVersion);
     const dbUpdates: any = {};
     if (updates.username !== undefined) dbUpdates.username = updates.username;
     if (updates.name !== undefined) dbUpdates.name = updates.name;
@@ -502,16 +703,27 @@ export const updateUser = async (id: string, updates: Partial<User>): Promise<vo
     if (updates.reviews !== undefined) dbUpdates.reviews = updates.reviews || null;
     if (updates.systemRoleIds !== undefined) dbUpdates.system_role_ids = updates.systemRoleIds || null;
     if (updates.customPermissions !== undefined) dbUpdates.custom_permissions = updates.customPermissions || null;
+    dbUpdates.updated_at = Date.now();
+    dbUpdates.row_version = currentRowVersion + 1;
 
-    const { error } = await supabase.from('users').update(dbUpdates).eq('id', id);
+    const { data, error } = await supabase
+      .from('users')
+      .update(dbUpdates)
+      .eq('id', id)
+      .eq('row_version', currentRowVersion)
+      .select('*')
+      .maybeSingle();
     if (error) throw error;
+    if (!data) throw buildConflictError('用户');
+    return mapUserRow(data);
   } catch (e) {
     handleSupabaseError(e);
+    throw e;
   }
 };
 
 export const deleteUser = async (id: string): Promise<void> => {
-  if (!isSupabaseConfigured()) return;
+  if (!isSupabaseConfigured()) throw new Error("Supabase not configured")
   try {
     const { error } = await supabase.from('users').delete().eq('id', id);
     if (error) throw error;
@@ -523,8 +735,8 @@ export const deleteUser = async (id: string): Promise<void> => {
 /**
  * Atomic Task Operations
  */
-export const addTask = async (task: PADEntry): Promise<void> => {
-  if (!isSupabaseConfigured()) return;
+export const addTask = async (task: PADEntry): Promise<PADEntry> => {
+  if (!isSupabaseConfigured()) throw new Error("Supabase not configured")
   try {
     const taskData = {
       id: task.id,
@@ -544,18 +756,23 @@ export const addTask = async (task: PADEntry): Promise<void> => {
       logs: task.logs || [],
       plan: task.plan || null,
       action: task.action || null,
-      deliverable: task.deliverable || null
+      deliverable: task.deliverable || null,
+      updated_at: Date.now(),
+      row_version: 0
     };
-    const { error } = await supabase.from('tasks').upsert(taskData);
+    const { data, error } = await supabase.from('tasks').upsert(taskData).select('*').single();
     if (error) throw error;
+    return mapTaskRow(data);
   } catch (e) {
     handleSupabaseError(e);
+    throw e;
   }
 };
 
-export const updateTask = async (taskId: string, task: Partial<PADEntry>): Promise<void> => {
-  if (!isSupabaseConfigured()) return;
+export const updateTask = async (taskId: string, task: Partial<PADEntry>): Promise<PADEntry> => {
+  if (!isSupabaseConfigured()) throw new Error("Supabase not configured")
   try {
+    const currentRowVersion = normalizeRowVersion(task.rowVersion);
     const taskData: any = {};
     if (task.departmentId !== undefined) taskData.department_id = task.departmentId;
     if (task.title !== undefined) taskData.title = task.title;
@@ -574,16 +791,27 @@ export const updateTask = async (taskId: string, task: Partial<PADEntry>): Promi
     if (task.plan !== undefined) taskData.plan = task.plan;
     if (task.action !== undefined) taskData.action = task.action;
     if (task.deliverable !== undefined) taskData.deliverable = task.deliverable;
+    taskData.updated_at = Date.now();
+    taskData.row_version = currentRowVersion + 1;
 
-    const { error } = await supabase.from('tasks').update(taskData).eq('id', taskId);
+    const { data, error } = await supabase
+      .from('tasks')
+      .update(taskData)
+      .eq('id', taskId)
+      .eq('row_version', currentRowVersion)
+      .select('*')
+      .maybeSingle();
     if (error) throw error;
+    if (!data) throw buildConflictError('任务');
+    return mapTaskRow(data);
   } catch (e) {
     handleSupabaseError(e);
+    throw e;
   }
 };
 
 export const deleteTask = async (taskId: string): Promise<void> => {
-  if (!isSupabaseConfigured()) return;
+  if (!isSupabaseConfigured()) throw new Error("Supabase not configured")
   try {
     const { error } = await supabase.from('tasks').delete().eq('id', taskId);
     if (error) throw error;

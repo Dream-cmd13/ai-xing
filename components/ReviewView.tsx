@@ -105,8 +105,8 @@ const ReviewView: React.FC = () => {
   const saveTask = async (status: string, keepOpen: boolean = false) => {
     const task = { ...taskModal.data, status } as PADEntry;
     try {
-      await updateTask(task.id, task);
-      const updatedTasks = state.tasks.map(t => t.id === task.id ? task : t);
+      const savedTask = await updateTask(task.id, task);
+      const updatedTasks = state.tasks.map(t => t.id === task.id ? savedTask : t);
       setTasks(updatedTasks);
       showNotification('任务已保存', 'success');
       if (!keepOpen) {

@@ -60,6 +60,7 @@ export interface ProcessDefinition {
   links: ProcessLink[];
   history: ProcessHistory[];
   updatedAt: number;
+  rowVersion?: number;
 }
 
 export interface KRReview {
@@ -100,6 +101,8 @@ export interface Department {
   subDepartments?: Department[];
   okrs?: Record<number, Record<string, OKR[]>>; 
   reviews?: Record<string, ReviewEntry[]>; // Key: Cycle ID (e.g., '2025-W01' or '2025-M01')
+  updatedAt?: number;
+  rowVersion?: number;
 }
 
 export interface OKR {
@@ -116,6 +119,7 @@ export interface CompanyStrategy {
   employeeIssues: string;
   companyOKRs: Record<number, OKR[]>; 
   updatedAt?: number;
+  rowVersion?: number;
 }
 
 export interface MenuPermission {
@@ -129,6 +133,8 @@ export interface SystemRole {
   name: string;
   description: string;
   permissions: Record<string, MenuPermission>;
+  updatedAt?: number;
+  rowVersion?: number;
 }
 
 export interface User {
@@ -143,6 +149,8 @@ export interface User {
   reviews?: Record<string, ReviewEntry[]>;
   systemRoleIds?: string[];
   customPermissions?: Record<string, MenuPermission>;
+  updatedAt?: number;
+  rowVersion?: number;
 }
 
 export interface TaskLog {
@@ -174,6 +182,8 @@ export interface PADEntry {
   plan?: string;
   action?: string;
   deliverable?: string;
+  updatedAt?: number;
+  rowVersion?: number;
 }
 
 export interface WeeklyPAD {
@@ -193,6 +203,7 @@ export interface BusinessDefinition {
   surfaceProductPower: string;
   coreProductPower: string;
   updatedAt?: number;
+  rowVersion?: number;
 }
 
 export interface AIModelConfig {
@@ -207,6 +218,8 @@ export interface AIModelConfig {
 export interface AISettings {
   selectedModelId: string;
   configs: AIModelConfig[];
+  updatedAt?: number;
+  rowVersion?: number;
 }
 
 export interface AppState {
@@ -219,4 +232,3 @@ export interface AppState {
   systemRoles?: SystemRole[];
   aiSettings?: AISettings;
 }
-

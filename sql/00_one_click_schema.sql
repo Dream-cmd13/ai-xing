@@ -19,7 +19,9 @@ CREATE TABLE IF NOT EXISTS public.users (
   reviews JSONB,
   system_role_ids JSONB,
   custom_permissions JSONB,
-  auth_id UUID UNIQUE
+  auth_id UUID UNIQUE,
+  updated_at BIGINT NOT NULL DEFAULT 0,
+  row_version BIGINT NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS public.departments (
@@ -32,7 +34,9 @@ CREATE TABLE IF NOT EXISTS public.departments (
   attributes TEXT,
   sub_departments JSONB,
   okrs JSONB,
-  reviews JSONB
+  reviews JSONB,
+  updated_at BIGINT NOT NULL DEFAULT 0,
+  row_version BIGINT NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS public.processes (
@@ -49,7 +53,8 @@ CREATE TABLE IF NOT EXISTS public.processes (
   nodes JSONB,
   links JSONB,
   history JSONB,
-  updated_at BIGINT NOT NULL
+  updated_at BIGINT NOT NULL,
+  row_version BIGINT NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS public.strategy (
@@ -58,7 +63,9 @@ CREATE TABLE IF NOT EXISTS public.strategy (
   vision TEXT,
   customer_issues TEXT,
   employee_issues TEXT,
-  company_okrs JSONB
+  company_okrs JSONB,
+  updated_at BIGINT NOT NULL DEFAULT 0,
+  row_version BIGINT NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS public.businesses (
@@ -69,7 +76,8 @@ CREATE TABLE IF NOT EXISTS public.businesses (
   customer_needs TEXT,
   surface_product_power TEXT,
   core_product_power TEXT,
-  updated_at BIGINT NOT NULL
+  updated_at BIGINT NOT NULL,
+  row_version BIGINT NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS public.tasks (
@@ -92,19 +100,25 @@ CREATE TABLE IF NOT EXISTS public.tasks (
   action TEXT,
   deliverable TEXT,
   pad_id TEXT,
-  version TEXT
+  version TEXT,
+  updated_at BIGINT NOT NULL DEFAULT 0,
+  row_version BIGINT NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS public.system_roles (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL,
   description TEXT,
-  permissions JSONB NOT NULL
+  permissions JSONB NOT NULL,
+  updated_at BIGINT NOT NULL DEFAULT 0,
+  row_version BIGINT NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS public.settings (
   id TEXT PRIMARY KEY DEFAULT 'default',
-  ai_settings JSONB
+  ai_settings JSONB,
+  updated_at BIGINT NOT NULL DEFAULT 0,
+  row_version BIGINT NOT NULL DEFAULT 0
 );
 
 -- =========================
@@ -115,15 +129,25 @@ CREATE TABLE IF NOT EXISTS public.settings (
 ALTER TABLE public.users DROP COLUMN IF EXISTS ent_name;
 ALTER TABLE public.users DROP COLUMN IF EXISTS password;
 ALTER TABLE public.users ADD COLUMN IF NOT EXISTS auth_id UUID UNIQUE;
+ALTER TABLE public.users ADD COLUMN IF NOT EXISTS updated_at BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE public.users ADD COLUMN IF NOT EXISTS row_version BIGINT NOT NULL DEFAULT 0;
 
 ALTER TABLE public.departments DROP COLUMN IF EXISTS ent_name;
+ALTER TABLE public.departments ADD COLUMN IF NOT EXISTS updated_at BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE public.departments ADD COLUMN IF NOT EXISTS row_version BIGINT NOT NULL DEFAULT 0;
 ALTER TABLE public.processes DROP COLUMN IF EXISTS ent_name;
+ALTER TABLE public.processes ADD COLUMN IF NOT EXISTS row_version BIGINT NOT NULL DEFAULT 0;
 ALTER TABLE public.businesses DROP COLUMN IF EXISTS ent_name;
+ALTER TABLE public.businesses ADD COLUMN IF NOT EXISTS row_version BIGINT NOT NULL DEFAULT 0;
 ALTER TABLE public.system_roles DROP COLUMN IF EXISTS ent_name;
+ALTER TABLE public.system_roles ADD COLUMN IF NOT EXISTS updated_at BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE public.system_roles ADD COLUMN IF NOT EXISTS row_version BIGINT NOT NULL DEFAULT 0;
 
 ALTER TABLE public.tasks DROP COLUMN IF EXISTS ent_name;
 ALTER TABLE public.tasks ADD COLUMN IF NOT EXISTS pad_id TEXT;
 ALTER TABLE public.tasks ADD COLUMN IF NOT EXISTS version TEXT;
+ALTER TABLE public.tasks ADD COLUMN IF NOT EXISTS updated_at BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE public.tasks ADD COLUMN IF NOT EXISTS row_version BIGINT NOT NULL DEFAULT 0;
 
 -- Strategy migration from old multi-tenant shape (ent_name as PK) to id='default'
 DO $$
@@ -139,6 +163,8 @@ BEGIN
 END $$;
 
 ALTER TABLE public.strategy ADD COLUMN IF NOT EXISTS id TEXT;
+ALTER TABLE public.strategy ADD COLUMN IF NOT EXISTS updated_at BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE public.strategy ADD COLUMN IF NOT EXISTS row_version BIGINT NOT NULL DEFAULT 0;
 
 UPDATE public.strategy
 SET id = 'default'
@@ -157,6 +183,8 @@ BEGIN
 END $$;
 
 ALTER TABLE public.strategy ALTER COLUMN id SET DEFAULT 'default';
+ALTER TABLE public.settings ADD COLUMN IF NOT EXISTS updated_at BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE public.settings ADD COLUMN IF NOT EXISTS row_version BIGINT NOT NULL DEFAULT 0;
 
 -- Remove old enterprises table if present
 DROP TABLE IF EXISTS public.enterprises CASCADE;
@@ -268,5 +296,51 @@ CREATE POLICY settings_insert ON public.settings FOR INSERT TO authenticated WIT
 CREATE POLICY settings_update ON public.settings FOR UPDATE TO authenticated USING (public.is_admin()) WITH CHECK (public.is_admin());
 CREATE POLICY settings_delete ON public.settings FOR DELETE TO authenticated USING (public.is_admin());
 
-COMMIT;
+-- =========================
+-- 6) Realtime publication
+-- =========================
 
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_publication_tables
+    WHERE pubname = 'supabase_realtime' AND schemaname = 'public' AND tablename = 'tasks'
+  ) THEN
+    ALTER PUBLICATION supabase_realtime ADD TABLE public.tasks;
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_publication_tables
+    WHERE pubname = 'supabase_realtime' AND schemaname = 'public' AND tablename = 'processes'
+  ) THEN
+    ALTER PUBLICATION supabase_realtime ADD TABLE public.processes;
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_publication_tables
+    WHERE pubname = 'supabase_realtime' AND schemaname = 'public' AND tablename = 'departments'
+  ) THEN
+    ALTER PUBLICATION supabase_realtime ADD TABLE public.departments;
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_publication_tables
+    WHERE pubname = 'supabase_realtime' AND schemaname = 'public' AND tablename = 'strategy'
+  ) THEN
+    ALTER PUBLICATION supabase_realtime ADD TABLE public.strategy;
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_publication_tables
+    WHERE pubname = 'supabase_realtime' AND schemaname = 'public' AND tablename = 'businesses'
+  ) THEN
+    ALTER PUBLICATION supabase_realtime ADD TABLE public.businesses;
+  END IF;
+END $$;
+
+COMMIT;

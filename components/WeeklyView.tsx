@@ -259,11 +259,14 @@ const WeeklyView: React.FC = () => {
     if (executeAtomicOperation) {
       executeAtomicOperation(async () => {
         if (taskModal.index !== null) {
-          await updateTask(newData.id, newData);
+          const savedTask = await updateTask(newData.id, newData);
+          setTasks(state.tasks.map(t => t.id === newData.id ? savedTask : t));
         } else {
+          const savedEntries: PADEntry[] = [];
           for (const entry of entriesToAdd) {
-            await addTask(entry);
+            savedEntries.push(await addTask(entry));
           }
+          setTasks([...state.tasks, ...savedEntries]);
         }
       });
     } else {
