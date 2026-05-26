@@ -5,9 +5,9 @@ import { useAppActions } from '@/hooks/useAppActions';
 import { usePermissions } from '@/hooks/usePermissions';
 
 import { AppState, PADEntry, OKR, WeeklyPAD, TaskLog } from '@/types';
-import { addTask, updateTask, deleteTask as deleteDbTask } from '@/data';
 import { Calendar, CheckCircle, Clock, Target, ArrowRight, LayoutDashboard, ListTodo, Briefcase, Flag, AlertCircle, Save, Loader2 } from 'lucide-react';
 import TaskModal from './TaskModal';
+import { ensureTaskTargetWeeks } from '@/utils/taskPeriods.js';
 
 const WorkbenchView: React.FC = () => {
   const state = useAppStore();
@@ -17,12 +17,13 @@ const WorkbenchView: React.FC = () => {
   const actions = useAppActions();
   const permissions = usePermissions('workbench');
   const { 
-    handleSave, executeAtomicOperation, 
+    handleSave, 
     handleSetDepartments: setDepartments, handleSetUsers: setUsers, 
     handleSetSystemRoles: setSystemRoles, handleSetAISettings: setAISettings, 
     handleSetBusinesses: setBusinesses, setProcessData, updateProcessProps, 
     addProcess, deleteProcessFn: deleteProcess, publishProcess, rollbackProcess, 
-    handleSetTasks: setTasks, handleSetStrategy: setStrategy 
+    handleSetTasks: setTasks, handleSetStrategy: setStrategy,
+    persistTaskEntries, persistTaskDeletion
   } = actions;
   const isSaving = state.isSaving;
   const showSaveSuccess = state.showSaveSuccess;
@@ -41,9 +42,9 @@ const WorkbenchView: React.FC = () => {
   const nextWeekId = `${currentYear}-W${(currentWeek + 1).toString().padStart(2, '0')}`;
 
   const [taskModal, setTaskModal] = useState<{ isOpen: boolean, weekId: string | null, data: Partial<PADEntry> }>({ isOpen: false, weekId: null, data: {} });
-  const [notification, setNotification] = useState<{ message: string; type: 'success' | 'info' } | null>(null);
+  const [notification, setNotification] = useState<{ message: string; type: 'success' | 'info' | 'error' } | null>(null);
 
-  const showNotification = (message: string, type: 'success' | 'info' = 'success') => {
+  const showNotification = (message: string, type: 'success' | 'info' | 'error' = 'success') => {
     setNotification({ message, type });
     setTimeout(() => setNotification(null), 3000);
   };
@@ -137,11 +138,13 @@ const WorkbenchView: React.FC = () => {
     });
   };
 
-  const saveTask = (status: string = 'draft', keepOpen: boolean = false) => {
+  const saveTask = async (status: string = 'draft', keepOpen: boolean = false) => {
     if (!taskModal.weekId) return;
 
-    const newTask = { ...taskModal.data, status } as PADEntry;
-    const targetOwnerId = newTask.ownerId || currentUser.id;
+    const newTask = ensureTaskTargetWeeks(
+      { ...taskModal.data, status } as PADEntry,
+      taskModal.weekId
+    ) as PADEntry;
 
     const isNewTask = !state.tasks.some(e => e.id === newTask.id);
 
@@ -177,7 +180,7 @@ const WorkbenchView: React.FC = () => {
       }
     }
 
-    let tasks = [...state.tasks];
+    let nextTasks = [...state.tasks];
     
     // Prepare entries to add (handle multi-line title for new tasks)
     const entriesToAdd: PADEntry[] = [];
@@ -192,27 +195,17 @@ const WorkbenchView: React.FC = () => {
     }
     
     if (isNewTask) {
-      tasks = [...tasks, ...entriesToAdd];
+      nextTasks = [...nextTasks, ...entriesToAdd];
     } else {
-      tasks = tasks.map(t => t.id === newTask.id ? newTask : t);
+      nextTasks = nextTasks.map(t => t.id === newTask.id ? newTask : t);
     }
-    
-    setTasks(tasks);
-    setIsDirty(true);
-    
-    // Immediate save to database using atomic operations
-    executeAtomicOperation(async () => {
-      if (isNewTask) {
-        const savedEntries: PADEntry[] = [];
-        for (const entry of entriesToAdd) {
-          savedEntries.push(await addTask(entry));
-        }
-        setTasks([...state.tasks, ...savedEntries]);
-      } else {
-        const savedTask = await updateTask(newTask.id, newTask);
-        setTasks(state.tasks.map(t => t.id === newTask.id ? savedTask : t));
-      }
-    });
+
+    try {
+      await persistTaskEntries(nextTasks, entriesToAdd, isNewTask ? 'create' : 'update');
+    } catch (error: any) {
+      showNotification(error.message || '任务保存失败', 'error');
+      return;
+    }
     
     if (keepOpen) {
       setTaskModal({ 
@@ -238,20 +231,18 @@ const WorkbenchView: React.FC = () => {
     }
   };
 
-  const deleteTask = () => {
+  const deleteTask = async () => {
     if (!taskModal.data.id) return;
     const taskId = taskModal.data.id;
-    const tasks = state.tasks.filter(t => t.id !== taskId);
-    setTasks(tasks);
-    setIsDirty(true);
-    
-    // Immediate save to database using atomic operations
-    executeAtomicOperation(async () => {
-      await deleteDbTask(taskId);
-    });
-    
-    setTaskModal({ isOpen: false, weekId: null, data: {} });
-    showNotification('任务已删除', 'info');
+    const nextTasks = state.tasks.filter(t => t.id !== taskId);
+
+    try {
+      await persistTaskDeletion(nextTasks, [taskId]);
+      setTaskModal({ isOpen: false, weekId: null, data: {} });
+      showNotification('任务已删除', 'info');
+    } catch (error: any) {
+      showNotification(error.message || '任务删除失败', 'error');
+    }
   };
 
   return (

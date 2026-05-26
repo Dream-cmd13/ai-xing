@@ -5,11 +5,11 @@ import { useAppActions } from '../hooks/useAppActions';
 import { usePermissions } from '../hooks/usePermissions';
 
 import { AppState, Department, User, WeeklyPAD, PADEntry, OKR, TaskLog, MenuPermission } from '../types';
-import { addTask, updateTask, deleteTask as deleteDbTask } from '../data';
 import PeriodAlignmentView from './PeriodAlignmentView';
 import TaskModal from './TaskModal';
 import { Building2, ChevronDown, ChevronRight, LayoutGrid, Plus, X, Calendar, User as UserIcon, Clock, Save, Loader2, CheckCircle, AlertCircle } from 'lucide-react';
 import { getVisibleDepartments } from '../utils/permissions';
+import { ensureTaskTargetWeeks } from '../utils/taskPeriods.js';
 
 
 
@@ -36,12 +36,13 @@ const ExecutionView: React.FC = () => {
   const actions = useAppActions();
   const permissions = usePermissions('execution');
   const { 
-    handleSave, executeAtomicOperation, 
+    handleSave, 
     handleSetDepartments: setDepartments, handleSetUsers: setUsers, 
     handleSetSystemRoles: setSystemRoles, handleSetAISettings: setAISettings, 
     handleSetBusinesses: setBusinesses, setProcessData, updateProcessProps, 
     addProcess, deleteProcessFn: deleteProcess, publishProcess, rollbackProcess, 
-    handleSetTasks: setTasks, handleSetStrategy: setStrategy 
+    handleSetTasks: setTasks, handleSetStrategy: setStrategy,
+    persistTaskEntries, persistTaskDeletion
   } = actions;
   const isSaving = state.isSaving;
   const showSaveSuccess = state.showSaveSuccess;
@@ -57,7 +58,7 @@ const ExecutionView: React.FC = () => {
   const [selectedPeriod, setSelectedPeriod] = useState<string>(currentInfo.q);
   const [taskModal, setTaskModal] = useState<{ isOpen: boolean, weekId: string | null, data: Partial<PADEntry> }>({ isOpen: false, weekId: null, data: {} });
 
-  const [notification, setNotification] = useState<{ message: string; type: 'success' | 'info' } | null>(null);
+  const [notification, setNotification] = useState<{ message: string; type: 'success' | 'info' | 'error' } | null>(null);
 
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 
@@ -79,7 +80,7 @@ const ExecutionView: React.FC = () => {
     return weeks;
   }, [selectedYear, selectedPeriod]);
 
-  const showNotification = (message: string, type: 'success' | 'info' = 'success') => {
+  const showNotification = (message: string, type: 'success' | 'info' | 'error' = 'success') => {
     setNotification({ message, type });
     setTimeout(() => setNotification(null), 3000);
   };
@@ -210,10 +211,13 @@ const ExecutionView: React.FC = () => {
     });
   };
 
-  const saveTask = (status: string = 'draft', keepOpen: boolean = false) => {
+  const saveTask = async (status: string = 'draft', keepOpen: boolean = false) => {
     if (!taskModal.weekId) return;
 
-    const newTask = { ...taskModal.data, status } as PADEntry;
+    const newTask = ensureTaskTargetWeeks(
+      { ...taskModal.data, status } as PADEntry,
+      taskModal.weekId
+    ) as PADEntry;
     const targetOwnerId = newTask.ownerId || currentUser.id;
 
     const isNewTask = !state.tasks.some(e => e.id === newTask.id);
@@ -250,7 +254,7 @@ const ExecutionView: React.FC = () => {
       }
     }
 
-    let tasks = [...state.tasks];
+    let nextTasks = [...state.tasks];
     
     const entriesToAdd: PADEntry[] = [];
     
@@ -264,27 +268,17 @@ const ExecutionView: React.FC = () => {
     }
     
     if (isNewTask) {
-      tasks = [...tasks, ...entriesToAdd];
+      nextTasks = [...nextTasks, ...entriesToAdd];
     } else {
-      tasks = tasks.map(t => t.id === newTask.id ? newTask : t);
+      nextTasks = nextTasks.map(t => t.id === newTask.id ? newTask : t);
     }
-    
-    setTasks(tasks);
-    setIsDirty(true);
-    
-    // Immediate save to database using atomic operations
-    executeAtomicOperation(async () => {
-      if (isNewTask) {
-        const savedEntries: PADEntry[] = [];
-        for (const entry of entriesToAdd) {
-          savedEntries.push(await addTask(entry));
-        }
-        setTasks([...state.tasks, ...savedEntries]);
-      } else {
-        const savedTask = await updateTask(newTask.id, newTask);
-        setTasks(state.tasks.map(t => t.id === newTask.id ? savedTask : t));
-      }
-    });
+
+    try {
+      await persistTaskEntries(nextTasks, entriesToAdd, isNewTask ? 'create' : 'update');
+    } catch (error: any) {
+      showNotification(error.message || '任务保存失败', 'error');
+      return;
+    }
 
     // Show success message with location and week info
     const ownerName = state.users.find(u => u.id === targetOwnerId)?.name || '个人';
@@ -317,20 +311,18 @@ const ExecutionView: React.FC = () => {
     }
   };
 
-  const handleDeleteTask = () => {
+  const handleDeleteTask = async () => {
     if (!taskModal.data.id) return;
     const taskId = taskModal.data.id;
     const updatedTasks = state.tasks.filter(t => t.id !== taskId);
-    setTasks(updatedTasks);
-    setIsDirty(true);
-    
-    // Immediate save to database using atomic operations
-    executeAtomicOperation(async () => {
-      await deleteDbTask(taskId);
-    });
-    
-    setTaskModal({ ...taskModal, isOpen: false });
-    showNotification('任务已删除', 'info');
+
+    try {
+      await persistTaskDeletion(updatedTasks, [taskId]);
+      setTaskModal({ ...taskModal, isOpen: false });
+      showNotification('任务已删除', 'info');
+    } catch (error: any) {
+      showNotification(error.message || '任务删除失败', 'error');
+    }
   };
 
   return (

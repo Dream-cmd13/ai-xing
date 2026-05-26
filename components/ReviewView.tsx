@@ -6,7 +6,6 @@ import { useAppActions } from '../hooks/useAppActions';
 import { usePermissions } from '../hooks/usePermissions';
 
 import { AppState, Department, ReviewEntry, ObjectiveReview, User, PADEntry, MenuPermission, OKR } from '../types';
-import { updateTask, deleteTask as deleteDbTask } from '../data';
 import { Calendar, Building2, ClipboardCheck, Save, CheckCircle, Loader2, Target, TrendingUp, MessageSquare, FileText, AlertCircle, Lock, Download, RefreshCw } from 'lucide-react';
 import TaskModal from './TaskModal';
 import { getVisibleDepartments, canViewTask } from '../utils/permissions';
@@ -28,7 +27,8 @@ const ReviewView: React.FC = () => {
     handleSetSystemRoles: setSystemRoles, handleSetAISettings: setAISettings, 
     handleSetBusinesses: setBusinesses, setProcessData, updateProcessProps, 
     addProcess, deleteProcessFn: deleteProcess, publishProcess, rollbackProcess, 
-    handleSetTasks: setTasks, handleSetStrategy: setStrategy 
+    handleSetTasks: setTasks, handleSetStrategy: setStrategy,
+    persistTaskEntries, persistTaskDeletion
   } = actions;
   const isSaving = state.isSaving;
   const showSaveSuccess = state.showSaveSuccess;
@@ -94,9 +94,8 @@ const ReviewView: React.FC = () => {
   const handleDeleteTask = async () => {
     if (!taskModal.data.id) return;
     try {
-      await deleteDbTask(taskModal.data.id);
       const updatedTasks = state.tasks.filter(t => t.id !== taskModal.data.id);
-      setTasks(updatedTasks);
+      await persistTaskDeletion(updatedTasks, [taskModal.data.id]);
       showNotification('任务已删除', 'info');
       setTaskModal({ ...taskModal, isOpen: false });
     } catch (e: any) {
@@ -107,9 +106,8 @@ const ReviewView: React.FC = () => {
   const saveTask = async (status: string, keepOpen: boolean = false) => {
     const task = { ...taskModal.data, status } as PADEntry;
     try {
-      const savedTask = await updateTask(task.id, task);
-      const updatedTasks = state.tasks.map(t => t.id === task.id ? savedTask : t);
-      setTasks(updatedTasks);
+      const updatedTasks = state.tasks.map(t => t.id === task.id ? task : t);
+      await persistTaskEntries(updatedTasks, [task], 'update');
       showNotification('任务已保存', 'success');
       if (!keepOpen) {
         setTaskModal({ ...taskModal, isOpen: false });

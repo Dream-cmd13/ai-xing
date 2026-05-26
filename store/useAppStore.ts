@@ -12,6 +12,7 @@ interface AppStoreState extends AppState {
   lastSavedProcesses: ProcessDefinition[];
   lastSavedDepartments: Department[];
   lastSavedBusinesses: BusinessDefinition[];
+  lastSavedTasks: PADEntry[];
   lastSavedUsers: User[];
   lastSavedSystemRoles: SystemRole[];
   lastSavedStrategy: CompanyStrategy | null;
@@ -27,6 +28,7 @@ interface AppStoreState extends AppState {
   setLastSavedProcesses: (processes: ProcessDefinition[]) => void;
   setLastSavedDepartments: (departments: Department[]) => void;
   setLastSavedBusinesses: (businesses: BusinessDefinition[]) => void;
+  setLastSavedTasks: (tasks: PADEntry[]) => void;
   setLastSavedUsers: (users: User[]) => void;
   setLastSavedSystemRoles: (roles: SystemRole[]) => void;
   setLastSavedStrategy: (strategy: CompanyStrategy) => void;
@@ -69,6 +71,7 @@ export const useAppStore = create<AppStoreState>((set) => ({
   lastSavedProcesses: [],
   lastSavedDepartments: [],
   lastSavedBusinesses: [],
+  lastSavedTasks: [],
   lastSavedUsers: [],
   lastSavedSystemRoles: [],
   lastSavedStrategy: null,
@@ -90,6 +93,7 @@ export const useAppStore = create<AppStoreState>((set) => ({
   setLastSavedProcesses: (lastSavedProcesses) => set({ lastSavedProcesses }),
   setLastSavedDepartments: (lastSavedDepartments) => set({ lastSavedDepartments }),
   setLastSavedBusinesses: (lastSavedBusinesses) => set({ lastSavedBusinesses }),
+  setLastSavedTasks: (lastSavedTasks) => set({ lastSavedTasks }),
   setLastSavedUsers: (lastSavedUsers) => set({ lastSavedUsers }),
   setLastSavedSystemRoles: (lastSavedSystemRoles) => set({ lastSavedSystemRoles }),
   setLastSavedStrategy: (lastSavedStrategy) => set({ lastSavedStrategy }),

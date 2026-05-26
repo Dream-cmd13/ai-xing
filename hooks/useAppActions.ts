@@ -6,10 +6,12 @@ import {
   deleteProcess as deleteDbProcess, updateStrategy, addBusiness, updateBusiness, deleteBusiness, 
   addUser as addDbUser, updateUser as updateDbUser, deleteUser as deleteDbUser, addSystemRole, 
   updateSystemRole, deleteSystemRole, addDepartment as addDbDepartment, updateDepartment as updateDbDepartment, 
-  deleteDepartment as deleteDbDepartment, saveAISettings
+  deleteDepartment as deleteDbDepartment, saveAISettings, addTask as addDbTask, updateTask as updateDbTask, deleteTask as deleteDbTask
 } from '@/data';
-import { ProcessDefinition, ProcessHistory } from '@/types';
+import { PADEntry, ProcessDefinition, ProcessHistory } from '@/types';
 import { clearPendingMutation, markPendingMutation, normalizeForConflictComparison } from '@/syncConflictGuard';
+import { applyDepartmentPatch, buildDepartmentPatch, hasDepartmentPatchConflict } from '@/utils/departmentSyncState.js';
+import { removeTasksById, upsertTasksById } from '@/utils/taskSyncState.js';
 
 export const useAppActions = () => {
   const store = useAppStore();
@@ -25,6 +27,9 @@ export const useAppActions = () => {
 
   const dirtyProcessIdsRef = useRef<Set<string>>(new Set());
   const deletedProcessIdsRef = useRef<Set<string>>(new Set());
+  const syncStateRef = () => {
+    stateRef.current = useAppStore.getState() as any;
+  };
   useEffect(() => {
     return () => {
       if (saveSuccessTimeoutRef.current) clearTimeout(saveSuccessTimeoutRef.current);
@@ -45,6 +50,108 @@ export const useAppActions = () => {
     } catch (error: any) {
       store.setIsSaving(false);
       store.setBackendError(error.message || "操作失败");
+    }
+  }, [isAuthenticated, store]);
+
+  const showSaveSuccessFeedback = (dirtyStateAfterSuccess: boolean) => {
+    store.setIsSaving(false);
+    store.setIsDirty(dirtyStateAfterSuccess);
+    store.setShowSaveSuccess(true);
+    if (saveSuccessTimeoutRef.current) clearTimeout(saveSuccessTimeoutRef.current);
+    saveSuccessTimeoutRef.current = setTimeout(() => {
+      store.setShowSaveSuccess(false);
+      saveSuccessTimeoutRef.current = null;
+    }, 3000);
+    store.setBackendError(null);
+  };
+
+  const rollbackTaskMutation = (
+    previousTasks: PADEntry[],
+    previousLastSavedTasks: PADEntry[],
+    previousDirtyState: boolean,
+    error: any
+  ) => {
+    store.setState({ tasks: previousTasks });
+    store.setLastSavedTasks(previousLastSavedTasks);
+    store.setIsSaving(false);
+    store.setIsDirty(previousDirtyState);
+    store.setBackendError(error?.message || '任务保存失败');
+    syncStateRef();
+  };
+
+  const persistTaskEntries = useCallback(async (
+    optimisticTasks: PADEntry[],
+    entriesToPersist: PADEntry[],
+    mode: 'create' | 'update'
+  ) => {
+    if (!isAuthenticated) return [];
+
+    const previousTasks = stateRef.current.tasks || [];
+    const previousLastSavedTasks = stateRef.current.lastSavedTasks || [];
+    const previousDirtyState = store.isDirty;
+
+    store.setState({ tasks: optimisticTasks });
+    store.setIsDirty(true);
+    store.setIsSaving(true);
+    syncStateRef();
+
+    try {
+      const savedEntries: PADEntry[] = [];
+      for (const entry of entriesToPersist) {
+        markPendingMutation('tasks', entry.id, entry, entry.rowVersion);
+        try {
+          const savedEntry = mode === 'create'
+            ? await addDbTask(entry)
+            : await updateDbTask(entry.id, entry);
+          savedEntries.push(savedEntry);
+        } catch (error) {
+          clearPendingMutation('tasks', entry.id);
+          throw error;
+        }
+      }
+
+      const currentTasks = (useAppStore.getState() as any).tasks || [];
+      const mergedTasks = upsertTasksById(currentTasks, savedEntries);
+      const mergedLastSavedTasks = upsertTasksById(previousLastSavedTasks, savedEntries);
+
+      store.setState({ tasks: mergedTasks });
+      store.setLastSavedTasks(mergedLastSavedTasks);
+      showSaveSuccessFeedback(previousDirtyState);
+      syncStateRef();
+      return savedEntries;
+    } catch (error: any) {
+      rollbackTaskMutation(previousTasks, previousLastSavedTasks, previousDirtyState, error);
+      throw error;
+    }
+  }, [isAuthenticated, store]);
+
+  const persistTaskDeletion = useCallback(async (
+    optimisticTasks: PADEntry[],
+    taskIds: string[]
+  ) => {
+    if (!isAuthenticated) return;
+
+    const previousTasks = stateRef.current.tasks || [];
+    const previousLastSavedTasks = stateRef.current.lastSavedTasks || [];
+    const previousDirtyState = store.isDirty;
+
+    store.setState({ tasks: optimisticTasks });
+    store.setIsDirty(true);
+    store.setIsSaving(true);
+    syncStateRef();
+
+    try {
+      for (const taskId of taskIds) {
+        await deleteDbTask(taskId);
+      }
+
+      const mergedLastSavedTasks = removeTasksById(previousLastSavedTasks, taskIds);
+      store.setLastSavedTasks(mergedLastSavedTasks);
+      showSaveSuccessFeedback(previousDirtyState);
+      syncStateRef();
+    } catch (error: any) {
+      rollbackTaskMutation(previousTasks, previousLastSavedTasks, previousDirtyState, error);
+      throw error;
     }
   }, [isAuthenticated, store]);
 
@@ -102,12 +209,32 @@ export const useAppActions = () => {
         if (!oldDept) {
           savedDepartments.push(await addDbDepartment(newDept));
         } else if (normalizeForConflictComparison(oldDept) !== normalizeForConflictComparison(newDept)) {
-          markPendingMutation('departments', newDept.id, newDept, newDept.rowVersion);
+          const departmentPatch = buildDepartmentPatch(oldDept, newDept);
+          markPendingMutation('departments', newDept.id, newDept, oldDept.rowVersion);
           try {
-            savedDepartments.push(await updateDbDepartment(newDept.id, newDept));
+            savedDepartments.push(await updateDbDepartment(newDept.id, departmentPatch));
           } catch (error) {
             clearPendingMutation('departments', newDept.id);
-            throw error;
+            const latestDept = (useAppStore.getState() as any).lastSavedDepartments?.find((dept: any) => dept.id === newDept.id);
+            if (!latestDept || hasDepartmentPatchConflict(oldDept, newDept, latestDept)) {
+              throw error;
+            }
+
+            const rebasedDept = applyDepartmentPatch(latestDept, departmentPatch);
+            const retryPatch = buildDepartmentPatch(latestDept, rebasedDept);
+            const retryFields = Object.keys(retryPatch).filter(key => key !== 'rowVersion');
+            if (retryFields.length === 0) {
+              savedDepartments.push(latestDept);
+              continue;
+            }
+
+            markPendingMutation('departments', newDept.id, rebasedDept, latestDept.rowVersion);
+            try {
+              savedDepartments.push(await updateDbDepartment(newDept.id, retryPatch));
+            } catch (retryError) {
+              clearPendingMutation('departments', newDept.id);
+              throw retryError;
+            }
           }
         } else {
           savedDepartments.push(oldDept);
@@ -212,25 +339,25 @@ export const useAppActions = () => {
   const handleSetDepartments = (newDepts: any[]) => {
     store.setDepartments(newDepts);
     store.setIsDirty(true);
-    stateRef.current = useAppStore.getState() as any;
+    syncStateRef();
   };
 
   const handleSetUsers = (newUsers: any[]) => {
     store.setUsers(newUsers);
     store.setIsDirty(true);
-    stateRef.current = useAppStore.getState() as any;
+    syncStateRef();
   };
 
   const handleSetSystemRoles = (newRoles: any[]) => {
     store.setSystemRoles(newRoles);
     store.setIsDirty(true);
-    stateRef.current = useAppStore.getState() as any;
+    syncStateRef();
   };
 
   const handleSetAISettings = (newAISettings: any) => {
     store.setAISettings(newAISettings);
     store.setIsDirty(true);
-    stateRef.current = useAppStore.getState() as any;
+    syncStateRef();
   };
 
   const submitAISettings = async (newAISettings: any) => {
@@ -259,21 +386,21 @@ export const useAppActions = () => {
   const handleSetBusinesses = (businesses: any[]) => {
     store.setBusinesses(businesses);
     store.setIsDirty(true);
-    stateRef.current = useAppStore.getState() as any;
+    syncStateRef();
   };
 
   const setProcessData = (id: string, nodes: any[], links: any[]) => {
     store.updateProcess(id, { nodes, links });
     store.setIsDirty(true);
     dirtyProcessIdsRef.current.add(id);
-    stateRef.current = useAppStore.getState() as any;
+    syncStateRef();
   };
 
   const updateProcessProps = (id: string, props: Partial<ProcessDefinition>) => {
     store.updateProcess(id, props);
     store.setIsDirty(true);
     dirtyProcessIdsRef.current.add(id);
-    stateRef.current = useAppStore.getState() as any;
+    syncStateRef();
   };
 
   const addProcess = (category: any, level: 1 | 2, name: string) => {
@@ -284,7 +411,7 @@ export const useAppActions = () => {
     store.addProcess(newProcess);
     dirtyProcessIdsRef.current.add(newProcess.id);
     store.setIsDirty(true);
-    stateRef.current = useAppStore.getState() as any;
+    syncStateRef();
   };
 
   const deleteProcessFn = (id: string) => {
@@ -292,7 +419,7 @@ export const useAppActions = () => {
     deletedProcessIdsRef.current.add(id);
     dirtyProcessIdsRef.current.delete(id);
     store.setIsDirty(true);
-    stateRef.current = useAppStore.getState() as any;
+    syncStateRef();
   };
 
   const publishProcess = (id: string, version: string) => {
@@ -305,7 +432,7 @@ export const useAppActions = () => {
     store.updateProcess(id, { version, isActive: true, history: newHistory });
     dirtyProcessIdsRef.current.add(id);
     store.setIsDirty(true);
-    stateRef.current = useAppStore.getState() as any;
+    syncStateRef();
   };
 
   const rollbackProcess = (procId: string, historyId: string) => {
@@ -321,18 +448,19 @@ export const useAppActions = () => {
     store.updateProcess(procId, { nodes: newNodes, links: newLinks });
     dirtyProcessIdsRef.current.add(procId);
     store.setIsDirty(true);
-    stateRef.current = useAppStore.getState() as any;
+    syncStateRef();
   };
 
   const handleSetTasks = (newTasks: any[]) => {
     store.setTasks(newTasks);
     store.setIsDirty(true);
+    syncStateRef();
   };
 
   const handleSetStrategy = (strategyPartial: any) => {
     store.setStrategy(strategyPartial);
     store.setIsDirty(true);
-    stateRef.current = useAppStore.getState() as any;
+    syncStateRef();
   };
 
   return {
@@ -352,6 +480,8 @@ export const useAppActions = () => {
     publishProcess,
     rollbackProcess,
     handleSetTasks,
-    handleSetStrategy
+    handleSetStrategy,
+    persistTaskEntries,
+    persistTaskDeletion
   };
 };

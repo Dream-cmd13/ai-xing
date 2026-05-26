@@ -6,7 +6,6 @@ import { useAppActions } from '../hooks/useAppActions';
 import { usePermissions } from '../hooks/usePermissions';
 
 import { AppState, WeeklyPAD, PADEntry, Department, User, OKR, TaskLog, MenuPermission } from '../types';
-import { addTask, updateTask, deleteTask as deleteDbTask } from '../data';
 import TaskModal from './TaskModal';
 import { 
   Calendar as CalendarIcon, Plus, Trash2, CheckCircle, Loader2, 
@@ -14,6 +13,7 @@ import {
   ChevronLeft, ChevronRight, LayoutGrid, Target, Clock, Save, WifiOff, List, X, Lock, MessageSquare, Edit2
 } from 'lucide-react';
 import { getVisibleDepartments, canViewTask } from '../utils/permissions';
+import { ensureTaskTargetWeeks } from '../utils/taskPeriods.js';
 
 
 
@@ -25,12 +25,13 @@ const WeeklyView: React.FC = () => {
   const actions = useAppActions();
   const permissions = usePermissions('execution');
   const { 
-    handleSave, executeAtomicOperation, 
+    handleSave, 
     handleSetDepartments: setDepartments, handleSetUsers: setUsers, 
     handleSetSystemRoles: setSystemRoles, handleSetAISettings: setAISettings, 
     handleSetBusinesses: setBusinesses, setProcessData, updateProcessProps, 
     addProcess, deleteProcessFn: deleteProcess, publishProcess, rollbackProcess, 
-    handleSetTasks: setTasks, handleSetStrategy: setStrategy 
+    handleSetTasks: setTasks, handleSetStrategy: setStrategy,
+    persistTaskEntries, persistTaskDeletion
   } = actions;
   const isSaving = state.isSaving;
   const showSaveSuccess = state.showSaveSuccess;
@@ -69,9 +70,9 @@ const WeeklyView: React.FC = () => {
     return list;
   }, [visibleDepartments]);
 
-  const [notification, setNotification] = useState<{ message: string; type: 'success' | 'info' } | null>(null);
+  const [notification, setNotification] = useState<{ message: string; type: 'success' | 'info' | 'error' } | null>(null);
 
-  const showNotification = (message: string, type: 'success' | 'info' = 'success') => {
+  const showNotification = (message: string, type: 'success' | 'info' | 'error' = 'success') => {
     setNotification({ message, type });
     setTimeout(() => setNotification(null), 3000);
   };
@@ -120,11 +121,12 @@ const WeeklyView: React.FC = () => {
     const taskToDelete = currentTasks[deleteConfirmIndex];
     if (taskToDelete) {
       const newTasks = state.tasks.filter(t => t.id !== taskToDelete.id);
-      setTasks(newTasks);
-      executeAtomicOperation(async () => {
-        await deleteDbTask(taskToDelete.id);
-      });
-      showNotification('任务已删除');
+      try {
+        await persistTaskDeletion(newTasks, [taskToDelete.id]);
+        showNotification('任务已删除');
+      } catch (error: any) {
+        showNotification(error.message || '任务删除失败', 'error');
+      }
     }
     setDeleteConfirmIndex(null);
   };
@@ -168,12 +170,13 @@ const WeeklyView: React.FC = () => {
     if (currentTasks[index]) {
       const taskToDelete = currentTasks[index];
       const newTasks = state.tasks.filter(t => t.id !== taskToDelete.id);
-      setTasks(newTasks);
-      executeAtomicOperation(async () => {
-        await deleteDbTask(taskToDelete.id);
-      });
-      setDeleteConfirmIndex(null);
-      showNotification('任务已从您的计划中移除');
+      try {
+        await persistTaskDeletion(newTasks, [taskToDelete.id]);
+        setDeleteConfirmIndex(null);
+        showNotification('任务已从您的计划中移除');
+      } catch (error: any) {
+        showNotification(error.message || '任务删除失败', 'error');
+      }
     }
   };
 
@@ -181,17 +184,22 @@ const WeeklyView: React.FC = () => {
     if (taskModal.index !== null && currentTasks[taskModal.index]) {
       const taskToDelete = currentTasks[taskModal.index];
       const newTasks = state.tasks.filter(t => t.id !== taskToDelete.id);
-      setTasks(newTasks);
-      executeAtomicOperation(async () => {
-        await deleteDbTask(taskToDelete.id);
-      });
-      showNotification('任务已删除', 'info');
+      try {
+        await persistTaskDeletion(newTasks, [taskToDelete.id]);
+        showNotification('任务已删除', 'info');
+      } catch (error: any) {
+        showNotification(error.message || '任务删除失败', 'error');
+        return;
+      }
     }
     setTaskModal({ ...taskModal, isOpen: false });
   };
 
   const saveTask = async (status: string = 'draft', keepOpen: boolean = false) => {
-    const newData = { ...taskModal.data, status } as PADEntry;
+    const newData = ensureTaskTargetWeeks(
+      { ...taskModal.data, status } as PADEntry,
+      selectedWeek
+    ) as PADEntry;
     
     if (taskModal.index !== null) {
       const oldTask = currentTasks[taskModal.index];
@@ -235,29 +243,20 @@ const WeeklyView: React.FC = () => {
       entriesToAdd.push(newData);
     }
     
-    let tasks = [...state.tasks];
+    let nextTasks = [...state.tasks];
     if (taskModal.index !== null) {
-      tasks = tasks.map(t => t.id === newData.id ? newData : t);
+      nextTasks = nextTasks.map(t => t.id === newData.id ? newData : t);
     } else {
-      tasks = [...tasks, ...entriesToAdd];
+      nextTasks = [...nextTasks, ...entriesToAdd];
     }
-    
-    setTasks(tasks);
-    
-    executeAtomicOperation(async () => {
-      if (taskModal.index !== null) {
-        const savedTask = await updateTask(newData.id, newData);
-        setTasks(state.tasks.map(t => t.id === newData.id ? savedTask : t));
-      } else {
-        const savedEntries: PADEntry[] = [];
-        for (const entry of entriesToAdd) {
-          savedEntries.push(await addTask(entry));
-        }
-        setTasks([...state.tasks, ...savedEntries]);
-      }
-    });
-    
-    showNotification('任务已成功保存');
+
+    try {
+      await persistTaskEntries(nextTasks, entriesToAdd, taskModal.index !== null ? 'update' : 'create');
+      showNotification('任务已成功保存');
+    } catch (error: any) {
+      showNotification(error.message || '任务保存失败', 'error');
+      return;
+    }
 
     if (keepOpen) {
       setTaskModal({ 

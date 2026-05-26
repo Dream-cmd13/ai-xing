@@ -1,11 +1,10 @@
-import React, { useState, useMemo } from 'react';
+﻿import React, { useState, useMemo } from 'react';
 import { useAppStore } from '../store/useAppStore';
 import { useAuthStore } from '../store/useAuthStore';
 import { useAppActions } from '../hooks/useAppActions';
 import { usePermissions } from '../hooks/usePermissions';
 
 import { AppState, WeeklyPAD, PADEntry, User, Department, OKR, TaskLog, MenuPermission } from '../types';
-import { addTask, updateTask, deleteTask as deleteDbTask } from '../data';
 import { 
   LayoutList, CheckCircle, Clock, AlertCircle, User as UserIcon, 
   Building2, Filter, Search, Calendar, Tag, ChevronDown, ChevronRight,
@@ -25,12 +24,13 @@ const TaskCenterView: React.FC = () => {
   const actions = useAppActions();
   const permissions = usePermissions('task-center');
   const { 
-    handleSave, executeAtomicOperation, 
+    handleSave, 
     handleSetDepartments: setDepartments, handleSetUsers: setUsers, 
     handleSetSystemRoles: setSystemRoles, handleSetAISettings: setAISettings, 
     handleSetBusinesses: setBusinesses, setProcessData, updateProcessProps, 
     addProcess, deleteProcessFn: deleteProcess, publishProcess, rollbackProcess, 
-    handleSetTasks: setTasks, handleSetStrategy: setStrategy 
+    handleSetTasks: setTasks, handleSetStrategy: setStrategy,
+    persistTaskEntries, persistTaskDeletion
   } = actions;
   const isSaving = state.isSaving;
   const showSaveSuccess = state.showSaveSuccess;
@@ -55,9 +55,9 @@ const TaskCenterView: React.FC = () => {
   const [priorityFilter, setPriorityFilter] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [taskModal, setTaskModal] = useState<{ isOpen: boolean, weekId: string | null, padId: string | null, data: Partial<PADEntry> }>({ isOpen: false, weekId: null, padId: null, data: {} });
-  const [notification, setNotification] = useState<{ message: string; type: 'success' | 'info' } | null>(null);
+  const [notification, setNotification] = useState<{ message: string; type: 'success' | 'info' | 'error' } | null>(null);
 
-  const showNotification = (message: string, type: 'success' | 'info' = 'success') => {
+  const showNotification = (message: string, type: 'success' | 'info' | 'error' = 'success') => {
     setNotification({ message, type });
     setTimeout(() => setNotification(null), 3000);
   };
@@ -96,13 +96,11 @@ const TaskCenterView: React.FC = () => {
     });
   };
 
-  const saveTask = (status: string = 'draft', keepOpen: boolean = false) => {
+  const saveTask = async (status: string = 'draft', keepOpen: boolean = false) => {
     const newTask = ensureTaskTargetWeeks(
       { ...taskModal.data, status } as PADEntry,
       taskModal.weekId
     ) as PADEntry;
-    const targetOwnerId = newTask.ownerId || currentUser.id;
-
     const isNewTask = !state.tasks.some(e => e.id === newTask.id);
 
     if (!isNewTask) {
@@ -137,10 +135,9 @@ const TaskCenterView: React.FC = () => {
       }
     }
 
-    let tasks = [...state.tasks];
-    
+    let nextTasks = [...state.tasks];
     const entriesToAdd: PADEntry[] = [];
-    
+
     if (isNewTask && newTask.title.includes('\n')) {
       const titles = newTask.title.split('\n').filter(t => t.trim());
       titles.forEach((t, i) => {
@@ -151,67 +148,55 @@ const TaskCenterView: React.FC = () => {
     }
     
     if (isNewTask) {
-      tasks = [...tasks, ...entriesToAdd];
+      nextTasks = [...nextTasks, ...entriesToAdd];
     } else {
-      tasks = tasks.map(t => t.id === newTask.id ? newTask : t);
+      nextTasks = nextTasks.map(t => t.id === newTask.id ? newTask : t);
     }
-    
-    setTasks(tasks);
-    setIsDirty(true);
-    
-    // Immediate save to database using atomic operations
-    executeAtomicOperation(async () => {
-      if (isNewTask) {
-        const savedEntries: PADEntry[] = [];
-        for (const entry of entriesToAdd) {
-          savedEntries.push(await addTask(entry));
-        }
-        setTasks([...state.tasks, ...savedEntries]);
+
+    try {
+      await persistTaskEntries(nextTasks, entriesToAdd, isNewTask ? 'create' : 'update');
+
+      if (keepOpen) {
+        setTaskModal({ 
+          isOpen: true, 
+          weekId: taskModal.weekId, 
+          padId: taskModal.padId,
+          data: { 
+            id: `task-${Date.now()}`,
+            title: '', 
+            status: 'draft',
+            priority: 'medium',
+            ownerId: currentUser.id,
+            departmentId: currentUser.departmentId,
+            visibility: 'public',
+            startDate: Date.now(),
+            dueDate: Date.now() + 86400000,
+            tags: [],
+            participantIds: [],
+            approverIds: []
+          } 
+        });
       } else {
-        const savedTask = await updateTask(newTask.id, newTask);
-        setTasks(state.tasks.map(t => t.id === newTask.id ? savedTask : t));
+        setTaskModal({ isOpen: false, weekId: null, padId: null, data: {} });
       }
-    });
-    
-    if (keepOpen) {
-      setTaskModal({ 
-        isOpen: true, 
-        weekId: taskModal.weekId, 
-        padId: taskModal.padId,
-        data: { 
-          id: `task-${Date.now()}`,
-          title: '', 
-          status: 'draft',
-          priority: 'medium',
-          ownerId: currentUser.id,
-          departmentId: currentUser.departmentId,
-          visibility: 'public',
-          startDate: Date.now(),
-          dueDate: Date.now() + 86400000,
-          tags: [],
-          participantIds: [],
-          approverIds: []
-        } 
-      });
-    } else {
-      setTaskModal({ isOpen: false, weekId: null, padId: null, data: {} });
+      showNotification('任务已保存', 'success');
+    } catch (error: any) {
+      showNotification(error.message || '任务保存失败', 'error');
     }
   };
 
-  const deleteTask = () => {
+  const deleteTask = async () => {
     if (!taskModal.data.id) return;
     const taskId = taskModal.data.id;
-    const tasks = state.tasks.filter(t => t.id !== taskId);
-    setTasks(tasks);
-    setIsDirty(true);
-    
-    // Immediate save to database using atomic operations
-    executeAtomicOperation(async () => {
-      await deleteDbTask(taskId);
-    });
-    
-    setTaskModal({ isOpen: false, weekId: null, padId: null, data: {} });
-    showNotification('任务已删除', 'info');
+    const nextTasks = state.tasks.filter(t => t.id !== taskId);
+
+    try {
+      await persistTaskDeletion(nextTasks, [taskId]);
+      setTaskModal({ isOpen: false, weekId: null, padId: null, data: {} });
+      showNotification('任务已删除', 'info');
+    } catch (error: any) {
+      showNotification(error.message || '任务删除失败', 'error');
+    }
   };
 
   const groupedAvailableKRs = useMemo(() => {

@@ -3,6 +3,7 @@ import { useAppStore } from './store/useAppStore';
 import { supabase } from './supabase';
 import { AppState, CompanyStrategy, BusinessDefinition, Department, ProcessDefinition, PADEntry } from './types';
 import { matchesPendingMutation, normalizeForConflictComparison } from './syncConflictGuard';
+import { getLastSavedTask, hasTaskLocalChanges } from './utils/taskSyncState.js';
 
 const mapPayloadToState = (table: string, data: any) => {
   if (!data) return data;
@@ -119,10 +120,13 @@ export const useRealtimeSync = (
       } else if (table === 'processes') {
         lastSavedItem = store.lastSavedProcesses.find((item: any) => item.id === itemId);
       } else if (table === 'tasks') {
-        lastSavedItem = (store.tasks || []).find((item: any) => item.id === itemId);
+        lastSavedItem = getLastSavedTask(store.lastSavedTasks || [], itemId);
       }
 
       if (!lastSavedItem) return false;
+      if (table === 'tasks') {
+        return hasTaskLocalChanges(currentData, store.lastSavedTasks || [], itemId);
+      }
       return normalizeForConflictComparison(localItem) !== normalizeForConflictComparison(lastSavedItem);
     };
 
@@ -192,6 +196,8 @@ export const useRealtimeSync = (
             newState.lastSavedDepartments = currentData.map(item => item.id === mappedNew.id ? mappedNew : item);
           } else if (table === 'processes') {
             newState.lastSavedProcesses = currentData.map(item => item.id === mappedNew.id ? mappedNew : item);
+          } else if (table === 'tasks') {
+            newState.lastSavedTasks = currentData.map(item => item.id === mappedNew.id ? mappedNew : item);
           }
 
           if (!shouldKeepLocalArray(table, itemId, currentData)) {
@@ -216,6 +222,8 @@ export const useRealtimeSync = (
           newState.lastSavedDepartments = updatedData;
         } else if (table === 'processes') {
           newState.lastSavedProcesses = updatedData;
+        } else if (table === 'tasks') {
+          newState.lastSavedTasks = updatedData;
         }
 
         return newState;
