@@ -104,6 +104,8 @@ const OrgView: React.FC = () => {
 
   const isAdmin = !!currentUser && isAdminUser(currentUser, state.systemRoles || []);
   const canEditDepartmentManager = (department: Department) => isAdmin && canEditDepartment(department);
+  const canManageDepartmentStructure = (department: Department, inheritedPermission = false) =>
+    isAdmin || inheritedPermission || canEditDepartment(department);
 
   const updateDeptRecursive = (depts: Department[], id: string, updater: (d: Department) => Department): Department[] => {
     return depts.map(d => {
@@ -208,8 +210,11 @@ const OrgView: React.FC = () => {
     setPendingDeleteDept(null);
   };
 
-  const renderDeptCard = (d: Department, depth = 0, isLast = false) => {
+  const renderDeptCard = (d: Department, depth = 0, isLast = false, inheritedStructurePermission = false) => {
     if (!matchesSearch(d, searchQuery)) return null;
+
+    const canManageStructure = canManageDepartmentStructure(d, inheritedStructurePermission);
+    const canDeleteDepartmentNode = isAdmin || (canManageStructure && depth > 0);
 
     return (
       <div key={d.id} className="relative w-full">
@@ -231,10 +236,10 @@ const OrgView: React.FC = () => {
               </div>
             </div>
             <div className="flex gap-1">
-                  {isAdmin && (
+                  {canManageStructure && (
                     <button onClick={() => setAddingToId(addingToId === d.id ? null : d.id)} className="p-2 text-slate-400 hover:text-brand-600 hover:bg-brand-50 rounded-xl" title="添加子部门"><Plus size={16}/></button>
                   )}
-                  {isAdmin && (
+                  {canDeleteDepartmentNode && (
                     <button onClick={() => setPendingDeleteDept({id: d.id, name: d.name})} className="p-2 text-slate-200 hover:text-red-500 hover:bg-red-50 rounded-xl"><Trash2 size={16}/></button>
                   )}
             </div>
@@ -391,7 +396,7 @@ const OrgView: React.FC = () => {
         {/* Render Children */}
         {d.subDepartments && d.subDepartments.length > 0 && (
           <div className="ml-8 pl-8 border-l-2 border-slate-200 mt-8 space-y-8 relative">
-             {d.subDepartments.map((sub, idx) => renderDeptCard(sub, depth + 1, idx === d.subDepartments.length - 1))}
+             {d.subDepartments.map((sub, idx) => renderDeptCard(sub, depth + 1, idx === d.subDepartments.length - 1, canManageStructure))}
           </div>
         )}
       </div>

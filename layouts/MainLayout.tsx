@@ -4,6 +4,8 @@ import { useAuthStore } from '../store/useAuthStore';
 import { useAppStore } from '../store/useAppStore';
 import { MENU_GROUPS } from '../constants';
 import { hasPermission as hasMenuPermission } from '../utils/permissions';
+import { updateMyProfileName } from '../data';
+import { supabase } from '../supabase';
 import { 
   ShieldCheck, Settings, LogOut, X, Menu, LayoutDashboard, GitGraph, Target, Building2,
   Calendar, Users, UserCog, ShieldCheck as ShieldCheckIcon, Settings as SettingsIcon,
@@ -26,15 +28,40 @@ const iconMap: Record<string, React.ReactNode> = {
 };
 
 export const MainLayout: React.FC = () => {
-  const { currentUser, logout } = useAuthStore();
-  const { isDirty, isSaving, showSaveSuccess, backendError, systemRoles } = useAppStore();
+  const { currentUser, logout, updateCurrentUser } = useAuthStore();
+  const { isDirty, isSaving, showSaveSuccess, backendError, systemRoles, users, lastSavedUsers } = useAppStore();
   const navigate = useNavigate();
   const location = useLocation();
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(true);
+  const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
+  const [profileName, setProfileName] = useState(currentUser?.name || '');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [profileError, setProfileError] = useState<string | null>(null);
+  const [profileSuccess, setProfileSuccess] = useState<string | null>(null);
+  const [isProfileSaving, setIsProfileSaving] = useState(false);
+  const [isPasswordSaving, setIsPasswordSaving] = useState(false);
 
   const handleLogout = () => {
     logout();
     navigate('/login');
+  };
+
+  const openProfileModal = () => {
+    setProfileName(currentUser?.name || '');
+    setNewPassword('');
+    setConfirmPassword('');
+    setProfileError(null);
+    setProfileSuccess(null);
+    setIsProfileModalOpen(true);
+  };
+
+  const closeProfileModal = () => {
+    setIsProfileModalOpen(false);
+    setProfileError(null);
+    setProfileSuccess(null);
+    setNewPassword('');
+    setConfirmPassword('');
   };
 
   const handleNavigation = (path: string) => {
@@ -52,6 +79,75 @@ export const MainLayout: React.FC = () => {
     if (menuId === 'workbench') return true;
     if (!currentUser) return false;
     return hasMenuPermission(currentUser, systemRoles || [], menuId, 'view');
+  };
+
+  const handleSaveProfileName = async () => {
+    if (!currentUser) return;
+
+    const trimmedName = profileName.trim();
+    if (!trimmedName) {
+      setProfileError('姓名不能为空');
+      setProfileSuccess(null);
+      return;
+    }
+
+    if (trimmedName === currentUser.name) {
+      setProfileSuccess('姓名未发生变化');
+      setProfileError(null);
+      return;
+    }
+
+    setIsProfileSaving(true);
+    setProfileError(null);
+    setProfileSuccess(null);
+    try {
+      const updatedUser = await updateMyProfileName(trimmedName, currentUser.rowVersion);
+      updateCurrentUser(updatedUser);
+      useAppStore.setState({
+        users: users.map((user) => user.id === updatedUser.id ? updatedUser : user),
+        lastSavedUsers: lastSavedUsers.map((user) => user.id === updatedUser.id ? updatedUser : user)
+      });
+      setProfileSuccess('姓名已更新');
+    } catch (error: any) {
+      setProfileError(error.message || '姓名更新失败');
+    } finally {
+      setIsProfileSaving(false);
+    }
+  };
+
+  const handleUpdatePassword = async () => {
+    if (!newPassword) {
+      setProfileError('请输入新密码');
+      setProfileSuccess(null);
+      return;
+    }
+
+    if (newPassword.length < 6) {
+      setProfileError('新密码至少需要 6 位');
+      setProfileSuccess(null);
+      return;
+    }
+
+    if (newPassword !== confirmPassword) {
+      setProfileError('两次输入的密码不一致');
+      setProfileSuccess(null);
+      return;
+    }
+
+    setIsPasswordSaving(true);
+    setProfileError(null);
+    setProfileSuccess(null);
+    try {
+      const { error } = await supabase.auth.updateUser({ password: newPassword });
+      if (error) throw error;
+      setNewPassword('');
+      setConfirmPassword('');
+      setProfileSuccess('密码已更新');
+    } catch (error: any) {
+      setProfileError(error.message || '密码更新失败');
+    } finally {
+      setIsPasswordSaving(false);
+    }
   };
 
   return (
@@ -77,6 +173,9 @@ export const MainLayout: React.FC = () => {
                 <div className="flex items-center gap-2 mt-0.5">
                   <span className="text-[10px] font-black text-brand-400 truncate">{currentUser?.name}</span>
                   <div className="flex gap-1">
+                    <button onClick={openProfileModal} className="p-0.5 hover:bg-slate-700 text-slate-500 hover:text-white rounded transition-colors" title="个人资料">
+                      <Settings size={10} />
+                    </button>
                     <button onClick={handleLogout} className="p-0.5 hover:bg-red-900/30 text-slate-500 hover:text-red-400 rounded transition-colors" title="退出">
                       <LogOut size={10} />
                     </button>
@@ -179,6 +278,86 @@ export const MainLayout: React.FC = () => {
           <Outlet />
         </div>
       </main>
+
+      {isProfileModalOpen && currentUser && (
+        <div className="fixed inset-0 z-[600] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-6">
+          <div className="bg-white rounded-[2.5rem] w-full max-w-lg p-8 shadow-2xl">
+            <div className="flex items-center justify-between mb-6">
+              <div>
+                <h3 className="text-xl font-black text-slate-800">个人资料</h3>
+                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-1">Profile & Password</p>
+              </div>
+              <button onClick={closeProfileModal} className="p-2 hover:bg-slate-100 rounded-full">
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="space-y-6">
+              <div className="rounded-[1.5rem] border border-slate-200 p-5 space-y-4">
+                <div>
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">显示名称</label>
+                  <input
+                    value={profileName}
+                    onChange={(e) => setProfileName(e.target.value)}
+                    className="mt-2 w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold outline-none focus:border-brand-500"
+                    placeholder="请输入姓名"
+                  />
+                </div>
+                <button
+                  onClick={handleSaveProfileName}
+                  disabled={isProfileSaving}
+                  className="w-full py-3 bg-brand-600 text-white rounded-2xl text-xs font-black uppercase tracking-widest disabled:opacity-50 flex items-center justify-center gap-2"
+                >
+                  {isProfileSaving ? <Spinner size={14} className="animate-spin" /> : <Save size={14} />}
+                  保存姓名
+                </button>
+              </div>
+
+              <div className="rounded-[1.5rem] border border-slate-200 p-5 space-y-4">
+                <div>
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">新密码</label>
+                  <input
+                    type="password"
+                    value={newPassword}
+                    onChange={(e) => setNewPassword(e.target.value)}
+                    className="mt-2 w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold outline-none focus:border-brand-500"
+                    placeholder="至少 6 位"
+                  />
+                </div>
+                <div>
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">确认新密码</label>
+                  <input
+                    type="password"
+                    value={confirmPassword}
+                    onChange={(e) => setConfirmPassword(e.target.value)}
+                    className="mt-2 w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold outline-none focus:border-brand-500"
+                    placeholder="再次输入新密码"
+                  />
+                </div>
+                <button
+                  onClick={handleUpdatePassword}
+                  disabled={isPasswordSaving}
+                  className="w-full py-3 bg-slate-900 text-white rounded-2xl text-xs font-black uppercase tracking-widest disabled:opacity-50 flex items-center justify-center gap-2"
+                >
+                  {isPasswordSaving ? <Spinner size={14} className="animate-spin" /> : <Key size={14} />}
+                  更新密码
+                </button>
+              </div>
+
+              {profileError && (
+                <div className="text-sm font-bold text-red-600 bg-red-50 border border-red-100 rounded-2xl px-4 py-3">
+                  {profileError}
+                </div>
+              )}
+              {profileSuccess && (
+                <div className="text-sm font-bold text-emerald-600 bg-emerald-50 border border-emerald-100 rounded-2xl px-4 py-3">
+                  {profileSuccess}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

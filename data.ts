@@ -915,6 +915,25 @@ export const saveUsersAtomically = async (
   }
 };
 
+export const updateMyProfileName = async (
+  name: string,
+  expectedRowVersion?: number
+): Promise<User> => {
+  if (!isSupabaseConfigured()) throw new Error("Supabase not configured");
+  try {
+    const { data, error } = await supabase.rpc('update_my_profile_name', {
+      p_name: name,
+      p_expected_row_version: expectedRowVersion ?? null
+    });
+    if (error) throw error;
+    if (!data) throw new Error('更新个人资料失败');
+    return mapUserRow(data);
+  } catch (e) {
+    handleSupabaseError(e);
+    throw e;
+  }
+};
+
 export const saveSystemRolesAtomically = async (
   nextRoles: SystemRole[],
   previousRoles: SystemRole[]

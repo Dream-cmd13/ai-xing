@@ -419,6 +419,7 @@ CREATE OR REPLACE FUNCTION public.save_departments_atomic(
 )
 RETURNS SETOF public.departments
 LANGUAGE plpgsql
+SECURITY DEFINER
 AS $$
 DECLARE
   next_item JSONB;
@@ -542,10 +543,7 @@ BEGIN
           roles = COALESCE(next_item->'roles', '[]'::jsonb),
           role_members = COALESCE(next_item->'roleMembers', '{}'::jsonb),
           attributes = COALESCE(next_item->>'attributes', ''),
-          sub_departments = CASE
-            WHEN public.is_admin() THEN COALESCE(next_item->'subDepartments', '[]'::jsonb)
-            ELSE COALESCE(previous_item->'subDepartments', '[]'::jsonb)
-          END,
+          sub_departments = COALESCE(next_item->'subDepartments', '[]'::jsonb),
           okrs = COALESCE(next_item->'okrs', '{}'::jsonb),
           reviews = COALESCE(next_item->'reviews', '{}'::jsonb),
           updated_at = FLOOR(EXTRACT(EPOCH FROM clock_timestamp()) * 1000)::BIGINT,
@@ -778,10 +776,7 @@ DECLARE
   expected_row_version BIGINT;
   previous_snapshot JSONB;
   next_snapshot JSONB;
-  current_user_auth_id UUID;
 BEGIN
-  current_user_auth_id := auth.uid();
-
   IF NOT public.is_admin() THEN
     RAISE EXCEPTION '无权限保存用户';
   END IF;
@@ -889,6 +884,48 @@ BEGIN
   SELECT *
   FROM public.users
   ORDER BY id;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.update_my_profile_name(
+  p_name TEXT,
+  p_expected_row_version BIGINT DEFAULT NULL
+)
+RETURNS public.users
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+DECLARE
+  current_auth_id UUID;
+  updated_user public.users;
+BEGIN
+  current_auth_id := auth.uid();
+
+  IF current_auth_id IS NULL THEN
+    RAISE EXCEPTION '未登录，无法修改个人资料';
+  END IF;
+
+  IF COALESCE(BTRIM(p_name), '') = '' THEN
+    RAISE EXCEPTION '姓名不能为空';
+  END IF;
+
+  UPDATE public.users
+  SET
+    name = BTRIM(p_name),
+    updated_at = FLOOR(EXTRACT(EPOCH FROM clock_timestamp()) * 1000)::BIGINT,
+    row_version = row_version + 1
+  WHERE auth_id = current_auth_id
+    AND (
+      p_expected_row_version IS NULL
+      OR row_version = p_expected_row_version
+    )
+  RETURNING * INTO updated_user;
+
+  IF updated_user.id IS NULL THEN
+    RAISE EXCEPTION '个人资料已被其他人修改，请刷新后重试';
+  END IF;
+
+  RETURN updated_user;
 END;
 $$;
 
@@ -1154,16 +1191,16 @@ CREATE POLICY users_select ON public.users FOR SELECT TO authenticated
   );
 CREATE POLICY users_insert ON public.users FOR INSERT TO authenticated WITH CHECK (public.is_admin());
 CREATE POLICY users_update ON public.users FOR UPDATE TO authenticated
-  USING (auth_id = auth.uid() OR public.is_admin())
-  WITH CHECK (auth_id = auth.uid() OR public.is_admin());
+  USING (public.is_admin())
+  WITH CHECK (public.is_admin());
 CREATE POLICY users_delete ON public.users FOR DELETE TO authenticated USING (public.is_admin());
 
 CREATE POLICY departments_select ON public.departments FOR SELECT TO authenticated
   USING (public.current_user_has_department_visibility(id));
 CREATE POLICY departments_insert ON public.departments FOR INSERT TO authenticated WITH CHECK (public.is_admin());
 CREATE POLICY departments_update ON public.departments FOR UPDATE TO authenticated
-  USING (public.is_admin() OR public.is_department_manager(id))
-  WITH CHECK (public.is_admin() OR public.is_department_manager(id));
+  USING (public.is_admin())
+  WITH CHECK (public.is_admin());
 CREATE POLICY departments_delete ON public.departments FOR DELETE TO authenticated USING (public.is_admin());
 
 CREATE POLICY processes_select ON public.processes FOR SELECT TO authenticated
