@@ -408,7 +408,7 @@ const OrgView: React.FC = () => {
                 <h3 className="text-xl font-black">创建根部门</h3>
                 <button onClick={() => setShowAddRootModal(false)} className="p-2 hover:bg-slate-100 rounded-full"><X/></button>
              </div>
-             <p className="text-xs text-slate-400 font-bold mb-6">创建一个新的顶级部门节点。创建后将自动保存。</p>
+             <p className="text-xs text-slate-400 font-bold mb-6">创建一个新的顶级部门节点。创建后请点击页面右上角的保存按钮生效。</p>
              <input autoFocus className="w-full p-4 bg-slate-50 border rounded-2xl mb-6 text-sm font-bold outline-none focus:border-brand-500" placeholder="部门名称..." value={newRootDeptName} onChange={e => setNewRootDeptName(e.target.value)} onKeyDown={e => e.key === 'Enter' && addRootDepartment()} />
              <button onClick={addRootDepartment} className="w-full py-4 bg-brand-600 text-white rounded-2xl font-black uppercase text-xs tracking-widest shadow-xl hover:bg-brand-700 transition-all">
                 立即创建

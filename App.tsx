@@ -5,28 +5,36 @@ import { AppRoutes } from './router/AppRoutes';
 import { UnsavedChangesGuard } from './components/UnsavedChangesGuard';
 import { useAuthStore } from '@/store/useAuthStore';
 import { useAppStore } from '@/store/useAppStore';
-import { getWorkspace } from '@/data';
-import { useRealtimeSync } from '@/useRealtimeSync';
+import { getBootstrapData } from '@/data';
 import { supabase } from '@/supabase';
+
+const DEFAULT_AI_SETTINGS = {
+  selectedModelId: 'gemini',
+  configs: [
+    { id: 'gemini', name: 'Gemini 3 Flash Preview', type: 'gemini' as const, apiKey: 'ENV_KEY' }
+  ]
+};
+
+const DEFAULT_STRATEGY = {
+  mission: '',
+  vision: '',
+  customerIssues: '',
+  employeeIssues: '',
+  companyOKRs: {},
+  rowVersion: 0
+};
 
 const App: React.FC = () => {
   const { isAuthenticated, login } = useAuthStore();
   const { 
     setState, 
     setIsInitialLoadComplete, 
-    isInitialLoadComplete,
-    setLastSavedProcesses, 
-    setLastSavedDepartments, 
-    setLastSavedBusinesses,
-    setLastSavedTasks,
     setLastSavedUsers,
     setLastSavedSystemRoles,
-    setLastSavedStrategy
+    resetDomainLoadState,
+    setDomainLoadState
   } = useAppStore();
 
-  const { isSaving, isDirty } = useAppStore();
-  const isSavingRef = useRef(isSaving);
-  const isDirtyRef = useRef(isDirty);
   const lastProcessedUserIdRef = useRef<string | null>(null);
   const isInitializingRef = useRef(false);
 
@@ -49,11 +57,12 @@ const App: React.FC = () => {
 
         isInitializingRef.current = true;
         setIsInitialLoadComplete(false);
+        resetDomainLoadState();
         try {
-          const workspace = await getWorkspace();
-          if (workspace) {
+          const bootstrapData = await getBootstrapData();
+          if (bootstrapData) {
             // Prefer auth_id mapping, fallback to username for legacy records.
-            const user = workspace.users?.find((u) => {
+            const user = bootstrapData.users?.find((u) => {
               if (u.auth_id === userId) return true;
               if (!accountFromEmail) return false;
               return (u.username || '').toLowerCase() === accountFromEmail;
@@ -74,47 +83,26 @@ const App: React.FC = () => {
 
               lastProcessedUserIdRef.current = userId;
               login(user);
-              const initialProcesses = workspace.processes || [];
-              const initialDepartments = workspace.departments || [];
-              const initialBusinesses = workspace.businesses || [];
-              const initialUsers = workspace.users || [];
-              const initialSystemRoles = workspace.systemRoles || [];
-              const initialTasks = workspace.tasks || [];
-              const initialStrategy = {
-                mission: workspace.strategy?.mission || '',
-                vision: workspace.strategy?.vision || '',
-                customerIssues: workspace.strategy?.customerIssues || '',
-                employeeIssues: workspace.strategy?.employeeIssues || '',
-                companyOKRs: workspace.strategy?.companyOKRs || {},
-                updatedAt: workspace.strategy?.updatedAt,
-                rowVersion: workspace.strategy?.rowVersion || 0
-              };
+              const initialUsers = bootstrapData.users || [];
+              const initialSystemRoles = bootstrapData.systemRoles || [];
               
-              setLastSavedProcesses(initialProcesses);
-              setLastSavedDepartments(initialDepartments);
-              setLastSavedBusinesses(initialBusinesses);
-              setLastSavedTasks(initialTasks);
               setLastSavedUsers(initialUsers);
               setLastSavedSystemRoles(initialSystemRoles);
-              setLastSavedStrategy(initialStrategy);
+              setDomainLoadState('users', { loaded: true, loading: false });
+              setDomainLoadState('systemRoles', { loaded: true, loading: false });
+              setDomainLoadState('aiSettings', { loaded: true, loading: false });
 
               setState({
-                ...workspace,
-                processes: initialProcesses,
-                departments: initialDepartments,
-                businesses: initialBusinesses,
+                processes: [],
+                departments: [],
+                businesses: [],
                 users: initialUsers.length > 0 ? initialUsers : [
                   { id: 'admin-user-id', username: 'admin', name: '系统管理员', role: 'Admin' }
                 ],
                 systemRoles: initialSystemRoles,
-                strategy: initialStrategy,
-                tasks: initialTasks,
-                aiSettings: workspace.aiSettings || {
-                  selectedModelId: 'gemini',
-                  configs: [
-                    { id: 'gemini', name: 'Gemini 3 Flash Preview', type: 'gemini', apiKey: 'ENV_KEY' }
-                  ]
-                }
+                strategy: DEFAULT_STRATEGY,
+                tasks: [],
+                aiSettings: bootstrapData.aiSettings || DEFAULT_AI_SETTINGS
               });
             } else {
               console.warn("User not found in workspace data, auth session will not be activated");
@@ -133,6 +121,29 @@ const App: React.FC = () => {
           // Just clear the local store state
           useAuthStore.setState({ isAuthenticated: false, currentUser: null });
         }
+        resetDomainLoadState();
+        useAppStore.setState({
+          processes: [],
+          departments: [],
+          strategy: DEFAULT_STRATEGY,
+          businesses: [],
+          users: [],
+          tasks: [],
+          systemRoles: [],
+          aiSettings: DEFAULT_AI_SETTINGS,
+          isDirty: false,
+          isSaving: false,
+          showSaveSuccess: false,
+          backendError: null,
+          currentProcessId: null,
+          lastSavedProcesses: [],
+          lastSavedDepartments: [],
+          lastSavedBusinesses: [],
+          lastSavedTasks: [],
+          lastSavedUsers: [],
+          lastSavedSystemRoles: [],
+          lastSavedStrategy: null
+        });
         lastProcessedUserIdRef.current = null;
         setIsInitialLoadComplete(true);
       }
@@ -151,17 +162,7 @@ const App: React.FC = () => {
     return () => {
       subscription.unsubscribe();
     };
-  }, [login, setState, setIsInitialLoadComplete]);
-
-  useEffect(() => {
-    isSavingRef.current = isSaving;
-  }, [isSaving]);
-  
-  useEffect(() => {
-    isDirtyRef.current = isDirty;
-  }, [isDirty]);
-
-  useRealtimeSync(setState, isAuthenticated);
+  }, [login, resetDomainLoadState, setDomainLoadState, setIsInitialLoadComplete, setLastSavedSystemRoles, setLastSavedUsers, setState]);
 
   return (
     <BrowserRouter>

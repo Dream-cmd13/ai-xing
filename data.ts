@@ -159,6 +159,160 @@ const mapTaskRow = (t: any): PADEntry => ({
   rowVersion: normalizeRowVersion(t.row_version)
 });
 
+const USERS_SELECT_FIELDS = 'id,auth_id,username,name,role,department_id,pad_permissions,reviews,system_role_ids,custom_permissions,updated_at,row_version';
+const DEPARTMENTS_SELECT_FIELDS = 'id,name,manager_name,responsibilities,roles,role_members,attributes,sub_departments,okrs,reviews,updated_at,row_version';
+const PROCESSES_SELECT_FIELDS = 'id,name,category,level,version,is_active,type,owner,co_owner,objective,nodes,links,history,updated_at,row_version';
+const STRATEGY_SELECT_FIELDS = 'id,mission,vision,customer_issues,employee_issues,company_okrs,updated_at,row_version';
+const BUSINESSES_SELECT_FIELDS = 'id,name,business_format,customer_persona,customer_needs,surface_product_power,core_product_power,updated_at,row_version';
+const SYSTEM_ROLES_SELECT_FIELDS = 'id,name,description,permissions,updated_at,row_version';
+const TASKS_SELECT_FIELDS = 'id,title,status,priority,owner_id,department_id,visibility,aligned_kr_id,target_weeks,start_date,due_date,tags,participant_ids,approver_ids,logs,plan,action,deliverable,updated_at,row_version';
+
+const isIgnoredNoRowsError = (error: any) => error?.code === 'PGRST116';
+const isIgnoredMissingTableError = (error: any) => error?.code === '42P01';
+
+const buildDefaultStrategy = (): CompanyStrategy => ({
+  mission: '',
+  vision: '',
+  customerIssues: '',
+  employeeIssues: '',
+  companyOKRs: {},
+  rowVersion: 0
+});
+
+const fetchSettingsRow = async () => {
+  const { data, error } = await supabase
+    .from('settings')
+    .select('*')
+    .eq('id', 'default')
+    .maybeSingle();
+
+  if (error && !isIgnoredNoRowsError(error) && !isIgnoredMissingTableError(error)) {
+    throw error;
+  }
+
+  return data;
+};
+
+export const getBootstrapData = async (): Promise<Pick<AppState, 'users' | 'systemRoles' | 'aiSettings'>> => {
+  if (!isSupabaseConfigured()) {
+    throw new Error("Supabase not configured");
+  }
+
+  try {
+    const [usersRes, systemRolesRes, settingsData] = await Promise.all([
+      supabase.from('users').select(USERS_SELECT_FIELDS),
+      supabase.from('system_roles').select(SYSTEM_ROLES_SELECT_FIELDS),
+      fetchSettingsRow()
+    ]);
+
+    const errors = [usersRes.error, systemRolesRes.error].filter((error) => !isIgnoredMissingTableError(error));
+    if (errors.length > 0) {
+      throw errors[0];
+    }
+
+    return {
+      users: (usersRes.data || []).map(mapUserRow),
+      systemRoles: (systemRolesRes.data || []).map(mapSystemRoleRow),
+      aiSettings: mapSettingsRow(settingsData)
+    };
+  } catch (e) {
+    handleSupabaseError(e);
+    throw e;
+  }
+};
+
+export const getUsers = async (): Promise<User[]> => {
+  if (!isSupabaseConfigured()) throw new Error("Supabase not configured");
+  try {
+    const { data, error } = await supabase.from('users').select(USERS_SELECT_FIELDS);
+    if (error && !isIgnoredMissingTableError(error)) throw error;
+    return (data || []).map(mapUserRow);
+  } catch (e) {
+    handleSupabaseError(e);
+    throw e;
+  }
+};
+
+export const getDepartments = async (): Promise<Department[]> => {
+  if (!isSupabaseConfigured()) throw new Error("Supabase not configured");
+  try {
+    const { data, error } = await supabase.from('departments').select(DEPARTMENTS_SELECT_FIELDS);
+    if (error && !isIgnoredMissingTableError(error)) throw error;
+    return (data || []).map(mapDepartmentRow);
+  } catch (e) {
+    handleSupabaseError(e);
+    throw e;
+  }
+};
+
+export const getProcesses = async (): Promise<ProcessDefinition[]> => {
+  if (!isSupabaseConfigured()) throw new Error("Supabase not configured");
+  try {
+    const { data, error } = await supabase.from('processes').select(PROCESSES_SELECT_FIELDS);
+    if (error && !isIgnoredMissingTableError(error)) throw error;
+    return (data || []).map(mapProcessRow);
+  } catch (e) {
+    handleSupabaseError(e);
+    throw e;
+  }
+};
+
+export const getStrategy = async (): Promise<CompanyStrategy> => {
+  if (!isSupabaseConfigured()) throw new Error("Supabase not configured");
+  try {
+    const { data, error } = await supabase
+      .from('strategy')
+      .select(STRATEGY_SELECT_FIELDS)
+      .eq('id', 'default')
+      .maybeSingle();
+
+    if (error && !isIgnoredNoRowsError(error) && !isIgnoredMissingTableError(error)) {
+      throw error;
+    }
+
+    return data ? mapStrategyRow(data) : buildDefaultStrategy();
+  } catch (e) {
+    handleSupabaseError(e);
+    throw e;
+  }
+};
+
+export const getBusinesses = async (): Promise<BusinessDefinition[]> => {
+  if (!isSupabaseConfigured()) throw new Error("Supabase not configured");
+  try {
+    const { data, error } = await supabase.from('businesses').select(BUSINESSES_SELECT_FIELDS);
+    if (error && !isIgnoredMissingTableError(error)) throw error;
+    return (data || []).map(mapBusinessRow);
+  } catch (e) {
+    handleSupabaseError(e);
+    throw e;
+  }
+};
+
+export const getSystemRoles = async (): Promise<SystemRole[]> => {
+  if (!isSupabaseConfigured()) throw new Error("Supabase not configured");
+  try {
+    const { data, error } = await supabase.from('system_roles').select(SYSTEM_ROLES_SELECT_FIELDS);
+    if (error && !isIgnoredMissingTableError(error)) throw error;
+    return (data || []).map(mapSystemRoleRow);
+  } catch (e) {
+    handleSupabaseError(e);
+    throw e;
+  }
+};
+
+export const getTasks = async (): Promise<PADEntry[]> => {
+  if (!isSupabaseConfigured()) throw new Error("Supabase not configured");
+  try {
+    const { data, error } = await supabase.from('tasks').select(TASKS_SELECT_FIELDS);
+    if (error && !isIgnoredMissingTableError(error)) throw error;
+    return (data || []).map(mapTaskRow);
+  } catch (e) {
+    handleSupabaseError(e);
+    throw e;
+  }
+};
+
 export const saveAISettings = async (settings: AISettings): Promise<AISettings> => {
   if (!isSupabaseConfigured()) throw new Error("Supabase not configured");
 
@@ -246,72 +400,35 @@ export const getWorkspace = async (): Promise<AppState | null> => {
   }
 
   try {
-    // Check if settings exists
-    const { data: settingsData, error: settingsError } = await supabase.from('settings').select('*').eq('id', 'default').maybeSingle();
-    
-    if (settingsError && settingsError.code !== 'PGRST116' && settingsError.code !== '42P01') {
-      console.error("Settings fetch error:", settingsError);
-      throw settingsError;
-    }
-
-    // Fetch all related data concurrently
     const [
-      usersRes,
-      departmentsRes,
-      processesRes,
-      strategyRes,
-      businessesRes,
-      systemRolesRes,
-      tasksRes
+      bootstrapData,
+      departments,
+      processes,
+      strategy,
+      businesses,
+      tasks
     ] = await Promise.all([
-      supabase.from('users').select('*'),
-      supabase.from('departments').select('*'),
-      supabase.from('processes').select('*'),
-      supabase.from('strategy').select('*').eq('id', 'default').maybeSingle(),
-      supabase.from('businesses').select('*'),
-      supabase.from('system_roles').select('*'),
-      supabase.from('tasks').select('*')
+      getBootstrapData(),
+      getDepartments(),
+      getProcesses(),
+      getStrategy(),
+      getBusinesses(),
+      getTasks()
     ]);
 
-    const errors = [
-      usersRes.error, departmentsRes.error, processesRes.error,
-      strategyRes.error && strategyRes.error.code !== 'PGRST116' ? strategyRes.error : null,
-      businessesRes.error, systemRolesRes.error, tasksRes.error
-    ].filter(e => e && e.code !== '42P01'); // Ignore undefined_table errors
-
-    if (errors.length > 0) {
-      const firstError = errors[0];
-      console.error("Supabase fetch errors:", errors);
-      
-      if (firstError?.message?.includes('JWT')) {
-        throw new Error("数据库访问权限不足 (JWT 错误)。请检查 RLS 策略或登录状态。");
-      }
-      
-      throw firstError;
-    }
-
-    const users = usersRes.data || [];
-    const departments = departmentsRes.data || [];
-    const processes = processesRes.data || [];
-    const strategy = strategyRes.data;
-    const businesses = businessesRes.data || [];
-    const systemRoles = systemRolesRes.data || [];
-    const tasks = tasksRes.data || [];
-
     const appState: AppState = {
-      users: (users || []).map(mapUserRow),
-      departments: (departments || []).map(mapDepartmentRow),
-      processes: (processes || []).map(mapProcessRow),
-      strategy: strategy ? mapStrategyRow(strategy) : { mission: '', vision: '', customerIssues: '', employeeIssues: '', companyOKRs: {}, rowVersion: 0 },
-      businesses: (businesses || []).map(mapBusinessRow),
-      tasks: (tasks || []).map(mapTaskRow),
-      systemRoles: (systemRoles || []).map(mapSystemRoleRow),
-      aiSettings: mapSettingsRow(settingsData)
+      users: bootstrapData.users,
+      departments,
+      processes,
+      strategy,
+      businesses,
+      tasks,
+      systemRoles: bootstrapData.systemRoles,
+      aiSettings: bootstrapData.aiSettings
     };
 
     return appState;
   } catch (e) {
-    if ((e as any)?.code === 'PGRST116') return null; // No rows for strategy
     handleSupabaseError(e);
     return null;
   }
@@ -819,4 +936,3 @@ export const deleteTask = async (taskId: string): Promise<void> => {
     handleSupabaseError(e);
   }
 };
-

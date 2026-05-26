@@ -1,6 +1,32 @@
 import { create } from 'zustand';
 import { AppState, ProcessDefinition, Department, CompanyStrategy, User, SystemRole, AISettings, PADEntry, BusinessDefinition } from '../types';
 
+export type AppDomainKey =
+  | 'users'
+  | 'systemRoles'
+  | 'aiSettings'
+  | 'departments'
+  | 'processes'
+  | 'strategy'
+  | 'businesses'
+  | 'tasks';
+
+type DomainLoadState = {
+  loaded: boolean;
+  loading: boolean;
+};
+
+const createInitialDomainLoadStatus = (): Record<AppDomainKey, DomainLoadState> => ({
+  users: { loaded: false, loading: false },
+  systemRoles: { loaded: false, loading: false },
+  aiSettings: { loaded: false, loading: false },
+  departments: { loaded: false, loading: false },
+  processes: { loaded: false, loading: false },
+  strategy: { loaded: false, loading: false },
+  businesses: { loaded: false, loading: false },
+  tasks: { loaded: false, loading: false }
+});
+
 interface AppStoreState extends AppState {
   isDirty: boolean;
   isSaving: boolean;
@@ -8,6 +34,7 @@ interface AppStoreState extends AppState {
   backendError: string | null;
   currentProcessId: string | null;
   isInitialLoadComplete: boolean;
+  domainLoadStatus: Record<AppDomainKey, DomainLoadState>;
   
   lastSavedProcesses: ProcessDefinition[];
   lastSavedDepartments: Department[];
@@ -24,6 +51,8 @@ interface AppStoreState extends AppState {
   setBackendError: (error: string | null) => void;
   setCurrentProcessId: (id: string | null) => void;
   setIsInitialLoadComplete: (isComplete: boolean) => void;
+  setDomainLoadState: (domain: AppDomainKey, state: Partial<DomainLoadState>) => void;
+  resetDomainLoadState: () => void;
   
   setLastSavedProcesses: (processes: ProcessDefinition[]) => void;
   setLastSavedDepartments: (departments: Department[]) => void;
@@ -67,6 +96,7 @@ export const useAppStore = create<AppStoreState>((set) => ({
   backendError: null,
   currentProcessId: null,
   isInitialLoadComplete: false,
+  domainLoadStatus: createInitialDomainLoadStatus(),
   
   lastSavedProcesses: [],
   lastSavedDepartments: [],
@@ -89,6 +119,16 @@ export const useAppStore = create<AppStoreState>((set) => ({
   setBackendError: (backendError) => set({ backendError }),
   setCurrentProcessId: (currentProcessId) => set({ currentProcessId }),
   setIsInitialLoadComplete: (isInitialLoadComplete) => set({ isInitialLoadComplete }),
+  setDomainLoadState: (domain, nextState) => set((state) => ({
+    domainLoadStatus: {
+      ...state.domainLoadStatus,
+      [domain]: {
+        ...state.domainLoadStatus[domain],
+        ...nextState
+      }
+    }
+  })),
+  resetDomainLoadState: () => set({ domainLoadStatus: createInitialDomainLoadStatus() }),
   
   setLastSavedProcesses: (lastSavedProcesses) => set({ lastSavedProcesses }),
   setLastSavedDepartments: (lastSavedDepartments) => set({ lastSavedDepartments }),

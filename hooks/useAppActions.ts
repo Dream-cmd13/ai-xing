@@ -2,14 +2,14 @@ import { useCallback, useRef, useEffect } from 'react';
 import { useAppStore } from '@/store/useAppStore';
 import { useAuthStore } from '@/store/useAuthStore';
 import { 
-  getWorkspace, saveWorkspace, addProcess as addDbProcess, updateProcess as updateDbProcess, 
+  getWorkspace, addProcess as addDbProcess, updateProcess as updateDbProcess, 
   deleteProcess as deleteDbProcess, updateStrategy, addBusiness, updateBusiness, deleteBusiness, 
   addUser as addDbUser, updateUser as updateDbUser, deleteUser as deleteDbUser, addSystemRole, 
   updateSystemRole, deleteSystemRole, addDepartment as addDbDepartment, updateDepartment as updateDbDepartment, 
   deleteDepartment as deleteDbDepartment, saveAISettings, addTask as addDbTask, updateTask as updateDbTask, deleteTask as deleteDbTask
 } from '@/data';
 import { PADEntry, ProcessDefinition, ProcessHistory } from '@/types';
-import { clearPendingMutation, markPendingMutation, normalizeForConflictComparison } from '@/syncConflictGuard';
+import { normalizeForConflictComparison } from '@/syncConflictGuard';
 import { applyDepartmentPatch, buildDepartmentPatch, hasDepartmentPatchConflict } from '@/utils/departmentSyncState.js';
 import { removeTasksById, upsertTasksById } from '@/utils/taskSyncState.js';
 
@@ -98,16 +98,10 @@ export const useAppActions = () => {
     try {
       const savedEntries: PADEntry[] = [];
       for (const entry of entriesToPersist) {
-        markPendingMutation('tasks', entry.id, entry, entry.rowVersion);
-        try {
-          const savedEntry = mode === 'create'
-            ? await addDbTask(entry)
-            : await updateDbTask(entry.id, entry);
-          savedEntries.push(savedEntry);
-        } catch (error) {
-          clearPendingMutation('tasks', entry.id);
-          throw error;
-        }
+        const savedEntry = mode === 'create'
+          ? await addDbTask(entry)
+          : await updateDbTask(entry.id, entry);
+        savedEntries.push(savedEntry);
       }
 
       const currentTasks = (useAppStore.getState() as any).tasks || [];
@@ -161,7 +155,6 @@ export const useAppActions = () => {
     
     store.setIsSaving(true);
     try {
-      markPendingMutation('strategy', 'default', stateRef.current.strategy, stateRef.current.strategy?.rowVersion);
       const savedStrategy = await updateStrategy(stateRef.current.strategy);
       store.setState({ strategy: savedStrategy });
 
@@ -180,13 +173,7 @@ export const useAppActions = () => {
           if (isNew) {
             nextProcesses[processIndex] = await addDbProcess(process);
           } else {
-            markPendingMutation('processes', id, process, process.rowVersion);
-            try {
             nextProcesses[processIndex] = await updateDbProcess(id, process);
-            } catch (error) {
-              clearPendingMutation('processes', id);
-              throw error;
-            }
           }
         }
       }
@@ -210,11 +197,9 @@ export const useAppActions = () => {
           savedDepartments.push(await addDbDepartment(newDept));
         } else if (normalizeForConflictComparison(oldDept) !== normalizeForConflictComparison(newDept)) {
           const departmentPatch = buildDepartmentPatch(oldDept, newDept);
-          markPendingMutation('departments', newDept.id, newDept, oldDept.rowVersion);
           try {
             savedDepartments.push(await updateDbDepartment(newDept.id, departmentPatch));
           } catch (error) {
-            clearPendingMutation('departments', newDept.id);
             const latestDept = (useAppStore.getState() as any).lastSavedDepartments?.find((dept: any) => dept.id === newDept.id);
             if (!latestDept || hasDepartmentPatchConflict(oldDept, newDept, latestDept)) {
               throw error;
@@ -228,13 +213,7 @@ export const useAppActions = () => {
               continue;
             }
 
-            markPendingMutation('departments', newDept.id, rebasedDept, latestDept.rowVersion);
-            try {
-              savedDepartments.push(await updateDbDepartment(newDept.id, retryPatch));
-            } catch (retryError) {
-              clearPendingMutation('departments', newDept.id);
-              throw retryError;
-            }
+            savedDepartments.push(await updateDbDepartment(newDept.id, retryPatch));
           }
         } else {
           savedDepartments.push(oldDept);
@@ -282,15 +261,8 @@ export const useAppActions = () => {
       for (const newBiz of newBusinesses) {
         const oldBiz = oldBusinesses.find(b => b.id === newBiz.id);
         if (!oldBiz) savedBusinesses.push(await addBusiness(newBiz));
-        else if (normalizeForConflictComparison(oldBiz) !== normalizeForConflictComparison(newBiz)) {
-          markPendingMutation('businesses', newBiz.id, newBiz, newBiz.rowVersion);
-          try {
-            savedBusinesses.push(await updateBusiness(newBiz.id, newBiz));
-          } catch (error) {
-            clearPendingMutation('businesses', newBiz.id);
-            throw error;
-          }
-        } else savedBusinesses.push(oldBiz);
+        else if (normalizeForConflictComparison(oldBiz) !== normalizeForConflictComparison(newBiz)) savedBusinesses.push(await updateBusiness(newBiz.id, newBiz));
+        else savedBusinesses.push(oldBiz);
       }
       
       store.setState({ 
@@ -315,26 +287,10 @@ export const useAppActions = () => {
       setTimeout(() => store.setShowSaveSuccess(false), 3000);
       store.setBackendError(null);
     } catch (error: any) {
-      clearPendingMutation('strategy', 'default');
       store.setIsSaving(false);
       store.setBackendError(error.message || "保存失败");
     }
   }, [isAuthenticated, store]);
-
-  const saveStateDirectly = async (newState: any) => {
-    if (!isAuthenticated) return;
-    store.setState(newState);
-    store.setIsDirty(true);
-    executeAtomicOperation(async () => {
-      if (newState.aiSettings) {
-        const savedSettings = await saveAISettings(newState.aiSettings);
-        store.setState({ aiSettings: savedSettings });
-      } else {
-        await saveWorkspace(newState);
-      }
-      store.setIsDirty(false);
-    });
-  };
 
   const handleSetDepartments = (newDepts: any[]) => {
     store.setDepartments(newDepts);
@@ -368,7 +324,6 @@ export const useAppActions = () => {
         ...stateRef.current.aiSettings,
         ...newAISettings
       };
-      markPendingMutation('settings', 'default', nextSettings, stateRef.current.aiSettings?.rowVersion);
       const savedSettings = await saveAISettings(nextSettings);
       store.setState({ aiSettings: savedSettings });
       store.setBackendError(null);
@@ -376,7 +331,6 @@ export const useAppActions = () => {
       store.setShowSaveSuccess(true);
       setTimeout(() => store.setShowSaveSuccess(false), 3000);
     } catch (error: any) {
-      clearPendingMutation('settings', 'default');
       store.setBackendError(error.message || '保存系统设置失败');
     } finally {
       store.setIsSaving(false);
@@ -465,7 +419,6 @@ export const useAppActions = () => {
 
   return {
     handleSave,
-    saveStateDirectly,
     executeAtomicOperation,
     handleSetDepartments,
     handleSetUsers,
