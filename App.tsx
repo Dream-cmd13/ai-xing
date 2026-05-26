@@ -18,6 +18,7 @@ const App: React.FC = () => {
     setLastSavedProcesses, 
     setLastSavedDepartments, 
     setLastSavedBusinesses,
+    setLastSavedTasks,
     setLastSavedUsers,
     setLastSavedSystemRoles,
     setLastSavedStrategy
@@ -78,6 +79,7 @@ const App: React.FC = () => {
               const initialBusinesses = workspace.businesses || [];
               const initialUsers = workspace.users || [];
               const initialSystemRoles = workspace.systemRoles || [];
+              const initialTasks = workspace.tasks || [];
               const initialStrategy = {
                 mission: workspace.strategy?.mission || '',
                 vision: workspace.strategy?.vision || '',
@@ -91,6 +93,7 @@ const App: React.FC = () => {
               setLastSavedProcesses(initialProcesses);
               setLastSavedDepartments(initialDepartments);
               setLastSavedBusinesses(initialBusinesses);
+              setLastSavedTasks(initialTasks);
               setLastSavedUsers(initialUsers);
               setLastSavedSystemRoles(initialSystemRoles);
               setLastSavedStrategy(initialStrategy);
@@ -105,7 +108,7 @@ const App: React.FC = () => {
                 ],
                 systemRoles: initialSystemRoles,
                 strategy: initialStrategy,
-                tasks: workspace.tasks || [],
+                tasks: initialTasks,
                 aiSettings: workspace.aiSettings || {
                   selectedModelId: 'gemini',
                   configs: [
