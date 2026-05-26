@@ -56,7 +56,7 @@ const ExecutionView: React.FC = () => {
   const [selectedDeptId, setSelectedDeptId] = useState<string | null>(currentUser.departmentId || null);
   const [selectedYear, setSelectedYear] = useState<number>(currentInfo.year);
   const [selectedPeriod, setSelectedPeriod] = useState<string>(currentInfo.q);
-  const [taskModal, setTaskModal] = useState<{ isOpen: boolean, weekId: string | null, data: Partial<PADEntry> }>({ isOpen: false, weekId: null, data: {} });
+  const [taskModal, setTaskModal] = useState<{ isOpen: boolean, weekId: string | null, mode: 'create' | 'edit', data: Partial<PADEntry> }>({ isOpen: false, weekId: null, mode: 'create', data: {} });
 
   const [notification, setNotification] = useState<{ message: string; type: 'success' | 'info' | 'error' } | null>(null);
 
@@ -160,6 +160,7 @@ const ExecutionView: React.FC = () => {
     setTaskModal({
       isOpen: true,
       weekId,
+      mode: 'create',
       data: {
         id: `task-${Date.now()}`,
         title: '',
@@ -207,6 +208,7 @@ const ExecutionView: React.FC = () => {
     setTaskModal({
       isOpen: true,
       weekId,
+      mode: 'edit',
       data: task
     });
   };
@@ -290,6 +292,7 @@ const ExecutionView: React.FC = () => {
       setTaskModal({ 
         isOpen: true, 
         weekId: taskModal.weekId, 
+          mode: 'create',
         data: { 
           id: `task-${Date.now()}`,
           title: '', 
@@ -307,7 +310,7 @@ const ExecutionView: React.FC = () => {
         } 
       });
     } else {
-      setTaskModal({ isOpen: false, weekId: null, data: {} });
+        setTaskModal({ isOpen: false, weekId: null, mode: 'create', data: {} });
     }
   };
 
@@ -443,8 +446,8 @@ const ExecutionView: React.FC = () => {
         users={state.users}
         departments={state.departments}
         groupedAvailableKRs={groupedAvailableKRs}
-        isEditing={!!taskModal.data.id && !taskModal.data.id.startsWith('task-')} // Simple check, or rely on logic
-        readOnly={taskModal.data.id?.startsWith('task-') ? !permissions.create : !permissions.update}
+        mode={taskModal.mode}
+        readOnly={taskModal.mode === 'create' ? !permissions.create : !permissions.update}
         periodWeeks={periodWeeks}
       />
     </div>

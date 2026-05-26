@@ -14,7 +14,7 @@ interface TaskModalProps {
   users: User[];
   departments?: Department[];
   groupedAvailableKRs: { label: string, options: { id: string, name: string }[] }[];
-  isEditing: boolean;
+  mode: 'create' | 'edit';
   readOnly?: boolean;
   periodWeeks?: { id: string, label: string }[];
   aiSettings?: AISettings;
@@ -30,7 +30,7 @@ const TaskModal: React.FC<TaskModalProps> = ({
   users,
   departments = [],
   groupedAvailableKRs,
-  isEditing,
+  mode,
   readOnly = false,
   periodWeeks = [],
   aiSettings
@@ -65,6 +65,7 @@ const TaskModal: React.FC<TaskModalProps> = ({
   };
 
   if (!isOpen) return null;
+  const isEditing = mode === 'edit';
 
   const handleSave = (status: string, keepOpen?: boolean) => {
     // Validation

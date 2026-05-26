@@ -131,12 +131,13 @@ const WeeklyView: React.FC = () => {
     setDeleteConfirmIndex(null);
   };
 
-  const [taskModal, setTaskModal] = useState<{ isOpen: boolean, index: number | null, data: Partial<PADEntry> }>({ isOpen: false, index: null, data: {} });
+  const [taskModal, setTaskModal] = useState<{ isOpen: boolean, index: number | null, mode: 'create' | 'edit', data: Partial<PADEntry> }>({ isOpen: false, index: null, mode: 'create', data: {} });
 
   const handleAddTask = () => {
     setTaskModal({ 
       isOpen: true, 
       index: null, 
+      mode: 'create',
       data: { 
         id: `task-${Date.now()}`,
         title: '', 
@@ -161,6 +162,7 @@ const WeeklyView: React.FC = () => {
       setTaskModal({ 
         isOpen: true, 
         index, 
+        mode: 'edit',
         data: { ...task } 
       });
     }
@@ -522,8 +524,8 @@ const WeeklyView: React.FC = () => {
         users={state.users}
         departments={state.departments}
         groupedAvailableKRs={groupedAvailableKRs}
-        isEditing={taskModal.index !== null}
-        readOnly={taskModal.index === null ? !permissions.create : (!permissions.update || selectedOwnerId !== currentUser.id)}
+        mode={taskModal.mode}
+        readOnly={taskModal.mode === 'create' ? !permissions.create : (!permissions.update || selectedOwnerId !== currentUser.id)}
         aiSettings={state.aiSettings}
       />
 

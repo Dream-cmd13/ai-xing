@@ -41,7 +41,7 @@ const WorkbenchView: React.FC = () => {
   const weekId = `${currentYear}-W${currentWeek.toString().padStart(2, '0')}`;
   const nextWeekId = `${currentYear}-W${(currentWeek + 1).toString().padStart(2, '0')}`;
 
-  const [taskModal, setTaskModal] = useState<{ isOpen: boolean, weekId: string | null, data: Partial<PADEntry> }>({ isOpen: false, weekId: null, data: {} });
+  const [taskModal, setTaskModal] = useState<{ isOpen: boolean, weekId: string | null, mode: 'create' | 'edit', data: Partial<PADEntry> }>({ isOpen: false, weekId: null, mode: 'create', data: {} });
   const [notification, setNotification] = useState<{ message: string; type: 'success' | 'info' | 'error' } | null>(null);
 
   const showNotification = (message: string, type: 'success' | 'info' | 'error' = 'success') => {
@@ -134,6 +134,7 @@ const WorkbenchView: React.FC = () => {
     setTaskModal({
       isOpen: true,
       weekId: weekIdFromTask,
+      mode: 'edit',
       data: task
     });
   };
@@ -211,6 +212,7 @@ const WorkbenchView: React.FC = () => {
       setTaskModal({ 
         isOpen: true, 
         weekId: taskModal.weekId, 
+          mode: 'create',
         data: { 
           id: `task-${Date.now()}`,
           title: '', 
@@ -227,7 +229,7 @@ const WorkbenchView: React.FC = () => {
         } 
       });
     } else {
-      setTaskModal({ isOpen: false, weekId: null, data: {} });
+        setTaskModal({ isOpen: false, weekId: null, mode: 'create', data: {} });
     }
   };
 
@@ -238,7 +240,7 @@ const WorkbenchView: React.FC = () => {
 
     try {
       await persistTaskDeletion(nextTasks, [taskId]);
-      setTaskModal({ isOpen: false, weekId: null, data: {} });
+      setTaskModal({ isOpen: false, weekId: null, mode: 'create', data: {} });
       showNotification('任务已删除', 'info');
     } catch (error: any) {
       showNotification(error.message || '任务删除失败', 'error');
@@ -346,7 +348,7 @@ const WorkbenchView: React.FC = () => {
         users={state.users}
         departments={state.departments}
         groupedAvailableKRs={groupedAvailableKRs}
-        isEditing={true}
+        mode={taskModal.mode}
         aiSettings={state.aiSettings}
       />
     </div>

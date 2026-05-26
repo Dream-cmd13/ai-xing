@@ -68,7 +68,7 @@ const ReviewView: React.FC = () => {
   const [okrReviews, setOkrReviews] = useState<Record<string, ObjectiveReview>>({});
   const [reviewSubTab, setReviewSubTab] = useState<'tasks' | 'okrs'>('tasks');
 
-  const [taskModal, setTaskModal] = useState<{ isOpen: boolean, weekId: string | null, data: Partial<PADEntry> }>({ isOpen: false, weekId: null, data: {} });
+  const [taskModal, setTaskModal] = useState<{ isOpen: boolean, weekId: string | null, mode: 'create' | 'edit', data: Partial<PADEntry> }>({ isOpen: false, weekId: null, mode: 'edit', data: {} });
   const [notification, setNotification] = useState<{ message: string; type: 'success' | 'info' | 'error' } | null>(null);
 
   const showNotification = (message: string, type: 'success' | 'info' | 'error' = 'success') => {
@@ -129,6 +129,7 @@ const ReviewView: React.FC = () => {
     setTaskModal({
       isOpen: true,
       weekId,
+      mode: 'edit',
       data: task
     });
   };
@@ -744,7 +745,7 @@ const ReviewView: React.FC = () => {
         users={state.users}
         departments={state.departments}
         groupedAvailableKRs={groupedAvailableKRs}
-        isEditing={!!taskModal.data.id}
+        mode={taskModal.mode}
         readOnly={false}
       />
     </div>

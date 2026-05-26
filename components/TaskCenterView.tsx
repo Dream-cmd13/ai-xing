@@ -54,7 +54,7 @@ const TaskCenterView: React.FC = () => {
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [priorityFilter, setPriorityFilter] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState<string>('');
-  const [taskModal, setTaskModal] = useState<{ isOpen: boolean, weekId: string | null, padId: string | null, data: Partial<PADEntry> }>({ isOpen: false, weekId: null, padId: null, data: {} });
+  const [taskModal, setTaskModal] = useState<{ isOpen: boolean, weekId: string | null, padId: string | null, mode: 'create' | 'edit', data: Partial<PADEntry> }>({ isOpen: false, weekId: null, padId: null, mode: 'create', data: {} });
   const [notification, setNotification] = useState<{ message: string; type: 'success' | 'info' | 'error' } | null>(null);
 
   const showNotification = (message: string, type: 'success' | 'info' | 'error' = 'success') => {
@@ -92,6 +92,7 @@ const TaskCenterView: React.FC = () => {
       isOpen: true,
       weekId,
       padId: padId,
+      mode: 'edit',
       data: task
     });
   };
@@ -161,6 +162,7 @@ const TaskCenterView: React.FC = () => {
           isOpen: true, 
           weekId: taskModal.weekId, 
           padId: taskModal.padId,
+          mode: 'create',
           data: { 
             id: `task-${Date.now()}`,
             title: '', 
@@ -177,7 +179,7 @@ const TaskCenterView: React.FC = () => {
           } 
         });
       } else {
-        setTaskModal({ isOpen: false, weekId: null, padId: null, data: {} });
+        setTaskModal({ isOpen: false, weekId: null, padId: null, mode: 'create', data: {} });
       }
       showNotification('任务已保存', 'success');
     } catch (error: any) {
@@ -192,7 +194,7 @@ const TaskCenterView: React.FC = () => {
 
     try {
       await persistTaskDeletion(nextTasks, [taskId]);
-      setTaskModal({ isOpen: false, weekId: null, padId: null, data: {} });
+      setTaskModal({ isOpen: false, weekId: null, padId: null, mode: 'create', data: {} });
       showNotification('任务已删除', 'info');
     } catch (error: any) {
       showNotification(error.message || '任务删除失败', 'error');
@@ -401,7 +403,8 @@ const TaskCenterView: React.FC = () => {
                 onClick={() => setTaskModal({ 
                   isOpen: true, 
                   weekId: currentWeekId, 
-                  padId: null, 
+                  padId: null,
+                  mode: 'create',
                   data: {
                     id: `task-${Date.now()}`,
                     title: '',
@@ -583,7 +586,7 @@ const TaskCenterView: React.FC = () => {
         users={users}
         departments={departments}
         groupedAvailableKRs={groupedAvailableKRs}
-        isEditing={true}
+        mode={taskModal.mode}
         readOnly={!permissions.update}
         aiSettings={state.aiSettings}
       />
