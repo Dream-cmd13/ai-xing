@@ -47,6 +47,8 @@ export interface ProcessHistory {
 
 export interface ProcessDefinition {
   id: string;
+  departmentId?: string;
+  createdBy?: string;
   name: string;
   category: ProcessCategory;
   level: 1 | 2;

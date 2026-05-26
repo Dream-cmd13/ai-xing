@@ -35,6 +35,15 @@ export const canManageTask = (task: PADEntry, currentUser: User, systemRoles: Sy
   return task.createdBy === currentUser.id;
 };
 
+export const canManageProcess = (
+  process: { createdBy?: string },
+  currentUser: User,
+  systemRoles: SystemRole[] = []
+): boolean => {
+  if (hasAdminAccess(currentUser, systemRoles)) return true;
+  return process.createdBy === currentUser.id;
+};
+
 export const hasPermission = (
   user: User,
   systemRoles: SystemRole[],

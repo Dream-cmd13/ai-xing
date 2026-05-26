@@ -12,6 +12,7 @@ import {
   ArrowUpRight, CheckCircle2, Settings, History, Send, Info, User, Users, Target, RotateCcw, Layout,
   GitMerge, PlayCircle, StopCircle, Save, WifiOff, CheckCircle, Clock, AlertTriangle, Check, Lock, Loader2, Search
 } from 'lucide-react';
+import { canManageProcess } from '../utils/permissions';
 
 
 
@@ -137,6 +138,18 @@ const ProcessView: React.FC = () => {
   const [confirmDeleteAssetId, setConfirmDeleteAssetId] = useState<string | null>(null);
 
   const currentProcess = useMemo(() => processes.find(p => p.id === currentProcessId), [processes, currentProcessId]);
+  const canCreateProcess = permissions.create && !!currentUser;
+  const canEditCurrentProcess = useMemo(() => {
+    if (!currentUser || !currentProcess) return false;
+    return permissions.update && canManageProcess(currentProcess, currentUser, state.systemRoles || []);
+  }, [currentProcess, currentUser, permissions.update, state.systemRoles]);
+  const canSaveProcessChanges = !!currentUser && (permissions.update || permissions.create);
+  const canManageProcessEntry = useCallback((processId: string) => {
+    if (!currentUser) return false;
+    const targetProcess = processes.find((process) => process.id === processId);
+    if (!targetProcess) return false;
+    return permissions.update && canManageProcess(targetProcess, currentUser, state.systemRoles || []);
+  }, [currentUser, permissions.update, processes, state.systemRoles]);
 
   const availableRoles = useMemo(() => {
     const roles: string[] = [];
@@ -337,7 +350,7 @@ const ProcessView: React.FC = () => {
           </div>
           <button 
             onClick={() => handleSave(['processes'])} 
-            disabled={isSaving} 
+            disabled={isSaving || !canSaveProcessChanges} 
             className={`px-6 py-2.5 rounded-xl text-xs font-black uppercase flex items-center gap-2 transition-all shadow-md ${showSaveSuccess ? 'bg-emerald-50 text-emerald-600' : isDirty ? 'bg-brand-600 text-white hover:bg-brand-700 shadow-brand-100' : 'bg-slate-100 text-slate-400 cursor-default'}`}
           >
             {isSaving ? <Loader2 className="animate-spin" size={16}/> : showSaveSuccess ? <CheckCircle size={16}/> : <Save size={16} />} 
@@ -350,7 +363,7 @@ const ProcessView: React.FC = () => {
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-4">
                 <h2 className="text-sm font-black text-brand-600 uppercase tracking-widest border-l-4 border-brand-600 pl-4 py-1">{cat}</h2>
-                {permissions.create && (
+                {canCreateProcess && (
             <button onClick={() => setShowNewModal({ category: cat, level: 2 })} className="flex items-center gap-1 text-xs font-bold text-slate-400 hover:text-brand-600 transition-all bg-slate-100 hover:bg-brand-50 px-3 py-1.5 rounded-full">创建二级流程 <Plus size={14}/></button>
           )}
               </div>
@@ -369,7 +382,7 @@ const ProcessView: React.FC = () => {
                       <Clock size={12} className="text-slate-300"/> 
                       {formatTime(entry.updatedAt)}
                     </span>
-                    {permissions.update && !entry.isVirtualSub && (
+                    {canManageProcessEntry(entry.rootId) && !entry.isVirtualSub && (
                       <Trash2 
                         onClick={(e) => { e.stopPropagation(); setConfirmDeleteAssetId(entry.id); }} 
                         className="h-4 w-4 opacity-0 group-hover:opacity-100 text-red-400 hover:text-red-600 transition-all"
@@ -378,7 +391,7 @@ const ProcessView: React.FC = () => {
                   </div>
                 </div>
               ))}
-              {permissions.create ? (
+              {canCreateProcess ? (
                 <button onClick={() => setShowNewModal({ category: cat, level: 1 })} className="border-2 border-dashed border-slate-200 rounded-[2rem] p-8 text-slate-400 hover:text-brand-600 hover:border-brand-300 hover:bg-brand-50 transition-all font-black uppercase text-sm tracking-widest flex flex-col items-center justify-center gap-3 min-h-[160px]"><Plus size={28}/> 创建一级流程</button>
               ) : (
                 <div className="border-2 border-dashed border-slate-100 rounded-[2rem] p-8 text-slate-300 font-black uppercase text-sm tracking-widest flex flex-col items-center justify-center gap-3 min-h-[160px]">
@@ -438,10 +451,10 @@ const ProcessView: React.FC = () => {
            <button onClick={() => setShowHistory(true)} className="p-2.5 text-slate-400 hover:text-brand-600 hover:bg-slate-50 rounded-xl transition-all" title="发布记录"><History size={18}/></button>
            <button onClick={() => setShowSettings(true)} className="p-2.5 text-slate-400 hover:text-brand-600 hover:bg-slate-50 rounded-xl transition-all" title="属性设置"><Settings size={18}/></button>
            <div className="hidden md:block w-px h-4 bg-slate-200 mx-2"></div>
-           <button onClick={() => handleSave(['processes'])} disabled={isSaving || backendError} className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase flex items-center gap-2 transition-all ${showSaveSuccess ? 'bg-emerald-50 text-emerald-600' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'} ${backendError ? 'opacity-50 cursor-not-allowed' : ''}`}>
+           <button onClick={() => handleSave(['processes'])} disabled={isSaving || backendError || !canEditCurrentProcess} className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase flex items-center gap-2 transition-all ${showSaveSuccess ? 'bg-emerald-50 text-emerald-600' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'} ${(backendError || !canEditCurrentProcess) ? 'opacity-50 cursor-not-allowed' : ''}`}>
              {showSaveSuccess ? <CheckCircle size={14}/> : (backendError ? <WifiOff size={14}/> : <Save size={14} />)} 保存
            </button>
-           <button onClick={() => setShowPublishModal(true)} className="px-4 py-2 bg-slate-900 text-white rounded-xl text-[10px] font-black uppercase tracking-widest flex items-center gap-2 hover:bg-brand-600 transition-all"><Send size={14}/> 发布生效</button>
+           <button disabled={!canEditCurrentProcess} onClick={() => setShowPublishModal(true)} className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest flex items-center gap-2 transition-all ${canEditCurrentProcess ? 'bg-slate-900 text-white hover:bg-brand-600' : 'bg-slate-200 text-slate-400 cursor-not-allowed'}`}><Send size={14}/> 发布生效</button>
         </div>
       </div>
       
@@ -453,7 +466,7 @@ const ProcessView: React.FC = () => {
              { type: 'decision', label: '分支', icon: <GitMerge size={20} className="text-amber-500"/> },
              { type: 'end', label: '结束', icon: <StopCircle size={20} className="text-slate-900"/> }
            ].map(item => (
-            <button key={item.type} disabled={!permissions.update} onClick={() => {
+            <button key={item.type} disabled={!canEditCurrentProcess} onClick={() => {
               const newNode: ProcessNode = { 
                 id: `node-${Date.now()}`, 
                 label: item.type === 'start' ? '开始' : item.type === 'end' ? '结束' : item.type === 'decision' ? '条件判断' : '新环节', 
@@ -528,8 +541,8 @@ const ProcessView: React.FC = () => {
               <div className="space-y-4">
                 <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest">基础设置</label>
                 <div className="flex gap-2">
-                  <IMEInput className="flex-1 p-3 bg-slate-50 border rounded-xl text-xs font-bold outline-none focus:border-brand-500 disabled:opacity-50" value={selectedNode.label || ''} disabled={!permissions.update} onChange={e => updateNode(selectedNode.id, { label: e.target.value })} />
-                  {permissions.update && (
+                  <IMEInput className="flex-1 p-3 bg-slate-50 border rounded-xl text-xs font-bold outline-none focus:border-brand-500 disabled:opacity-50" value={selectedNode.label || ''} disabled={!canEditCurrentProcess} onChange={e => updateNode(selectedNode.id, { label: e.target.value })} />
+                  {canEditCurrentProcess && (
                     <button 
                       onClick={(e) => { e.stopPropagation(); setConfirmDeleteNode(true); }} 
                       className="p-3 bg-red-50 text-red-500 rounded-xl hover:bg-red-100 transition-colors shadow-sm" 
@@ -546,8 +559,8 @@ const ProcessView: React.FC = () => {
                   <div className="space-y-4 relative">
                     <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest">执行角色 (岗位)</label>
                     <div
-                      className={`w-full p-3 bg-slate-50 border rounded-xl min-h-[42px] transition-all flex items-center justify-between gap-2 ${permissions.update ? 'cursor-pointer hover:border-brand-300' : 'opacity-50 cursor-not-allowed'}`}
-                      onClick={() => permissions.update && setShowOwnerRoleDropdown(!showOwnerRoleDropdown)}
+                      className={`w-full p-3 bg-slate-50 border rounded-xl min-h-[42px] transition-all flex items-center justify-between gap-2 ${canEditCurrentProcess ? 'cursor-pointer hover:border-brand-300' : 'opacity-50 cursor-not-allowed'}`}
+                      onClick={() => canEditCurrentProcess && setShowOwnerRoleDropdown(!showOwnerRoleDropdown)}
                     >
                       {selectedNode.sipoc.ownerRole ? (
                         <span className="text-xs font-bold text-slate-700">{selectedNode.sipoc.ownerRole}</span>
@@ -661,25 +674,25 @@ const ProcessView: React.FC = () => {
               {selectedNode.type === 'decision' && (
                 <div className="space-y-4">
                   <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest">判断逻辑描述</label>
-                  <IMETextarea className="w-full p-4 bg-amber-50 border-2 border-amber-200 rounded-2xl text-xs font-bold outline-none resize-none h-32 shadow-inner" placeholder="描述判断依据..." value={selectedNode.decisionDescription || ''} onChange={e => updateNode(selectedNode.id, { decisionDescription: e.target.value })} />
+                  <IMETextarea disabled={!canEditCurrentProcess} className="w-full p-4 bg-amber-50 border-2 border-amber-200 rounded-2xl text-xs font-bold outline-none resize-none h-32 shadow-inner disabled:opacity-50" placeholder="描述判断依据..." value={selectedNode.decisionDescription || ''} onChange={e => updateNode(selectedNode.id, { decisionDescription: e.target.value })} />
                 </div>
               )}
 
               {selectedNode.type === 'process' && (
                 <>
                   <div className="p-4 bg-slate-900 rounded-2xl text-white space-y-4">
-                     <div className="flex justify-between items-center"><span className="text-[9px] font-black text-brand-400 uppercase">子流程嵌套</span><label className="scale-75 cursor-pointer inline-flex items-center"><input type="checkbox" checked={!!selectedNode.isSubProcess} onChange={e=>updateNode(selectedNode.id, {isSubProcess: e.target.checked})} className="sr-only peer"/><div className="w-11 h-6 bg-slate-700 rounded-full peer peer-checked:bg-brand-500 after:content-[''] after:absolute after:top-0.5 after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:after:translate-x-full"></div></label></div>
+                     <div className="flex justify-between items-center"><span className="text-[9px] font-black text-brand-400 uppercase">子流程嵌套</span><label className={`scale-75 inline-flex items-center ${canEditCurrentProcess ? 'cursor-pointer' : 'opacity-50 cursor-not-allowed'}`}><input type="checkbox" disabled={!canEditCurrentProcess} checked={!!selectedNode.isSubProcess} onChange={e=>updateNode(selectedNode.id, {isSubProcess: e.target.checked})} className="sr-only peer"/><div className="w-11 h-6 bg-slate-700 rounded-full peer peer-checked:bg-brand-500 after:content-[''] after:absolute after:top-0.5 after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:after:translate-x-full"></div></label></div>
                      {selectedNode.isSubProcess && <button onClick={() => setSubProcessPath([...subProcessPath, selectedNode])} className="w-full py-2 bg-white/10 rounded-xl text-[9px] font-black uppercase tracking-widest flex items-center justify-center gap-1">展开细化流程 <ArrowUpRight size={14}/></button>}
                   </div>
                   <div className="space-y-3">
                     <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest">SIPOC 要素控制</label>
                     <div className="grid grid-cols-1 gap-3">
-                        <DetailedSipocCard title="S - 来源" items={selectedNode.sipoc.source || []} onClick={() => setEditModal({ nodeId: selectedNode.id, field: 'source', title: 'S - 来源对象' })} />
-                        <DetailedSipocCard title="I - 输入" items={selectedNode.sipoc.inputs || []} onClick={() => setEditModal({ nodeId: selectedNode.id, field: 'inputs', title: 'I - 输入要素' })} />
-                        <DetailedSipocCard title="O - 输出" items={selectedNode.sipoc.outputs || []} onClick={() => setEditModal({ nodeId: selectedNode.id, field: 'outputs', title: 'O - 输出产物' })} />
-                        <DetailedSipocCard title="C - 输出对象" items={selectedNode.sipoc.customers || []} onClick={() => setEditModal({ nodeId: selectedNode.id, field: 'customers', title: 'C - 输出对象' })} />
+                        <DetailedSipocCard title="S - 来源" items={selectedNode.sipoc.source || []} onClick={() => canEditCurrentProcess && setEditModal({ nodeId: selectedNode.id, field: 'source', title: 'S - 来源对象' })} />
+                        <DetailedSipocCard title="I - 输入" items={selectedNode.sipoc.inputs || []} onClick={() => canEditCurrentProcess && setEditModal({ nodeId: selectedNode.id, field: 'inputs', title: 'I - 输入要素' })} />
+                        <DetailedSipocCard title="O - 输出" items={selectedNode.sipoc.outputs || []} onClick={() => canEditCurrentProcess && setEditModal({ nodeId: selectedNode.id, field: 'outputs', title: 'O - 输出产物' })} />
+                        <DetailedSipocCard title="C - 输出对象" items={selectedNode.sipoc.customers || []} onClick={() => canEditCurrentProcess && setEditModal({ nodeId: selectedNode.id, field: 'customers', title: 'C - 输出对象' })} />
                     </div>
-                    <div onClick={() => setEditModal({ nodeId: selectedNode.id, field: 'standard', title: 'P - 作业标准' })} className="p-4 bg-slate-50 border rounded-2xl cursor-pointer hover:border-brand-300 transition-all">
+                    <div onClick={() => canEditCurrentProcess && setEditModal({ nodeId: selectedNode.id, field: 'standard', title: 'P - 作业标准' })} className={`p-4 bg-slate-50 border rounded-2xl transition-all ${canEditCurrentProcess ? 'cursor-pointer hover:border-brand-300' : 'opacity-70 cursor-default'}`}>
                       <div className="flex items-center justify-between gap-3">
                         <span className="text-[9px] font-black text-slate-400 uppercase">P - 作业标准</span>
                         <span className="text-[9px] font-black text-brand-600">{selectedNode.sipoc.standard ? '已填写' : '待填写'}</span>
@@ -697,9 +710,10 @@ const ProcessView: React.FC = () => {
                       const linked = currentContext.links.some(l => l.from === selectedNode.id && l.to === n.id);
                       return (
                         <div key={n.id} onClick={() => {
+                          if (!canEditCurrentProcess) return;
                           const newLinks = linked ? currentContext.links.filter(l => !(l.from === selectedNode.id && l.to === n.id)) : [...currentContext.links, { id: `link-${Date.now()}`, from: selectedNode.id, to: n.id }];
                           updateCurrentData(currentContext.nodes, newLinks);
-                        }} className={`flex justify-between items-center p-2 rounded-lg border text-[10px] font-bold cursor-pointer transition-all ${linked ? 'bg-brand-50 border-brand-200 text-brand-700' : 'bg-white hover:border-slate-300 shadow-sm'}`}>
+                        }} className={`flex justify-between items-center p-2 rounded-lg border text-[10px] font-bold transition-all ${canEditCurrentProcess ? 'cursor-pointer' : 'opacity-70 cursor-default'} ${linked ? 'bg-brand-50 border-brand-200 text-brand-700' : 'bg-white hover:border-slate-300 shadow-sm'}`}>
                           {n.label} <Plus size={12} className={linked ? 'rotate-45' : ''}/>
                         </div>
                       );
@@ -721,7 +735,7 @@ const ProcessView: React.FC = () => {
              <div className="space-y-5">
                 <div className="space-y-2">
                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-2"><Layout size={12}/> 流程资产名称</label>
-                   <IMEInput className="w-full p-4 bg-slate-50 border rounded-2xl text-xs font-bold outline-none focus:border-brand-500" value={(subProcessPath.length === 0 ? (activeContainer as ProcessDefinition)?.name : (activeContainer as ProcessNode)?.label) || ''} onChange={e => {
+                   <IMEInput disabled={!canEditCurrentProcess} className="w-full p-4 bg-slate-50 border rounded-2xl text-xs font-bold outline-none focus:border-brand-500 disabled:opacity-50" value={(subProcessPath.length === 0 ? (activeContainer as ProcessDefinition)?.name : (activeContainer as ProcessNode)?.label) || ''} onChange={e => {
                      if (subProcessPath.length === 0) {
                        updateProcessProps(currentProcessId!, { name: e.target.value });
                      } else {
@@ -731,7 +745,7 @@ const ProcessView: React.FC = () => {
                 </div>
                 <div className="space-y-2">
                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-2"><User size={12}/> 主责任人</label>
-                   <select className="w-full p-4 bg-slate-50 border rounded-2xl text-xs font-bold outline-none focus:border-brand-500 appearance-none" value={activeContainer?.owner || ''} onChange={e=>updateContainerProps({ owner: e.target.value })}>
+                   <select disabled={!canEditCurrentProcess} className="w-full p-4 bg-slate-50 border rounded-2xl text-xs font-bold outline-none focus:border-brand-500 appearance-none disabled:opacity-50" value={activeContainer?.owner || ''} onChange={e=>updateContainerProps({ owner: e.target.value })}>
                      <option value="">选择主导负责人...</option>
                      {users.map(u => (
                        <option key={u.id} value={u.name}>{u.name}</option>
@@ -740,7 +754,7 @@ const ProcessView: React.FC = () => {
                 </div>
                 <div className="space-y-2">
                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-2"><Users size={12}/> 辅助责任人</label>
-                   <select className="w-full p-4 bg-slate-50 border rounded-2xl text-xs font-bold outline-none focus:border-brand-500 appearance-none" value={activeContainer?.coOwner || ''} onChange={e=>updateContainerProps({ coOwner: e.target.value })}>
+                   <select disabled={!canEditCurrentProcess} className="w-full p-4 bg-slate-50 border rounded-2xl text-xs font-bold outline-none focus:border-brand-500 appearance-none disabled:opacity-50" value={activeContainer?.coOwner || ''} onChange={e=>updateContainerProps({ coOwner: e.target.value })}>
                      <option value="">选择辅助参与人...</option>
                      {users.map(u => (
                        <option key={u.id} value={u.name}>{u.name}</option>
@@ -749,7 +763,7 @@ const ProcessView: React.FC = () => {
                 </div>
                 <div className="space-y-2">
                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-2"><Target size={12}/> 流程目标 (Objective)</label>
-                   <IMETextarea className="w-full p-4 bg-slate-50 border rounded-2xl text-xs font-bold outline-none focus:border-brand-500 h-24 resize-none shadow-inner" value={activeContainer?.objective || ''} onChange={e=>updateContainerProps({ objective: e.target.value })} placeholder="定义流程的核心产出目标与业务价值..."/>
+                   <IMETextarea disabled={!canEditCurrentProcess} className="w-full p-4 bg-slate-50 border rounded-2xl text-xs font-bold outline-none focus:border-brand-500 h-24 resize-none shadow-inner disabled:opacity-50" value={activeContainer?.objective || ''} onChange={e=>updateContainerProps({ objective: e.target.value })} placeholder="定义流程的核心产出目标与业务价值..."/>
                 </div>
              </div>
              <button onClick={() => setShowSettings(false)} className="w-full mt-10 py-4 bg-slate-900 text-white rounded-2xl font-black uppercase text-xs tracking-widest shadow-xl">保存资产属性</button>
@@ -830,7 +844,7 @@ const ProcessView: React.FC = () => {
             />
             <div className="flex gap-4">
               <button onClick={() => setShowPublishModal(false)} className="flex-1 py-4 font-bold text-slate-500">取消</button>
-              <button onClick={async () => { publishProcess(currentProcessId!, publishVersion); setShowPublishModal(false); setPublishVersion(''); }} className="flex-1 py-4 bg-brand-600 text-white rounded-2xl font-black shadow-lg">确认发布</button>
+              <button disabled={!canEditCurrentProcess} onClick={async () => { publishProcess(currentProcessId!, publishVersion); setShowPublishModal(false); setPublishVersion(''); }} className={`flex-1 py-4 rounded-2xl font-black shadow-lg ${canEditCurrentProcess ? 'bg-brand-600 text-white' : 'bg-slate-200 text-slate-400 cursor-not-allowed shadow-none'}`}>确认发布</button>
             </div>
           </div>
         </div>
@@ -853,7 +867,7 @@ const ProcessView: React.FC = () => {
                       <div className="flex items-center gap-2"><span className="text-xs font-black bg-slate-900 text-white px-2 py-0.5 rounded">{h.version}</span><span className="text-[10px] text-slate-400 font-bold">{formatTime(h.publishedAt)}</span></div>
                       <p className="text-[10px] font-black text-slate-500 mt-1 uppercase tracking-widest">发布人: {h.publishedBy}</p>
                     </div>
-                    <button onClick={() => { rollbackProcess(currentProcess!.id, h.id); setShowHistory(false); }} className="opacity-0 group-hover:opacity-100 p-2 bg-brand-50 text-brand-600 rounded-xl text-[10px] font-black uppercase flex items-center gap-1 transition-all"><RotateCcw size={12}/> 回滚</button>
+                    <button disabled={!canEditCurrentProcess} onClick={() => { rollbackProcess(currentProcess!.id, h.id); setShowHistory(false); }} className={`opacity-0 group-hover:opacity-100 p-2 rounded-xl text-[10px] font-black uppercase flex items-center gap-1 transition-all ${canEditCurrentProcess ? 'bg-brand-50 text-brand-600' : 'bg-slate-100 text-slate-300 cursor-not-allowed'}`}><RotateCcw size={12}/> 回滚</button>
                   </div>
                 ))
               )}

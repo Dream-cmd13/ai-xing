@@ -229,8 +229,22 @@ export const useAppActions = () => {
 
   const addProcess = (category: any, level: 1 | 2, name: string) => {
     const newProcess: ProcessDefinition = {
-      id: `proc-${Date.now()}`, name, category, level, version: 'Draft', isActive: false, type: category === '辅助体系' ? 'auxiliary' : 'main',
-      owner: '', coOwner: '', objective: '', nodes: [], links: [], history: [], updatedAt: Date.now()
+      id: `proc-${Date.now()}`,
+      departmentId: currentUser?.departmentId,
+      createdBy: currentUser?.id,
+      name,
+      category,
+      level,
+      version: 'Draft',
+      isActive: false,
+      type: category === '辅助体系' ? 'auxiliary' : 'main',
+      owner: '',
+      coOwner: '',
+      objective: '',
+      nodes: [],
+      links: [],
+      history: [],
+      updatedAt: Date.now()
     };
     store.addProcess(newProcess);
     dirtyProcessIdsRef.current.add(newProcess.id);

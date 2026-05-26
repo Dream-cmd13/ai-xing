@@ -97,6 +97,8 @@ const mapDepartmentRow = (d: any): Department => {
 
 const mapProcessRow = (p: any): ProcessDefinition => ({
   id: p.id,
+  departmentId: p.department_id ?? undefined,
+  createdBy: p.created_by ?? undefined,
   name: p.name,
   category: p.category,
   level: p.level,
@@ -170,7 +172,7 @@ const mapTaskRow = (t: any): PADEntry => ({
 
 const USERS_SELECT_FIELDS = 'id,auth_id,username,name,role,department_id,pad_permissions,reviews,system_role_ids,custom_permissions,updated_at,row_version';
 const DEPARTMENTS_SELECT_FIELDS = 'id,name,manager_name,responsibilities,roles,role_members,attributes,sub_departments,okrs,reviews,updated_at,row_version';
-const PROCESSES_SELECT_FIELDS = 'id,name,category,level,version,is_active,type,owner,co_owner,objective,nodes,links,history,updated_at,row_version';
+const PROCESSES_SELECT_FIELDS = 'id,department_id,created_by,name,category,level,version,is_active,type,owner,co_owner,objective,nodes,links,history,updated_at,row_version';
 const STRATEGY_SELECT_FIELDS = 'id,mission,vision,customer_issues,employee_issues,company_okrs,updated_at,row_version';
 const BUSINESSES_SELECT_FIELDS = 'id,name,business_format,customer_persona,customer_needs,surface_product_power,core_product_power,updated_at,row_version';
 const SYSTEM_ROLES_SELECT_FIELDS = 'id,name,description,permissions,updated_at,row_version';
@@ -707,7 +709,8 @@ export const addProcess = async (process: ProcessDefinition): Promise<ProcessDef
   if (!isSupabaseConfigured()) throw new Error("Supabase not configured")
   try {
     const { data, error } = await supabase.from('processes').insert({
-      id: process.id, name: process.name, category: process.category, level: process.level,
+      id: process.id, department_id: process.departmentId || null, created_by: process.createdBy || null,
+      name: process.name, category: process.category, level: process.level,
       version: process.version, is_active: process.isActive, type: process.type, owner: process.owner,
       co_owner: process.coOwner, objective: process.objective, nodes: process.nodes || [],
       links: process.links || [], history: process.history || [], updated_at: process.updatedAt,
@@ -727,6 +730,8 @@ export const updateProcess = async (id: string, updates: Partial<ProcessDefiniti
   try {
     const currentRowVersion = normalizeRowVersion(updates.rowVersion);
     const dbUpdates: any = {};
+    if (updates.departmentId !== undefined) dbUpdates.department_id = updates.departmentId || null;
+    if (updates.createdBy !== undefined) dbUpdates.created_by = updates.createdBy || null;
     if (updates.name !== undefined) dbUpdates.name = updates.name;
     if (updates.category !== undefined) dbUpdates.category = updates.category;
     if (updates.level !== undefined) dbUpdates.level = updates.level;
