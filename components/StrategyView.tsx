@@ -79,6 +79,7 @@ const StrategyView: React.FC = () => {
   const isSaving = state.isSaving;
   const showSaveSuccess = state.showSaveSuccess;
   const isDirty = state.isDirty;
+  const dirtyDomains = state.dirtyDomains;
   const setIsDirty = state.setIsDirty;
   const backendError = state.backendError;
   const currentProcessId = state.currentProcessId;
@@ -95,6 +96,9 @@ const StrategyView: React.FC = () => {
   const [activeQuarter, setActiveQuarter] = useState<string>('Q1');
   const [expandedDept, setExpandedDept] = useState<string | null>(null);
   const [alignmentModal, setAlignmentModal] = useState<any>(null);
+  const activeSaveDomains = activeTab === 'dept-okr' ? ['departments'] as const : ['strategy'] as const;
+  const isCurrentTabDirty = activeSaveDomains.some(domain => dirtyDomains.includes(domain));
+  const saveButtonLabel = activeTab === 'dept-okr' ? '保存部门 OKR' : '保存公司 OKR';
   
   // Helper to set dirty when modifying data
   const updateStrategy = (s: Partial<CompanyStrategy>) => {
@@ -462,12 +466,12 @@ const StrategyView: React.FC = () => {
               )}
               <div className="w-px h-4 bg-slate-200 mx-1 md:mx-2 hidden md:block"></div>
               <button 
-                onClick={() => handleSave(['strategy', 'departments'])} 
+                onClick={() => handleSave([...activeSaveDomains])} 
                 disabled={isSaving} 
-                className={`px-4 md:px-6 py-1.5 md:py-2 rounded-xl text-[10px] font-black uppercase flex items-center gap-1 md:gap-2 transition-all shadow-md ${showSaveSuccess ? 'bg-emerald-50 text-emerald-600' : isDirty ? 'bg-brand-600 text-white hover:bg-brand-700 shadow-brand-100' : 'bg-slate-100 text-slate-400 cursor-default'}`}
+                className={`px-4 md:px-6 py-1.5 md:py-2 rounded-xl text-[10px] font-black uppercase flex items-center gap-1 md:gap-2 transition-all shadow-md ${showSaveSuccess ? 'bg-emerald-50 text-emerald-600' : isCurrentTabDirty ? 'bg-brand-600 text-white hover:bg-brand-700 shadow-brand-100' : 'bg-slate-100 text-slate-400 cursor-default'}`}
               >
                 {isSaving ? <Loader2 className="animate-spin h-3 w-3"/> : showSaveSuccess ? <CheckCircle size={14}/> : <Save size={14} />} 
-                {showSaveSuccess ? '已保存' : isDirty ? '立即保存' : '已是最新'}
+                {showSaveSuccess ? '已保存' : isCurrentTabDirty ? saveButtonLabel : '已是最新'}
               </button>
             </div>
           </div>

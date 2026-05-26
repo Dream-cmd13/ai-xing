@@ -28,6 +28,7 @@ const MenuPermissionView: React.FC = () => {
   const isSaving = state.isSaving;
   const showSaveSuccess = state.showSaveSuccess;
   const isDirty = state.isDirty;
+  const dirtyDomains = state.dirtyDomains;
   const setIsDirty = state.setIsDirty;
   const backendError = state.backendError;
   const currentProcessId = state.currentProcessId;
@@ -38,6 +39,9 @@ const MenuPermissionView: React.FC = () => {
   const [editingRole, setEditingRole] = useState<SystemRole | null>(null);
   const [editingUser, setEditingUser] = useState<User | null>(null);
   const [pendingDeleteRoleId, setPendingDeleteRoleId] = useState<string | null>(null);
+  const activeSaveDomains = activeTab === 'roles' ? ['systemRoles'] as const : ['users'] as const;
+  const isCurrentTabDirty = activeSaveDomains.some(domain => dirtyDomains.includes(domain));
+  const saveButtonLabel = activeTab === 'roles' ? '保存角色权限' : '保存个人权限';
 
   const roles = state.systemRoles || [];
   const users = state.users || [];
@@ -321,12 +325,12 @@ const MenuPermissionView: React.FC = () => {
         <div className="flex items-center gap-4">
           {permissions.update && (
             <button 
-              onClick={() => handleSave(['users', 'systemRoles'])} 
+              onClick={() => handleSave([...activeSaveDomains])} 
               disabled={isSaving} 
-              className={`px-6 py-2.5 rounded-xl text-xs font-black uppercase flex items-center gap-2 transition-all shadow-md ${showSaveSuccess ? 'bg-emerald-50 text-emerald-600' : isDirty ? 'bg-brand-600 text-white hover:bg-brand-700 shadow-brand-100' : 'bg-slate-100 text-slate-400 cursor-default'}`}
+              className={`px-6 py-2.5 rounded-xl text-xs font-black uppercase flex items-center gap-2 transition-all shadow-md ${showSaveSuccess ? 'bg-emerald-50 text-emerald-600' : isCurrentTabDirty ? 'bg-brand-600 text-white hover:bg-brand-700 shadow-brand-100' : 'bg-slate-100 text-slate-400 cursor-default'}`}
             >
               {isSaving ? <Loader2 className="animate-spin" size={16}/> : showSaveSuccess ? <CheckCircle size={16}/> : <Save size={16} />} 
-              {showSaveSuccess ? '已保存' : isDirty ? '立即保存' : '已是最新'}
+              {showSaveSuccess ? '已保存' : isCurrentTabDirty ? saveButtonLabel : '已是最新'}
             </button>
           )}
         </div>
