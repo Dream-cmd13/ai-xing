@@ -655,7 +655,23 @@ BEGIN
       expected_row_version := COALESCE((previous_item->>'rowVersion')::BIGINT, 0);
 
       IF NOT public.is_admin() THEN
-        RAISE EXCEPTION '部门长暂不允许删除部门结构';
+        IF NOT EXISTS (
+          SELECT 1
+          FROM jsonb_array_elements(COALESCE(p_previous_departments, '[]'::jsonb)) AS managed_roots(value)
+          WHERE (
+            COALESCE(managed_roots.value->>'managerUserId', '') = current_id
+            OR public.department_tree_has_manager(
+              COALESCE(managed_roots.value->'subDepartments', '[]'::jsonb),
+              current_id
+            )
+          )
+          AND public.find_department_in_tree(
+            COALESCE(managed_roots.value->'subDepartments', '[]'::jsonb),
+            previous_item->>'id'
+          ) IS NOT NULL
+        ) THEN
+          RAISE EXCEPTION '仅管理员可删除顶层部门；部门长仅可删除自己负责部门树内的子部门';
+        END IF;
       END IF;
 
       DELETE FROM public.departments
@@ -680,7 +696,23 @@ BEGIN
 
     IF previous_item IS NULL THEN
       IF NOT public.is_admin() THEN
-        RAISE EXCEPTION '部门长暂不允许创建部门结构';
+        IF NOT EXISTS (
+          SELECT 1
+          FROM jsonb_array_elements(COALESCE(p_next_departments, '[]'::jsonb)) AS managed_roots(value)
+          WHERE (
+            COALESCE(managed_roots.value->>'managerUserId', '') = current_id
+            OR public.department_tree_has_manager(
+              COALESCE(managed_roots.value->'subDepartments', '[]'::jsonb),
+              current_id
+            )
+          )
+          AND public.find_department_in_tree(
+            COALESCE(managed_roots.value->'subDepartments', '[]'::jsonb),
+            next_item->>'id'
+          ) IS NOT NULL
+        ) THEN
+          RAISE EXCEPTION '仅管理员可创建顶层部门；部门长仅可在自己负责部门树内创建子部门';
+        END IF;
       END IF;
 
       IF EXISTS (

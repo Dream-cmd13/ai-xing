@@ -31,10 +31,31 @@ export const getUserRoleLabel = (role: UserRole): string => {
   }
 };
 
+const findDepartmentById = (
+  departments: Department[] = [],
+  targetDepartmentId: string
+): Department | undefined => {
+  for (const department of departments) {
+    if (department.id === targetDepartmentId) {
+      return department;
+    }
+
+    const nestedMatch = findDepartmentById(
+      department.subDepartments || [],
+      targetDepartmentId
+    );
+    if (nestedMatch) {
+      return nestedMatch;
+    }
+  }
+
+  return undefined;
+};
+
 const isManagedDepartment = (targetDepartmentId: string | undefined, currentUser: User, departments: Department[] = []): boolean => {
   if (!targetDepartmentId) return false;
 
-  const managedDepartment = departments.find((department) => department.id === targetDepartmentId);
+  const managedDepartment = findDepartmentById(departments, targetDepartmentId);
   if (managedDepartment?.managerUserId) {
     return managedDepartment.managerUserId === currentUser.id;
   }
