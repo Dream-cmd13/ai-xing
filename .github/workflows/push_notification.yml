@@ -23,7 +23,7 @@ jobs:
           # 🌟 这里将邮件标题改为了具体的 commit 消息
           subject: "【dev】${{ github.event.head_commit.message }}"
           
-          from: GitHub 机器人 <981130406@qq.com>
+          from: GitHub <981130406@qq.com>
           to: 981130406@qq.com,2012209952@qq.com
           body: |
             项目仓库: ${{ github.repository }}
