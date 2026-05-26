@@ -326,6 +326,43 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER STABLE;
 
+CREATE OR REPLACE FUNCTION public.find_department_in_tree(
+  p_departments JSONB,
+  p_target_department_id TEXT
+)
+RETURNS JSONB AS $$
+DECLARE
+  department_node JSONB;
+  found_node JSONB;
+BEGIN
+  IF p_target_department_id IS NULL
+     OR p_departments IS NULL
+     OR jsonb_typeof(p_departments) <> 'array' THEN
+    RETURN NULL;
+  END IF;
+
+  FOR department_node IN
+    SELECT value
+    FROM jsonb_array_elements(COALESCE(p_departments, '[]'::jsonb))
+  LOOP
+    IF department_node->>'id' = p_target_department_id THEN
+      RETURN department_node;
+    END IF;
+
+    found_node := public.find_department_in_tree(
+      department_node->'subDepartments',
+      p_target_department_id
+    );
+
+    IF found_node IS NOT NULL THEN
+      RETURN found_node;
+    END IF;
+  END LOOP;
+
+  RETURN NULL;
+END;
+$$ LANGUAGE plpgsql STABLE;
+
 CREATE OR REPLACE FUNCTION public.is_department_manager(target_department_id TEXT)
 RETURNS BOOLEAN AS $$
 BEGIN
@@ -342,9 +379,176 @@ BEGIN
     FROM public.departments
     WHERE id = target_department_id
       AND manager_user_id = public.current_user_id()
+  ) OR EXISTS (
+    SELECT 1
+    FROM public.departments
+    WHERE COALESCE(
+      public.find_department_in_tree(COALESCE(sub_departments, '[]'::jsonb), target_department_id)->>'managerUserId',
+      ''
+    ) = public.current_user_id()
   );
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER STABLE;
+
+CREATE OR REPLACE FUNCTION public.department_tree_has_manager(
+  p_departments JSONB,
+  p_manager_user_id TEXT
+)
+RETURNS BOOLEAN AS $$
+DECLARE
+  department_node JSONB;
+BEGIN
+  IF p_manager_user_id IS NULL
+     OR p_departments IS NULL
+     OR jsonb_typeof(p_departments) <> 'array' THEN
+    RETURN false;
+  END IF;
+
+  FOR department_node IN
+    SELECT value
+    FROM jsonb_array_elements(COALESCE(p_departments, '[]'::jsonb))
+  LOOP
+    IF COALESCE(department_node->>'managerUserId', '') = p_manager_user_id THEN
+      RETURN true;
+    END IF;
+
+    IF public.department_tree_has_manager(
+      department_node->'subDepartments',
+      p_manager_user_id
+    ) THEN
+      RETURN true;
+    END IF;
+  END LOOP;
+
+  RETURN false;
+END;
+$$ LANGUAGE plpgsql STABLE;
+
+CREATE OR REPLACE FUNCTION public.sanitize_new_department_subtree_for_manager(
+  p_node JSONB
+)
+RETURNS JSONB AS $$
+DECLARE
+  child_node JSONB;
+  sanitized_children JSONB := '[]'::jsonb;
+  sanitized_child JSONB;
+BEGIN
+  IF p_node IS NULL OR jsonb_typeof(p_node) <> 'object' THEN
+    RETURN NULL;
+  END IF;
+
+  FOR child_node IN
+    SELECT value
+    FROM jsonb_array_elements(COALESCE(p_node->'subDepartments', '[]'::jsonb))
+  LOOP
+    sanitized_child := public.sanitize_new_department_subtree_for_manager(child_node);
+    IF sanitized_child IS NOT NULL THEN
+      sanitized_children := sanitized_children || jsonb_build_array(sanitized_child);
+    END IF;
+  END LOOP;
+
+  RETURN jsonb_strip_nulls(
+    (p_node - 'managerUserId' - 'managerName' - 'subDepartments')
+    || jsonb_build_object(
+      'managerUserId', NULL,
+      'managerName', '',
+      'subDepartments', sanitized_children
+    )
+  );
+END;
+$$ LANGUAGE plpgsql STABLE;
+
+CREATE OR REPLACE FUNCTION public.merge_department_subtree_for_manager(
+  p_previous_node JSONB,
+  p_next_node JSONB,
+  p_current_user_id TEXT
+)
+RETURNS JSONB AS $$
+DECLARE
+  previous_child JSONB;
+  next_child JSONB;
+  merged_child JSONB;
+  merged_children JSONB := '[]'::jsonb;
+  managed_here BOOLEAN;
+BEGIN
+  IF p_previous_node IS NULL THEN
+    RETURN public.sanitize_new_department_subtree_for_manager(p_next_node);
+  END IF;
+
+  IF p_next_node IS NULL THEN
+    IF COALESCE(p_previous_node->>'managerUserId', '') = COALESCE(p_current_user_id, '') THEN
+      RETURN NULL;
+    END IF;
+    RETURN p_previous_node;
+  END IF;
+
+  managed_here := COALESCE(p_previous_node->>'managerUserId', '') = COALESCE(p_current_user_id, '');
+
+  IF managed_here THEN
+    FOR next_child IN
+      SELECT value
+      FROM jsonb_array_elements(COALESCE(p_next_node->'subDepartments', '[]'::jsonb))
+    LOOP
+      SELECT value
+      INTO previous_child
+      FROM jsonb_array_elements(COALESCE(p_previous_node->'subDepartments', '[]'::jsonb)) AS previous_values(value)
+      WHERE previous_values.value->>'id' = next_child->>'id'
+      LIMIT 1;
+
+      merged_child := public.merge_department_subtree_for_manager(
+        previous_child,
+        next_child,
+        p_current_user_id
+      );
+
+      IF merged_child IS NOT NULL THEN
+        merged_children := merged_children || jsonb_build_array(merged_child);
+      END IF;
+
+      previous_child := NULL;
+    END LOOP;
+
+    RETURN jsonb_strip_nulls(
+      (p_next_node - 'managerUserId' - 'managerName' - 'subDepartments')
+      || jsonb_build_object(
+        'managerUserId', p_previous_node->'managerUserId',
+        'managerName', COALESCE(p_previous_node->>'managerName', ''),
+        'subDepartments', merged_children
+      )
+    );
+  END IF;
+
+  FOR previous_child IN
+    SELECT value
+    FROM jsonb_array_elements(COALESCE(p_previous_node->'subDepartments', '[]'::jsonb))
+  LOOP
+    SELECT value
+    INTO next_child
+    FROM jsonb_array_elements(COALESCE(p_next_node->'subDepartments', '[]'::jsonb)) AS next_values(value)
+    WHERE next_values.value->>'id' = previous_child->>'id'
+    LIMIT 1;
+
+    merged_child := public.merge_department_subtree_for_manager(
+      previous_child,
+      next_child,
+      p_current_user_id
+    );
+
+    IF merged_child IS NOT NULL THEN
+      merged_children := merged_children || jsonb_build_array(merged_child);
+    END IF;
+
+    next_child := NULL;
+  END LOOP;
+
+  RETURN jsonb_strip_nulls(
+    (p_previous_node - 'subDepartments')
+    || jsonb_build_object(
+      'subDepartments', merged_children
+    )
+  );
+END;
+$$ LANGUAGE plpgsql STABLE;
 
 CREATE OR REPLACE FUNCTION public.current_user_can_view_task(
   task_department_id TEXT,
@@ -518,15 +722,27 @@ BEGIN
         0
       );
     ELSE
+      IF NOT public.is_admin() THEN
+        IF COALESCE(previous_item->>'managerUserId', '') <> current_id
+           AND NOT public.department_tree_has_manager(
+             COALESCE(previous_item->'subDepartments', '[]'::jsonb),
+             current_id
+           ) THEN
+          RAISE EXCEPTION '仅允许修改自己负责的部门';
+        END IF;
+
+        next_item := public.merge_department_subtree_for_manager(
+          previous_item,
+          next_item,
+          current_id
+        );
+      END IF;
+
       previous_snapshot := jsonb_strip_nulls(previous_item - 'rowVersion' - 'updatedAt');
       next_snapshot := jsonb_strip_nulls(next_item - 'rowVersion' - 'updatedAt');
 
       IF previous_snapshot IS DISTINCT FROM next_snapshot THEN
         expected_row_version := COALESCE((previous_item->>'rowVersion')::BIGINT, 0);
-
-        IF NOT public.is_admin() AND NOT public.is_department_manager(previous_item->>'id') THEN
-          RAISE EXCEPTION '仅允许修改自己负责的部门';
-        END IF;
 
         UPDATE public.departments
         SET
