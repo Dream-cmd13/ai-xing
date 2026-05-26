@@ -387,7 +387,7 @@ export const saveAISettings = async (settings: AISettings): Promise<AISettings> 
 };
 
 /**
- * 持久化保存整个工作空间的状�?(拆分到各个关系表)
+ * 持久化保存整个工作空间的状态(拆分到各个关系表)
  */
 export const saveWorkspace = async (state: AppState): Promise<void> => {
   if (!isSupabaseConfigured()) throw new Error("Supabase not configured");
@@ -417,7 +417,7 @@ export const saveWorkspace = async (state: AppState): Promise<void> => {
 };
 
 /**
- * 读取企业的工作空间数�?(从各个关系表组装)
+ * 读取企业的工作空间数据(从各个关系表组装)
  */
 export const getWorkspace = async (): Promise<AppState | null> => {
   if (!isSupabaseConfigured()) {
