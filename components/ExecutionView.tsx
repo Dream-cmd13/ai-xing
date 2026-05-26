@@ -436,7 +436,7 @@ const ExecutionView: React.FC = () => {
         readOnly={
           taskModal.mode === 'create'
             ? !permissions.create
-            : (!permissions.update || !canManageTask(taskModal.data as PADEntry, currentUser, state.systemRoles || []))
+            : (!permissions.update || !canManageTask(taskModal.data as PADEntry, currentUser, state.systemRoles || [], state.departments))
         }
         periodWeeks={periodWeeks}
       />

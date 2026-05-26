@@ -746,7 +746,7 @@ const ReviewView: React.FC = () => {
         departments={state.departments}
         groupedAvailableKRs={groupedAvailableKRs}
         mode={taskModal.mode}
-        readOnly={!canManageTask(taskModal.data as PADEntry, currentUser, state.systemRoles || [])}
+        readOnly={!canManageTask(taskModal.data as PADEntry, currentUser, state.systemRoles || [], state.departments)}
       />
     </div>
   );

@@ -31,7 +31,18 @@ export const getUserRoleLabel = (role: UserRole): string => {
   }
 };
 
-export const canViewTask = (task: PADEntry, currentUser: User, users: User[], systemRoles: SystemRole[] = []): boolean => {
+const isManagedDepartment = (targetDepartmentId: string | undefined, currentUser: User, departments: Department[] = []): boolean => {
+  if (!targetDepartmentId) return false;
+
+  const managedDepartment = departments.find((department) => department.id === targetDepartmentId);
+  if (managedDepartment?.managerUserId) {
+    return managedDepartment.managerUserId === currentUser.id;
+  }
+
+  return currentUser.departmentId === targetDepartmentId;
+};
+
+export const canViewTask = (task: PADEntry, currentUser: User, users: User[], systemRoles: SystemRole[] = [], departments: Department[] = []): boolean => {
   if (isAdminUser(currentUser, systemRoles) || isManagerUser(currentUser)) return true;
 
   const taskDeptId = task.departmentId || users.find(u => u.id === task.ownerId)?.departmentId;
@@ -48,18 +59,36 @@ export const canViewTask = (task: PADEntry, currentUser: User, users: User[], sy
   return false;
 };
 
-export const canManageTask = (task: PADEntry, currentUser: User, systemRoles: SystemRole[] = []): boolean => {
+export const canManageTask = (
+  task: PADEntry,
+  currentUser: User,
+  systemRoles: SystemRole[] = [],
+  departments: Department[] = []
+): boolean => {
   if (isAdminUser(currentUser, systemRoles)) return true;
+  if (isManagerUser(currentUser) && isManagedDepartment(task.departmentId, currentUser, departments)) return true;
   return task.createdBy === currentUser.id;
 };
 
 export const canManageProcess = (
-  process: { createdBy?: string },
+  process: { createdBy?: string; departmentId?: string },
+  currentUser: User,
+  systemRoles: SystemRole[] = [],
+  departments: Department[] = []
+): boolean => {
+  if (isAdminUser(currentUser, systemRoles)) return true;
+  if (isManagerUser(currentUser) && isManagedDepartment(process.departmentId, currentUser, departments)) return true;
+  return process.createdBy === currentUser.id;
+};
+
+export const canManageDepartment = (
+  department: Department,
   currentUser: User,
   systemRoles: SystemRole[] = []
 ): boolean => {
   if (isAdminUser(currentUser, systemRoles)) return true;
-  return process.createdBy === currentUser.id;
+  if (!isManagerUser(currentUser)) return false;
+  return department.managerUserId === currentUser.id;
 };
 
 export const hasPermission = (

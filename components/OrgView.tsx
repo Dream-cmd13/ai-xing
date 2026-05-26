@@ -7,6 +7,7 @@ import { usePermissions } from '../hooks/usePermissions';
 
 import { Department, ProcessNode, ProcessDefinition, User, MenuPermission } from '../types';
 import { addDepartment as addDbDepartment, updateDepartment as updateDbDepartment, deleteDepartment as deleteDbDepartment } from '../data';
+import { canManageDepartment, isAdminUser } from '../utils/permissions';
 import { 
   Plus, Trash2, Building2, ChevronRight, X, Briefcase, ChevronDown, 
   ExternalLink, Search, User as UserIcon, Check, Minus, Save, WifiOff, CheckCircle, Info, Shield, Users, AlertCircle, Lock, Loader2
@@ -98,6 +99,12 @@ const OrgView: React.FC = () => {
     return Array.from(roles).sort();
   }, [departments]);
 
+  const canEditDepartment = (department: Department) =>
+    !!currentUser && permissions.update && canManageDepartment(department, currentUser, state.systemRoles || []);
+
+  const isAdmin = !!currentUser && isAdminUser(currentUser, state.systemRoles || []);
+  const canEditDepartmentManager = (department: Department) => isAdmin && canEditDepartment(department);
+
   const updateDeptRecursive = (depts: Department[], id: string, updater: (d: Department) => Department): Department[] => {
     return depts.map(d => {
       if (d.id === id) return updater(d);
@@ -113,6 +120,17 @@ const OrgView: React.FC = () => {
         ...d,
         subDepartments: d.subDepartments ? deleteDeptFromTree(d.subDepartments, targetId) : []
       }));
+  };
+
+  const findDeptById = (depts: Department[], id: string): Department | undefined => {
+    for (const department of depts) {
+      if (department.id === id) return department;
+      if (department.subDepartments) {
+        const found = findDeptById(department.subDepartments, id);
+        if (found) return found;
+      }
+    }
+    return undefined;
   };
 
   const addRootDepartment = () => {
@@ -213,10 +231,10 @@ const OrgView: React.FC = () => {
               </div>
             </div>
             <div className="flex gap-1">
-                  {permissions.create && (
+                  {isAdmin && (
                     <button onClick={() => setAddingToId(addingToId === d.id ? null : d.id)} className="p-2 text-slate-400 hover:text-brand-600 hover:bg-brand-50 rounded-xl" title="添加子部门"><Plus size={16}/></button>
                   )}
-                  {permissions.update && (
+                  {isAdmin && (
                     <button onClick={() => setPendingDeleteDept({id: d.id, name: d.name})} className="p-2 text-slate-200 hover:text-red-500 hover:bg-red-50 rounded-xl"><Trash2 size={16}/></button>
                   )}
             </div>
@@ -230,7 +248,7 @@ const OrgView: React.FC = () => {
                   className="w-full p-2.5 bg-slate-50 border rounded-xl text-xs font-bold outline-none border-slate-200 focus:border-brand-500 disabled:opacity-50" 
                   placeholder="部门名称..." 
                   value={d.name || ''} 
-                  disabled={!permissions.update}
+                  disabled={!canEditDepartment(d)}
                   onChange={e => updateDeptField(d.id, 'name', e.target.value)} 
                 />
               </div>
@@ -239,12 +257,15 @@ const OrgView: React.FC = () => {
                  <select 
                   className="w-full p-2.5 bg-slate-50 border rounded-xl text-xs font-bold outline-none border-slate-200 focus:border-brand-500 disabled:opacity-50" 
                   value={d.managerUserId || ''} 
-                  disabled={!permissions.update}
+                  disabled={!canEditDepartmentManager(d)}
                   onChange={e => updateDeptManager(d.id, e.target.value)} 
                 >
                   <option value="">选择负责人...</option>
                   {users.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
                 </select>
+                {!isAdmin && canEditDepartment(d) && (
+                  <p className="text-[9px] font-bold text-slate-400">部门负责人仅管理员可调整。</p>
+                )}
               </div>
               <div className="space-y-1">
                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-1"><Shield size={10}/> 核心权力与职责</label>
@@ -252,7 +273,7 @@ const OrgView: React.FC = () => {
                   className="w-full p-3 bg-slate-900 text-slate-100 border-none rounded-2xl text-xs font-bold outline-none h-32 shadow-inner disabled:opacity-50" 
                   placeholder="详细描述该部门拥有的业务权力、资源分配权及核心交付职责..." 
                   value={d.responsibilities || ''} 
-                  disabled={!permissions.update}
+                  disabled={!canEditDepartment(d)}
                   onChange={e => updateDeptField(d.id, 'responsibilities', e.target.value)}
                 />
               </div>
@@ -262,11 +283,11 @@ const OrgView: React.FC = () => {
                   className="w-full p-3 bg-slate-50 border border-slate-200 rounded-2xl text-xs font-bold outline-none h-24 disabled:opacity-50" 
                   placeholder="部门属性、职能边界..." 
                   value={d.attributes || ''} 
-                  disabled={!permissions.update}
+                  disabled={!canEditDepartment(d)}
                   onChange={e => updateDeptField(d.id, 'attributes', e.target.value)}
                 />
               </div>
-              {permissions.update && (
+              {canEditDepartment(d) && (
                 <div className="flex justify-end pt-2">
                   <button 
                     onClick={() => {
@@ -316,12 +337,23 @@ const OrgView: React.FC = () => {
               }
 
               return (
-                <div key={r} onClick={() => setAssigningRole({deptId: d.id, roleName: r})} className="px-3 py-1.5 rounded-xl border text-[10px] font-black flex items-center gap-2 bg-slate-50 hover:border-brand-300 transition-all group cursor-pointer">
+                <div
+                  key={r}
+                  onClick={() => {
+                    if (!canEditDepartment(d)) return;
+                    setAssigningRole({ deptId: d.id, roleName: r });
+                  }}
+                  className={`px-3 py-1.5 rounded-xl border text-[10px] font-black flex items-center gap-2 transition-all group ${
+                    canEditDepartment(d)
+                      ? 'bg-slate-50 hover:border-brand-300 cursor-pointer'
+                      : 'bg-slate-50 border-slate-200 cursor-not-allowed opacity-70'
+                  }`}
+                >
                   <Briefcase size={10} className="text-brand-500"/>
                   <span 
                     className="hover:underline"
                     onClick={(e) => {
-                      if (!permissions.update) return;
+                      if (!canEditDepartment(d)) return;
                       e.stopPropagation();
                       setEditingRole({deptId: d.id, roleName: r});
                       setEditingRoleName(r);
@@ -330,7 +362,7 @@ const OrgView: React.FC = () => {
                     {r}
                   </span>
                   <span className="bg-brand-500 text-white px-1.5 py-0.5 rounded-full text-[8px] font-black">{memberCount}</span>
-                  {permissions.update && (
+                  {canEditDepartment(d) && (
                     <button onClick={(e) => { e.stopPropagation(); setPendingDeleteRole({deptId: d.id, roleName: r}); }} className="ml-1 text-slate-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-all"><Minus size={10}/></button>
                   )}
                 </div>
@@ -344,13 +376,13 @@ const OrgView: React.FC = () => {
                  <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest block mb-2">复用系统现有岗位</label>
                  <div className="flex flex-wrap gap-1 max-h-24 overflow-y-auto pr-2 custom-scrollbar">
                     {globalRoles.filter(gr => !d.roles.includes(gr)).map(gr => (
-                      <button key={gr} disabled={!permissions.update} onClick={() => addRoleToDept(d.id, gr)} className="px-2 py-1 bg-white border border-slate-100 rounded-lg text-[9px] font-bold hover:border-brand-500 transition-colors disabled:opacity-50">{gr}</button>
+                      <button key={gr} disabled={!canEditDepartment(d)} onClick={() => addRoleToDept(d.id, gr)} className="px-2 py-1 bg-white border border-slate-100 rounded-lg text-[9px] font-bold hover:border-brand-500 transition-colors disabled:opacity-50">{gr}</button>
                     ))}
                  </div>
               </div>
               <div className="flex gap-2">
-                <input className="flex-1 p-3 bg-white border rounded-xl text-xs font-bold outline-none focus:border-brand-500 shadow-inner disabled:opacity-50" placeholder="新增岗位名称..." value={newRoleName} disabled={!permissions.update} onChange={e=>setNewRoleName(e.target.value)} onKeyDown={e => e.key === 'Enter' && addRoleToDept(d.id, newRoleName)}/>
-                <button onClick={() => addRoleToDept(d.id, newRoleName)} disabled={!permissions.update} className="bg-slate-900 text-white px-5 py-2 rounded-xl text-[10px] font-black uppercase disabled:opacity-50">添加新岗位</button>
+                <input className="flex-1 p-3 bg-white border rounded-xl text-xs font-bold outline-none focus:border-brand-500 shadow-inner disabled:opacity-50" placeholder="新增岗位名称..." value={newRoleName} disabled={!canEditDepartment(d)} onChange={e=>setNewRoleName(e.target.value)} onKeyDown={e => e.key === 'Enter' && addRoleToDept(d.id, newRoleName)}/>
+                <button onClick={() => addRoleToDept(d.id, newRoleName)} disabled={!canEditDepartment(d)} className="bg-slate-900 text-white px-5 py-2 rounded-xl text-[10px] font-black uppercase disabled:opacity-50">添加新岗位</button>
               </div>
             </div>
           )}
@@ -373,12 +405,12 @@ const OrgView: React.FC = () => {
         <div className="flex flex-col md:flex-row gap-4 items-stretch md:items-center w-full md:w-auto">
            <div className="relative w-full md:w-auto"><input className="pl-10 pr-4 py-2.5 bg-slate-50 border rounded-xl text-xs font-bold outline-none focus:border-brand-500 w-full md:w-64 shadow-inner" placeholder="搜索部门..." value={searchQuery} onChange={e=>setSearchQuery(e.target.value)}/><Search size={14} className="absolute left-4 top-3.5 text-slate-300"/></div>
            <div className="flex gap-2 w-full md:w-auto">
-             <button onClick={() => setShowAddRootModal(true)} className="flex-1 md:flex-none justify-center bg-slate-100 text-slate-600 px-6 py-2.5 rounded-xl text-xs font-black uppercase hover:bg-slate-200 transition-all flex items-center gap-2 border border-slate-200"><Plus size={16}/> 创建根部门</button>
-             {permissions.update && (
+             <button disabled={!isAdmin} onClick={() => setShowAddRootModal(true)} className={`flex-1 md:flex-none justify-center px-6 py-2.5 rounded-xl text-xs font-black uppercase transition-all flex items-center gap-2 border ${isAdmin ? 'bg-slate-100 text-slate-600 hover:bg-slate-200 border-slate-200' : 'bg-slate-100 text-slate-300 border-slate-100 cursor-not-allowed'}`}><Plus size={16}/> 创建根部门</button>
+             {(permissions.update || isAdmin) && (
                <button 
                  onClick={() => handleSave(['departments'])} 
-                 disabled={isSaving} 
-                 className={`flex-1 md:flex-none justify-center px-6 py-2.5 rounded-xl text-xs font-black uppercase flex items-center gap-2 transition-all shadow-md ${showSaveSuccess ? 'bg-emerald-50 text-emerald-600' : isDirty ? 'bg-brand-600 text-white hover:bg-brand-700 shadow-brand-100' : 'bg-slate-100 text-slate-400 cursor-default'}`}
+                 disabled={isSaving || (!isAdmin && !currentUser)} 
+                 className={`flex-1 md:flex-none justify-center px-6 py-2.5 rounded-xl text-xs font-black uppercase flex items-center gap-2 transition-all shadow-md ${showSaveSuccess ? 'bg-emerald-50 text-emerald-600' : isDirty ? 'bg-brand-600 text-white hover:bg-brand-700 shadow-brand-100' : 'bg-slate-100 text-slate-400 cursor-default'} ${(!isAdmin && !currentUser) ? 'opacity-50 cursor-not-allowed' : ''}`}
                >
                  {isSaving ? <Loader2 className="animate-spin" size={16}/> : showSaveSuccess ? <CheckCircle size={16}/> : <Save size={16} />} 
                  {showSaveSuccess ? '已保存' : isDirty ? '立即保存' : '已是最新'}
@@ -429,6 +461,11 @@ const OrgView: React.FC = () => {
       {assigningRole && (
         <div className="fixed inset-0 z-[500] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-6">
           <div className="bg-white rounded-[2.5rem] w-full max-w-md p-10 shadow-2xl animate-in zoom-in-95">
+            {(() => {
+              const assigningDepartment = findDeptById(departments, assigningRole.deptId);
+              const canAssignRoleMembers = !!assigningDepartment && canEditDepartment(assigningDepartment);
+              return (
+                <>
              <div className="flex justify-between items-center mb-6">
                 <div className="flex items-center gap-3">
                   <div className="w-12 h-12 bg-brand-50 text-brand-600 rounded-2xl flex items-center justify-center"><Users size={24}/></div>
@@ -455,24 +492,15 @@ const OrgView: React.FC = () => {
                 {users.length === 0 ? (
                   <p className="text-center py-10 text-slate-300 text-xs italic">请先在“用户管理”中创建系统用户</p>
                 ) : users.filter(u => u.name.toLowerCase().includes(roleUserSearch.toLowerCase()) || u.username.toLowerCase().includes(roleUserSearch.toLowerCase())).map(u => {
-                  // Recursive helper to find department
-                  const findDept = (depts: Department[], id: string): Department | undefined => {
-                    for (const d of depts) {
-                      if (d.id === id) return d;
-                      if (d.subDepartments) {
-                        const found = findDept(d.subDepartments, id);
-                        if (found) return found;
-                      }
-                    }
-                    return undefined;
-                  };
-                  const dept = findDept(departments, assigningRole.deptId);
-                  const isAssigned = dept?.roleMembers?.[assigningRole.roleName]?.includes(u.id);
+                  const isAssigned = assigningDepartment?.roleMembers?.[assigningRole.roleName]?.includes(u.id);
                   return (
                     <button 
                       key={u.id} 
+                      disabled={!canAssignRoleMembers}
                       onClick={() => toggleRoleMember(assigningRole.deptId, assigningRole.roleName, u.id)}
-                      className={`w-full flex items-center justify-between p-3 rounded-2xl border transition-all ${isAssigned ? 'bg-brand-50 border-brand-200' : 'bg-white hover:bg-slate-50 border-slate-100'}`}
+                      className={`w-full flex items-center justify-between p-3 rounded-2xl border transition-all ${
+                        isAssigned ? 'bg-brand-50 border-brand-200' : 'bg-white hover:bg-slate-50 border-slate-100'
+                      } ${!canAssignRoleMembers ? 'opacity-50 cursor-not-allowed' : ''}`}
                     >
                       <div className="flex items-center gap-3">
                         <div className={`w-8 h-8 rounded-lg flex items-center justify-center text-[10px] font-black ${isAssigned ? 'bg-brand-600 text-white' : 'bg-slate-100 text-slate-400'}`}>
@@ -489,9 +517,16 @@ const OrgView: React.FC = () => {
                 })}
              </div>
 
+             {!canAssignRoleMembers && (
+               <p className="mt-4 text-[10px] font-bold text-slate-400">仅管理员或负责该部门的部门长可调整岗位成员。</p>
+             )}
+
              <button onClick={() => setAssigningRole(null)} className="w-full mt-10 py-4 bg-slate-900 text-white rounded-2xl font-black uppercase text-xs tracking-widest shadow-xl hover:bg-brand-600 transition-all">
                 完成分配 (需保存生效)
              </button>
+                </>
+              );
+            })()}
           </div>
         </div>
       )}

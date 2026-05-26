@@ -141,15 +141,15 @@ const ProcessView: React.FC = () => {
   const canCreateProcess = permissions.create && !!currentUser;
   const canEditCurrentProcess = useMemo(() => {
     if (!currentUser || !currentProcess) return false;
-    return permissions.update && canManageProcess(currentProcess, currentUser, state.systemRoles || []);
-  }, [currentProcess, currentUser, permissions.update, state.systemRoles]);
+    return permissions.update && canManageProcess(currentProcess, currentUser, state.systemRoles || [], departments);
+  }, [currentProcess, currentUser, departments, permissions.update, state.systemRoles]);
   const canSaveProcessChanges = !!currentUser && (permissions.update || permissions.create);
   const canManageProcessEntry = useCallback((processId: string) => {
     if (!currentUser) return false;
     const targetProcess = processes.find((process) => process.id === processId);
     if (!targetProcess) return false;
-    return permissions.update && canManageProcess(targetProcess, currentUser, state.systemRoles || []);
-  }, [currentUser, permissions.update, processes, state.systemRoles]);
+    return permissions.update && canManageProcess(targetProcess, currentUser, state.systemRoles || [], departments);
+  }, [currentUser, departments, permissions.update, processes, state.systemRoles]);
 
   const availableRoles = useMemo(() => {
     const roles: string[] = [];

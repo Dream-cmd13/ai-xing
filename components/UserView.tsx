@@ -8,7 +8,7 @@ import { usePermissions } from '../hooks/usePermissions';
 import { AppState, User, Department, MenuPermission, UserRole } from '../types';
 import { addUser as addDbUser, updateUser as updateDbUser, deleteUser as deleteDbUser } from '../data';
 import { supabase } from '../supabase';
-import { getUserRoleLabel } from '../utils/permissions';
+import { getUserRoleLabel, isAdminUser } from '../utils/permissions';
 import { 
   Plus, Trash2, ShieldCheck, User as UserIcon, Key, RotateCcw,
   Building2, EyeOff, Save, WifiOff, CheckCircle, Lock, Unlock, AlertTriangle, UserMinus,
@@ -66,6 +66,8 @@ const UserView: React.FC = () => {
   };
 
   const roles = state.systemRoles || [];
+  const canManageUsers = !!currentUser && permissions.update && isAdminUser(currentUser, state.systemRoles || []);
+  const canCreateUsers = !!currentUser && permissions.create && isAdminUser(currentUser, state.systemRoles || []);
 
   const flatDepts = useMemo(() => {
     const list: Department[] = [];
@@ -306,13 +308,13 @@ const UserView: React.FC = () => {
             />
             <Search size={14} className="absolute left-4 top-3.5 text-slate-300"/>
           </div>
-          {permissions.create && (
+          {canCreateUsers && (
             <button onClick={() => setShowImportModal(true)} className="justify-center px-4 py-2.5 bg-slate-100 text-slate-600 hover:bg-slate-200 hover:text-slate-800 rounded-xl text-xs font-black uppercase flex items-center gap-2 transition-all">
               <Upload size={14}/> 批量导入
             </button>
           )}
           <div className="hidden md:block w-px h-6 bg-slate-200 mx-2"></div>
-          {permissions.update && (
+          {canManageUsers && (
             <button 
               onClick={() => handleSave(['users'])} 
               disabled={isSaving}
@@ -344,7 +346,7 @@ const UserView: React.FC = () => {
 
         {/* Right Content Area */}
         <div className="flex-1 flex flex-col gap-6 overflow-hidden">
-          {permissions.create && (
+          {canCreateUsers && (
             <div className="bg-brand-50 p-4 md:p-6 rounded-[2.5rem] border border-brand-100 flex flex-col md:flex-row flex-wrap gap-4 items-stretch md:items-end animate-in fade-in slide-in-from-top-4 shrink-0 shadow-inner">
               <div className="flex-1 min-w-[140px] space-y-2"><label className="text-[10px] font-black uppercase text-brand-600 tracking-widest">姓名</label><input className="w-full px-4 py-3 bg-white border border-brand-200 rounded-2xl text-sm font-bold outline-none" placeholder="真实姓名" value={newName} onChange={e => setNewName(e.target.value)}/></div>
               <div className="flex-1 min-w-[140px] space-y-2"><label className="text-[10px] font-black uppercase text-brand-600 tracking-widest">账号</label><input className="w-full px-4 py-3 bg-white border border-brand-200 rounded-2xl text-sm font-bold outline-none" placeholder="登录用户名" value={newUsername} onChange={e => setNewUsername(e.target.value)}/></div>
@@ -377,9 +379,10 @@ const UserView: React.FC = () => {
                           {u.departmentId && !dept && <p className="text-[9px] text-red-500 font-bold bg-red-50 p-2 rounded-lg">原部门已删除或无效</p>}
                           <div className="flex gap-2">
                             <select 
-                                className="flex-1 bg-slate-50 border border-slate-200 rounded-lg text-[10px] p-1 font-bold outline-none"
+                                className={`flex-1 bg-slate-50 border border-slate-200 rounded-lg text-[10px] p-1 font-bold outline-none ${!canManageUsers ? 'opacity-50 cursor-not-allowed' : ''}`}
                                 value={u.departmentId || ''}
-                                onChange={(e) => setUsers(state.users.map(us => us.id === u.id ? { ...us, departmentId: e.target.value } : us))}
+                                disabled={!canManageUsers}
+                                onChange={(e) => updateUsers(state.users.map(us => us.id === u.id ? { ...us, departmentId: e.target.value } : us))}
                             >
                                 <option value="">重新分配部门...</option>
                                 {flatDepts.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
@@ -388,10 +391,10 @@ const UserView: React.FC = () => {
                           <div className="w-full mt-2 flex items-center gap-2">
                             <ShieldCheck size={12} className={u.role === 'Admin' ? 'text-brand-600' : u.role === 'Manager' ? 'text-amber-600' : 'text-slate-400'} />
                             <select
-                              disabled={!permissions.update || u.id === currentUser.id}
+                              disabled={!canManageUsers || u.id === currentUser.id}
                               value={u.role}
                               onChange={(e) => updateUserRole(u.id, e.target.value as UserRole)}
-                              className={`w-full bg-slate-50 border rounded-lg text-[10px] font-black uppercase px-2 py-2 outline-none ${u.role === 'Admin' ? 'border-brand-200 text-brand-600' : u.role === 'Manager' ? 'border-amber-200 text-amber-600' : 'border-slate-200 text-slate-500'} ${(!permissions.update || u.id === currentUser.id) ? 'opacity-50 cursor-not-allowed' : ''}`}
+                              className={`w-full bg-slate-50 border rounded-lg text-[10px] font-black uppercase px-2 py-2 outline-none ${u.role === 'Admin' ? 'border-brand-200 text-brand-600' : u.role === 'Manager' ? 'border-amber-200 text-amber-600' : 'border-slate-200 text-slate-500'} ${(!canManageUsers || u.id === currentUser.id) ? 'opacity-50 cursor-not-allowed' : ''}`}
                             >
                               <option value="Employee">普通员工</option>
                               <option value="Manager">部门长</option>
@@ -413,7 +416,7 @@ const UserView: React.FC = () => {
                               return (
                                 <button
                                   key={role.id}
-                                  disabled={!permissions.update}
+                                  disabled={!canManageUsers}
                                   onClick={() => {
                                     const currentIds = u.systemRoleIds || [];
                                     const newIds = isSelected 
@@ -421,7 +424,7 @@ const UserView: React.FC = () => {
                                       : [...currentIds, role.id];
                                     setUsers(state.users.map(us => us.id === u.id ? { ...us, systemRoleIds: newIds } : us));
                                   }}
-                                  className={`px-2 py-1 rounded text-[9px] font-bold border transition-all ${isSelected ? 'bg-brand-50 border-brand-500 text-brand-700' : 'bg-white border-slate-200 text-slate-500 hover:border-brand-300'} ${!permissions.update ? 'opacity-50 cursor-not-allowed' : ''}`}
+                                  className={`px-2 py-1 rounded text-[9px] font-bold border transition-all ${isSelected ? 'bg-brand-50 border-brand-500 text-brand-700' : 'bg-white border-slate-200 text-slate-500 hover:border-brand-300'} ${!canManageUsers ? 'opacity-50 cursor-not-allowed' : ''}`}
                                 >
                                   {role.name}
                                 </button>
@@ -431,7 +434,7 @@ const UserView: React.FC = () => {
                           </div>
                         </div>
                         
-                        {u.id !== currentUser.id && permissions.update && (
+                        {u.id !== currentUser.id && canManageUsers && (
                           <div className="flex gap-2 mt-6 pt-6 border-t">
                             <button onClick={() => setPendingResetUser(u)} className="px-4 py-2 bg-slate-900 text-white rounded-xl text-[10px] font-black uppercase flex items-center justify-center gap-2"><RotateCcw size={14}/> 重置密码</button>
                             <button onClick={() => setPendingDeleteUser(u)} className="p-2 text-red-200 hover:text-red-500 transition-colors"><Trash2 size={16}/></button>
