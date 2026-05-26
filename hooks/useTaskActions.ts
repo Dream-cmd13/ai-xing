@@ -90,7 +90,11 @@ export const useTaskActions = ({
 
     try {
       for (const taskId of taskIds) {
-        await deleteDbTask(taskId);
+        const previousTask = previousLastSavedTasks.find((task) => task.id === taskId);
+        if (!previousTask) {
+          continue;
+        }
+        await deleteDbTask(taskId, previousTask.rowVersion);
       }
 
       const mergedLastSavedTasks = removeTasksById(previousLastSavedTasks, taskIds);

@@ -25,6 +25,12 @@ const handleSupabaseError = (error: any) => {
 const buildConflictError = (entityLabel: string) =>
   new Error(`${entityLabel}已被其他人修改，请先刷新最新数据后再重试。`);
 
+const buildDeleteConflictError = (entityLabel: string) =>
+  new Error(`${entityLabel}已被其他人修改或删除，请先刷新最新数据后再重试。`);
+
+const buildDuplicateCreateError = (entityLabel: string) =>
+  new Error(`${entityLabel}创建失败，可能是重复提交或记录已存在。`);
+
 const normalizeRowVersion = (value: any) =>
   typeof value === 'number' ? value : Number(value || 0);
 
@@ -566,13 +572,14 @@ export const updateStrategy = async (strategy: Partial<CompanyStrategy>): Promis
 export const addBusiness = async (business: BusinessDefinition): Promise<BusinessDefinition> => {
   if (!isSupabaseConfigured()) throw new Error("Supabase not configured")
   try {
-    const { data, error } = await supabase.from('businesses').upsert({
+    const { data, error } = await supabase.from('businesses').insert({
       id: business.id, name: business.name, business_format: business.businessFormat || '',
       customer_persona: business.customerPersona || '', customer_needs: business.customerNeeds || '',
       surface_product_power: business.surfaceProductPower || '', core_product_power: business.coreProductPower || '',
       updated_at: Date.now(), row_version: 0
     }).select('*').single();
     if (error) throw error;
+    if (!data) throw buildDuplicateCreateError('业务定义');
     return mapBusinessRow(data);
   } catch (e) {
     handleSupabaseError(e);
@@ -610,13 +617,21 @@ export const updateBusiness = async (id: string, updates: Partial<BusinessDefini
   }
 };
 
-export const deleteBusiness = async (id: string): Promise<void> => {
+export const deleteBusiness = async (id: string, rowVersion?: number): Promise<void> => {
   if (!isSupabaseConfigured()) throw new Error("Supabase not configured")
   try {
-    const { error } = await supabase.from('businesses').delete().eq('id', id);
+    const { data, error } = await supabase
+      .from('businesses')
+      .delete()
+      .eq('id', id)
+      .eq('row_version', normalizeRowVersion(rowVersion))
+      .select('id')
+      .maybeSingle();
     if (error) throw error;
+    if (!data) throw buildDeleteConflictError('业务定义');
   } catch (e) {
     handleSupabaseError(e);
+    throw e;
   }
 };
 
@@ -626,11 +641,12 @@ export const deleteBusiness = async (id: string): Promise<void> => {
 export const addSystemRole = async (role: SystemRole): Promise<SystemRole> => {
   if (!isSupabaseConfigured()) throw new Error("Supabase not configured")
   try {
-    const { data, error } = await supabase.from('system_roles').upsert({
+    const { data, error } = await supabase.from('system_roles').insert({
       id: role.id, name: role.name, description: role.description || '',
       permissions: role.permissions || {}, updated_at: Date.now(), row_version: 0
     }).select('*').single();
     if (error) throw error;
+    if (!data) throw buildDuplicateCreateError('系统角色');
     return mapSystemRoleRow(data);
   } catch (e) {
     handleSupabaseError(e);
@@ -665,13 +681,21 @@ export const updateSystemRole = async (id: string, updates: Partial<SystemRole>)
   }
 };
 
-export const deleteSystemRole = async (id: string): Promise<void> => {
+export const deleteSystemRole = async (id: string, rowVersion?: number): Promise<void> => {
   if (!isSupabaseConfigured()) throw new Error("Supabase not configured")
   try {
-    const { error } = await supabase.from('system_roles').delete().eq('id', id);
+    const { data, error } = await supabase
+      .from('system_roles')
+      .delete()
+      .eq('id', id)
+      .eq('row_version', normalizeRowVersion(rowVersion))
+      .select('id')
+      .maybeSingle();
     if (error) throw error;
+    if (!data) throw buildDeleteConflictError('系统角色');
   } catch (e) {
     handleSupabaseError(e);
+    throw e;
   }
 };
 
@@ -681,7 +705,7 @@ export const deleteSystemRole = async (id: string): Promise<void> => {
 export const addProcess = async (process: ProcessDefinition): Promise<ProcessDefinition> => {
   if (!isSupabaseConfigured()) throw new Error("Supabase not configured")
   try {
-    const { data, error } = await supabase.from('processes').upsert({
+    const { data, error } = await supabase.from('processes').insert({
       id: process.id, name: process.name, category: process.category, level: process.level,
       version: process.version, is_active: process.isActive, type: process.type, owner: process.owner,
       co_owner: process.coOwner, objective: process.objective, nodes: process.nodes || [],
@@ -689,6 +713,7 @@ export const addProcess = async (process: ProcessDefinition): Promise<ProcessDef
       row_version: 0
     }).select('*').single();
     if (error) throw error;
+    if (!data) throw buildDuplicateCreateError('流程');
     return mapProcessRow(data);
   } catch (e) {
     handleSupabaseError(e);
@@ -732,13 +757,21 @@ export const updateProcess = async (id: string, updates: Partial<ProcessDefiniti
   }
 };
 
-export const deleteProcess = async (id: string): Promise<void> => {
+export const deleteProcess = async (id: string, rowVersion?: number): Promise<void> => {
   if (!isSupabaseConfigured()) throw new Error("Supabase not configured")
   try {
-    const { error } = await supabase.from('processes').delete().eq('id', id);
+    const { data, error } = await supabase
+      .from('processes')
+      .delete()
+      .eq('id', id)
+      .eq('row_version', normalizeRowVersion(rowVersion))
+      .select('id')
+      .maybeSingle();
     if (error) throw error;
+    if (!data) throw buildDeleteConflictError('流程');
   } catch (e) {
     handleSupabaseError(e);
+    throw e;
   }
 };
 
@@ -748,7 +781,7 @@ export const deleteProcess = async (id: string): Promise<void> => {
 export const addDepartment = async (dept: Department): Promise<Department> => {
   if (!isSupabaseConfigured()) throw new Error("Supabase not configured")
   try {
-    const { data, error } = await supabase.from('departments').upsert({
+    const { data, error } = await supabase.from('departments').insert({
       id: dept.id, name: dept.name, manager_name: dept.managerName ?? '',
       responsibilities: dept.responsibilities ?? '', roles: dept.roles || [],
       role_members: dept.roleMembers ?? {}, attributes: dept.attributes ?? '',
@@ -756,6 +789,7 @@ export const addDepartment = async (dept: Department): Promise<Department> => {
       updated_at: Date.now(), row_version: 0
     }).select('*').single();
     if (error) throw error;
+    if (!data) throw buildDuplicateCreateError('部门');
     return mapDepartmentRow(data);
   } catch (e) {
     handleSupabaseError(e);
@@ -796,13 +830,111 @@ export const updateDepartment = async (id: string, updates: Partial<Department>)
   }
 };
 
-export const deleteDepartment = async (id: string): Promise<void> => {
+export const deleteDepartment = async (id: string, rowVersion?: number): Promise<void> => {
   if (!isSupabaseConfigured()) throw new Error("Supabase not configured")
   try {
-    const { error } = await supabase.from('departments').delete().eq('id', id);
+    const { data, error } = await supabase
+      .from('departments')
+      .delete()
+      .eq('id', id)
+      .eq('row_version', normalizeRowVersion(rowVersion))
+      .select('id')
+      .maybeSingle();
     if (error) throw error;
+    if (!data) throw buildDeleteConflictError('部门');
   } catch (e) {
     handleSupabaseError(e);
+    throw e;
+  }
+};
+
+export const saveDepartmentsAtomically = async (
+  nextDepartments: Department[],
+  previousDepartments: Department[]
+): Promise<Department[]> => {
+  if (!isSupabaseConfigured()) throw new Error("Supabase not configured");
+  try {
+    const { data, error } = await supabase.rpc('save_departments_atomic', {
+      p_next_departments: nextDepartments ?? [],
+      p_previous_departments: previousDepartments ?? []
+    });
+    if (error) throw error;
+    return (data || []).map(mapDepartmentRow);
+  } catch (e) {
+    handleSupabaseError(e);
+    throw e;
+  }
+};
+
+export const saveProcessesAtomically = async (
+  nextProcesses: ProcessDefinition[],
+  previousProcesses: ProcessDefinition[]
+): Promise<ProcessDefinition[]> => {
+  if (!isSupabaseConfigured()) throw new Error("Supabase not configured");
+  try {
+    const { data, error } = await supabase.rpc('save_processes_atomic', {
+      p_next_processes: nextProcesses ?? [],
+      p_previous_processes: previousProcesses ?? []
+    });
+    if (error) throw error;
+    return (data || []).map(mapProcessRow);
+  } catch (e) {
+    handleSupabaseError(e);
+    throw e;
+  }
+};
+
+export const saveUsersAtomically = async (
+  nextUsers: User[],
+  previousUsers: User[]
+): Promise<User[]> => {
+  if (!isSupabaseConfigured()) throw new Error("Supabase not configured");
+  try {
+    const { data, error } = await supabase.rpc('save_users_atomic', {
+      p_next_users: nextUsers ?? [],
+      p_previous_users: previousUsers ?? []
+    });
+    if (error) throw error;
+    return (data || []).map(mapUserRow);
+  } catch (e) {
+    handleSupabaseError(e);
+    throw e;
+  }
+};
+
+export const saveSystemRolesAtomically = async (
+  nextRoles: SystemRole[],
+  previousRoles: SystemRole[]
+): Promise<SystemRole[]> => {
+  if (!isSupabaseConfigured()) throw new Error("Supabase not configured");
+  try {
+    const { data, error } = await supabase.rpc('save_system_roles_atomic', {
+      p_next_roles: nextRoles ?? [],
+      p_previous_roles: previousRoles ?? []
+    });
+    if (error) throw error;
+    return (data || []).map(mapSystemRoleRow);
+  } catch (e) {
+    handleSupabaseError(e);
+    throw e;
+  }
+};
+
+export const saveBusinessesAtomically = async (
+  nextBusinesses: BusinessDefinition[],
+  previousBusinesses: BusinessDefinition[]
+): Promise<BusinessDefinition[]> => {
+  if (!isSupabaseConfigured()) throw new Error("Supabase not configured");
+  try {
+    const { data, error } = await supabase.rpc('save_businesses_atomic', {
+      p_next_businesses: nextBusinesses ?? [],
+      p_previous_businesses: previousBusinesses ?? []
+    });
+    if (error) throw error;
+    return (data || []).map(mapBusinessRow);
+  } catch (e) {
+    handleSupabaseError(e);
+    throw e;
   }
 };
 
@@ -812,7 +944,7 @@ export const deleteDepartment = async (id: string): Promise<void> => {
 export const addUser = async (user: User): Promise<User> => {
   if (!isSupabaseConfigured()) throw new Error("Supabase not configured")
   try {
-    const { data, error } = await supabase.from('users').upsert({
+    const { data, error } = await supabase.from('users').insert({
       id: user.id, username: user.username,
       name: user.name, role: user.role, department_id: user.departmentId || null,
       pad_permissions: user.padPermissions || null, reviews: null,
@@ -820,6 +952,7 @@ export const addUser = async (user: User): Promise<User> => {
       auth_id: user.auth_id || null, updated_at: Date.now(), row_version: 0
     }).select('*').single();
     if (error) throw error;
+    if (!data) throw buildDuplicateCreateError('用户');
     return mapUserRow(data);
   } catch (e) {
     handleSupabaseError(e);
@@ -859,13 +992,21 @@ export const updateUser = async (id: string, updates: Partial<User>): Promise<Us
   }
 };
 
-export const deleteUser = async (id: string): Promise<void> => {
+export const deleteUser = async (id: string, rowVersion?: number): Promise<void> => {
   if (!isSupabaseConfigured()) throw new Error("Supabase not configured")
   try {
-    const { error } = await supabase.from('users').delete().eq('id', id);
+    const { data, error } = await supabase
+      .from('users')
+      .delete()
+      .eq('id', id)
+      .eq('row_version', normalizeRowVersion(rowVersion))
+      .select('id')
+      .maybeSingle();
     if (error) throw error;
+    if (!data) throw buildDeleteConflictError('用户');
   } catch (e) {
     handleSupabaseError(e);
+    throw e;
   }
 };
 
@@ -897,8 +1038,9 @@ export const addTask = async (task: PADEntry): Promise<PADEntry> => {
       updated_at: Date.now(),
       row_version: 0
     };
-    const { data, error } = await supabase.from('tasks').upsert(taskData).select('*').single();
+    const { data, error } = await supabase.from('tasks').insert(taskData).select('*').single();
     if (error) throw error;
+    if (!data) throw buildDuplicateCreateError('任务');
     return mapTaskRow(data);
   } catch (e) {
     handleSupabaseError(e);
@@ -947,12 +1089,20 @@ export const updateTask = async (taskId: string, task: Partial<PADEntry>): Promi
   }
 };
 
-export const deleteTask = async (taskId: string): Promise<void> => {
+export const deleteTask = async (taskId: string, rowVersion?: number): Promise<void> => {
   if (!isSupabaseConfigured()) throw new Error("Supabase not configured")
   try {
-    const { error } = await supabase.from('tasks').delete().eq('id', taskId);
+    const { data, error } = await supabase
+      .from('tasks')
+      .delete()
+      .eq('id', taskId)
+      .eq('row_version', normalizeRowVersion(rowVersion))
+      .select('id')
+      .maybeSingle();
     if (error) throw error;
+    if (!data) throw buildDeleteConflictError('任务');
   } catch (e) {
     handleSupabaseError(e);
+    throw e;
   }
 };

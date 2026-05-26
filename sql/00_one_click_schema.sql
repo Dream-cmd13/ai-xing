@@ -222,6 +222,612 @@ RETURNS TEXT AS $$
   SELECT id FROM public.users WHERE auth_id = auth.uid() LIMIT 1;
 $$ LANGUAGE sql SECURITY DEFINER STABLE;
 
+CREATE OR REPLACE FUNCTION public.save_departments_atomic(
+  p_next_departments JSONB,
+  p_previous_departments JSONB
+)
+RETURNS SETOF public.departments
+LANGUAGE plpgsql
+AS $$
+DECLARE
+  next_item JSONB;
+  previous_item JSONB;
+  expected_row_version BIGINT;
+  previous_snapshot JSONB;
+  next_snapshot JSONB;
+BEGIN
+  IF NOT public.is_admin() THEN
+    RAISE EXCEPTION '无权限保存部门';
+  END IF;
+
+  FOR previous_item IN
+    SELECT value
+    FROM jsonb_array_elements(COALESCE(p_previous_departments, '[]'::jsonb))
+  LOOP
+    IF NOT EXISTS (
+      SELECT 1
+      FROM jsonb_array_elements(COALESCE(p_next_departments, '[]'::jsonb)) AS next_values(value)
+      WHERE next_values.value->>'id' = previous_item->>'id'
+    ) THEN
+      expected_row_version := COALESCE((previous_item->>'rowVersion')::BIGINT, 0);
+
+      DELETE FROM public.departments
+      WHERE id = previous_item->>'id'
+        AND row_version = expected_row_version;
+
+      IF NOT FOUND THEN
+        RAISE EXCEPTION '部门已被其他人修改或删除，请刷新最新数据后再重试。';
+      END IF;
+    END IF;
+  END LOOP;
+
+  FOR next_item IN
+    SELECT value
+    FROM jsonb_array_elements(COALESCE(p_next_departments, '[]'::jsonb))
+  LOOP
+    SELECT value
+    INTO previous_item
+    FROM jsonb_array_elements(COALESCE(p_previous_departments, '[]'::jsonb)) AS previous_values(value)
+    WHERE previous_values.value->>'id' = next_item->>'id'
+    LIMIT 1;
+
+    IF previous_item IS NULL THEN
+      IF EXISTS (
+        SELECT 1
+        FROM public.departments
+        WHERE id = next_item->>'id'
+      ) THEN
+        RAISE EXCEPTION '部门创建失败，可能是重复提交或记录已存在。';
+      END IF;
+
+      INSERT INTO public.departments (
+        id,
+        name,
+        manager_name,
+        responsibilities,
+        roles,
+        role_members,
+        attributes,
+        sub_departments,
+        okrs,
+        reviews,
+        updated_at,
+        row_version
+      )
+      VALUES (
+        next_item->>'id',
+        COALESCE(next_item->>'name', ''),
+        COALESCE(next_item->>'managerName', ''),
+        COALESCE(next_item->>'responsibilities', ''),
+        COALESCE(next_item->'roles', '[]'::jsonb),
+        COALESCE(next_item->'roleMembers', '{}'::jsonb),
+        COALESCE(next_item->>'attributes', ''),
+        COALESCE(next_item->'subDepartments', '[]'::jsonb),
+        COALESCE(next_item->'okrs', '{}'::jsonb),
+        COALESCE(next_item->'reviews', '{}'::jsonb),
+        FLOOR(EXTRACT(EPOCH FROM clock_timestamp()) * 1000)::BIGINT,
+        0
+      );
+    ELSE
+      previous_snapshot := jsonb_strip_nulls(previous_item - 'rowVersion' - 'updatedAt');
+      next_snapshot := jsonb_strip_nulls(next_item - 'rowVersion' - 'updatedAt');
+
+      IF previous_snapshot IS DISTINCT FROM next_snapshot THEN
+        expected_row_version := COALESCE((previous_item->>'rowVersion')::BIGINT, 0);
+
+        UPDATE public.departments
+        SET
+          name = COALESCE(next_item->>'name', ''),
+          manager_name = COALESCE(next_item->>'managerName', ''),
+          responsibilities = COALESCE(next_item->>'responsibilities', ''),
+          roles = COALESCE(next_item->'roles', '[]'::jsonb),
+          role_members = COALESCE(next_item->'roleMembers', '{}'::jsonb),
+          attributes = COALESCE(next_item->>'attributes', ''),
+          sub_departments = COALESCE(next_item->'subDepartments', '[]'::jsonb),
+          okrs = COALESCE(next_item->'okrs', '{}'::jsonb),
+          reviews = COALESCE(next_item->'reviews', '{}'::jsonb),
+          updated_at = FLOOR(EXTRACT(EPOCH FROM clock_timestamp()) * 1000)::BIGINT,
+          row_version = expected_row_version + 1
+        WHERE id = next_item->>'id'
+          AND row_version = expected_row_version;
+
+        IF NOT FOUND THEN
+          RAISE EXCEPTION '部门已被其他人修改，请刷新最新数据后再重试。';
+        END IF;
+      END IF;
+    END IF;
+
+    previous_item := NULL;
+  END LOOP;
+
+  RETURN QUERY
+  SELECT *
+  FROM public.departments
+  ORDER BY id;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.save_processes_atomic(
+  p_next_processes JSONB,
+  p_previous_processes JSONB
+)
+RETURNS SETOF public.processes
+LANGUAGE plpgsql
+AS $$
+DECLARE
+  next_item JSONB;
+  previous_item JSONB;
+  expected_row_version BIGINT;
+  previous_snapshot JSONB;
+  next_snapshot JSONB;
+BEGIN
+  IF NOT public.is_admin() THEN
+    RAISE EXCEPTION '无权限保存流程';
+  END IF;
+
+  FOR previous_item IN
+    SELECT value
+    FROM jsonb_array_elements(COALESCE(p_previous_processes, '[]'::jsonb))
+  LOOP
+    IF NOT EXISTS (
+      SELECT 1
+      FROM jsonb_array_elements(COALESCE(p_next_processes, '[]'::jsonb)) AS next_values(value)
+      WHERE next_values.value->>'id' = previous_item->>'id'
+    ) THEN
+      expected_row_version := COALESCE((previous_item->>'rowVersion')::BIGINT, 0);
+
+      DELETE FROM public.processes
+      WHERE id = previous_item->>'id'
+        AND row_version = expected_row_version;
+
+      IF NOT FOUND THEN
+        RAISE EXCEPTION '流程已被其他人修改或删除，请刷新最新数据后再重试。';
+      END IF;
+    END IF;
+  END LOOP;
+
+  FOR next_item IN
+    SELECT value
+    FROM jsonb_array_elements(COALESCE(p_next_processes, '[]'::jsonb))
+  LOOP
+    SELECT value
+    INTO previous_item
+    FROM jsonb_array_elements(COALESCE(p_previous_processes, '[]'::jsonb)) AS previous_values(value)
+    WHERE previous_values.value->>'id' = next_item->>'id'
+    LIMIT 1;
+
+    IF previous_item IS NULL THEN
+      IF EXISTS (
+        SELECT 1
+        FROM public.processes
+        WHERE id = next_item->>'id'
+      ) THEN
+        RAISE EXCEPTION '流程创建失败，可能是重复提交或记录已存在。';
+      END IF;
+
+      INSERT INTO public.processes (
+        id,
+        name,
+        category,
+        level,
+        version,
+        is_active,
+        type,
+        owner,
+        co_owner,
+        objective,
+        nodes,
+        links,
+        history,
+        updated_at,
+        row_version
+      )
+      VALUES (
+        next_item->>'id',
+        COALESCE(next_item->>'name', ''),
+        COALESCE(next_item->>'category', ''),
+        COALESCE((next_item->>'level')::INTEGER, 1),
+        COALESCE(next_item->>'version', 'Draft'),
+        COALESCE((next_item->>'isActive')::BOOLEAN, false),
+        COALESCE(next_item->>'type', 'main'),
+        COALESCE(next_item->>'owner', ''),
+        COALESCE(next_item->>'coOwner', ''),
+        COALESCE(next_item->>'objective', ''),
+        COALESCE(next_item->'nodes', '[]'::jsonb),
+        COALESCE(next_item->'links', '[]'::jsonb),
+        COALESCE(next_item->'history', '[]'::jsonb),
+        FLOOR(EXTRACT(EPOCH FROM clock_timestamp()) * 1000)::BIGINT,
+        0
+      );
+    ELSE
+      previous_snapshot := jsonb_strip_nulls(previous_item - 'rowVersion' - 'updatedAt');
+      next_snapshot := jsonb_strip_nulls(next_item - 'rowVersion' - 'updatedAt');
+
+      IF previous_snapshot IS DISTINCT FROM next_snapshot THEN
+        expected_row_version := COALESCE((previous_item->>'rowVersion')::BIGINT, 0);
+
+        UPDATE public.processes
+        SET
+          name = COALESCE(next_item->>'name', ''),
+          category = COALESCE(next_item->>'category', ''),
+          level = COALESCE((next_item->>'level')::INTEGER, 1),
+          version = COALESCE(next_item->>'version', 'Draft'),
+          is_active = COALESCE((next_item->>'isActive')::BOOLEAN, false),
+          type = COALESCE(next_item->>'type', 'main'),
+          owner = COALESCE(next_item->>'owner', ''),
+          co_owner = COALESCE(next_item->>'coOwner', ''),
+          objective = COALESCE(next_item->>'objective', ''),
+          nodes = COALESCE(next_item->'nodes', '[]'::jsonb),
+          links = COALESCE(next_item->'links', '[]'::jsonb),
+          history = COALESCE(next_item->'history', '[]'::jsonb),
+          updated_at = FLOOR(EXTRACT(EPOCH FROM clock_timestamp()) * 1000)::BIGINT,
+          row_version = expected_row_version + 1
+        WHERE id = next_item->>'id'
+          AND row_version = expected_row_version;
+
+        IF NOT FOUND THEN
+          RAISE EXCEPTION '流程已被其他人修改，请刷新最新数据后再重试。';
+        END IF;
+      END IF;
+    END IF;
+
+    previous_item := NULL;
+  END LOOP;
+
+  RETURN QUERY
+  SELECT *
+  FROM public.processes
+  ORDER BY id;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.save_users_atomic(
+  p_next_users JSONB,
+  p_previous_users JSONB
+)
+RETURNS SETOF public.users
+LANGUAGE plpgsql
+AS $$
+DECLARE
+  next_item JSONB;
+  previous_item JSONB;
+  expected_row_version BIGINT;
+  previous_snapshot JSONB;
+  next_snapshot JSONB;
+BEGIN
+  IF NOT public.is_admin() THEN
+    RAISE EXCEPTION '无权限保存用户';
+  END IF;
+
+  FOR previous_item IN
+    SELECT value
+    FROM jsonb_array_elements(COALESCE(p_previous_users, '[]'::jsonb))
+  LOOP
+    IF NOT EXISTS (
+      SELECT 1
+      FROM jsonb_array_elements(COALESCE(p_next_users, '[]'::jsonb)) AS next_values(value)
+      WHERE next_values.value->>'id' = previous_item->>'id'
+    ) THEN
+      expected_row_version := COALESCE((previous_item->>'rowVersion')::BIGINT, 0);
+
+      DELETE FROM public.users
+      WHERE id = previous_item->>'id'
+        AND row_version = expected_row_version;
+
+      IF NOT FOUND THEN
+        RAISE EXCEPTION '用户已被其他人修改或删除，请刷新最新数据后再重试。';
+      END IF;
+    END IF;
+  END LOOP;
+
+  FOR next_item IN
+    SELECT value
+    FROM jsonb_array_elements(COALESCE(p_next_users, '[]'::jsonb))
+  LOOP
+    SELECT value
+    INTO previous_item
+    FROM jsonb_array_elements(COALESCE(p_previous_users, '[]'::jsonb)) AS previous_values(value)
+    WHERE previous_values.value->>'id' = next_item->>'id'
+    LIMIT 1;
+
+    IF previous_item IS NULL THEN
+      IF EXISTS (
+        SELECT 1
+        FROM public.users
+        WHERE id = next_item->>'id'
+      ) THEN
+        RAISE EXCEPTION '用户创建失败，可能是重复提交或记录已存在。';
+      END IF;
+
+      INSERT INTO public.users (
+        id,
+        username,
+        name,
+        role,
+        department_id,
+        pad_permissions,
+        reviews,
+        system_role_ids,
+        custom_permissions,
+        auth_id,
+        updated_at,
+        row_version
+      )
+      VALUES (
+        next_item->>'id',
+        COALESCE(next_item->>'username', ''),
+        COALESCE(next_item->>'name', ''),
+        COALESCE(next_item->>'role', 'User'),
+        NULLIF(next_item->>'departmentId', ''),
+        CASE WHEN next_item ? 'padPermissions' THEN COALESCE(next_item->'padPermissions', '[]'::jsonb) ELSE NULL END,
+        CASE WHEN next_item ? 'reviews' THEN COALESCE(next_item->'reviews', '{}'::jsonb) ELSE NULL END,
+        CASE WHEN next_item ? 'systemRoleIds' THEN COALESCE(next_item->'systemRoleIds', '[]'::jsonb) ELSE NULL END,
+        CASE WHEN next_item ? 'customPermissions' THEN COALESCE(next_item->'customPermissions', '{}'::jsonb) ELSE NULL END,
+        CASE WHEN NULLIF(next_item->>'auth_id', '') IS NULL THEN NULL ELSE (next_item->>'auth_id')::UUID END,
+        FLOOR(EXTRACT(EPOCH FROM clock_timestamp()) * 1000)::BIGINT,
+        0
+      );
+    ELSE
+      previous_snapshot := jsonb_strip_nulls(previous_item - 'rowVersion' - 'updatedAt');
+      next_snapshot := jsonb_strip_nulls(next_item - 'rowVersion' - 'updatedAt');
+
+      IF previous_snapshot IS DISTINCT FROM next_snapshot THEN
+        expected_row_version := COALESCE((previous_item->>'rowVersion')::BIGINT, 0);
+
+        UPDATE public.users
+        SET
+          username = COALESCE(next_item->>'username', ''),
+          name = COALESCE(next_item->>'name', ''),
+          role = COALESCE(next_item->>'role', 'User'),
+          department_id = NULLIF(next_item->>'departmentId', ''),
+          pad_permissions = CASE WHEN next_item ? 'padPermissions' THEN COALESCE(next_item->'padPermissions', '[]'::jsonb) ELSE NULL END,
+          reviews = CASE WHEN next_item ? 'reviews' THEN COALESCE(next_item->'reviews', '{}'::jsonb) ELSE NULL END,
+          system_role_ids = CASE WHEN next_item ? 'systemRoleIds' THEN COALESCE(next_item->'systemRoleIds', '[]'::jsonb) ELSE NULL END,
+          custom_permissions = CASE WHEN next_item ? 'customPermissions' THEN COALESCE(next_item->'customPermissions', '{}'::jsonb) ELSE NULL END,
+          updated_at = FLOOR(EXTRACT(EPOCH FROM clock_timestamp()) * 1000)::BIGINT,
+          row_version = expected_row_version + 1
+        WHERE id = next_item->>'id'
+          AND row_version = expected_row_version;
+
+        IF NOT FOUND THEN
+          RAISE EXCEPTION '用户已被其他人修改，请刷新最新数据后再重试。';
+        END IF;
+      END IF;
+    END IF;
+
+    previous_item := NULL;
+  END LOOP;
+
+  RETURN QUERY
+  SELECT *
+  FROM public.users
+  ORDER BY id;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.save_system_roles_atomic(
+  p_next_roles JSONB,
+  p_previous_roles JSONB
+)
+RETURNS SETOF public.system_roles
+LANGUAGE plpgsql
+AS $$
+DECLARE
+  next_item JSONB;
+  previous_item JSONB;
+  expected_row_version BIGINT;
+  previous_snapshot JSONB;
+  next_snapshot JSONB;
+BEGIN
+  IF NOT public.is_admin() THEN
+    RAISE EXCEPTION '无权限保存系统角色';
+  END IF;
+
+  FOR previous_item IN
+    SELECT value
+    FROM jsonb_array_elements(COALESCE(p_previous_roles, '[]'::jsonb))
+  LOOP
+    IF NOT EXISTS (
+      SELECT 1
+      FROM jsonb_array_elements(COALESCE(p_next_roles, '[]'::jsonb)) AS next_values(value)
+      WHERE next_values.value->>'id' = previous_item->>'id'
+    ) THEN
+      expected_row_version := COALESCE((previous_item->>'rowVersion')::BIGINT, 0);
+
+      DELETE FROM public.system_roles
+      WHERE id = previous_item->>'id'
+        AND row_version = expected_row_version;
+
+      IF NOT FOUND THEN
+        RAISE EXCEPTION '系统角色已被其他人修改或删除，请刷新最新数据后再重试。';
+      END IF;
+    END IF;
+  END LOOP;
+
+  FOR next_item IN
+    SELECT value
+    FROM jsonb_array_elements(COALESCE(p_next_roles, '[]'::jsonb))
+  LOOP
+    SELECT value
+    INTO previous_item
+    FROM jsonb_array_elements(COALESCE(p_previous_roles, '[]'::jsonb)) AS previous_values(value)
+    WHERE previous_values.value->>'id' = next_item->>'id'
+    LIMIT 1;
+
+    IF previous_item IS NULL THEN
+      IF EXISTS (
+        SELECT 1
+        FROM public.system_roles
+        WHERE id = next_item->>'id'
+      ) THEN
+        RAISE EXCEPTION '系统角色创建失败，可能是重复提交或记录已存在。';
+      END IF;
+
+      INSERT INTO public.system_roles (
+        id,
+        name,
+        description,
+        permissions,
+        updated_at,
+        row_version
+      )
+      VALUES (
+        next_item->>'id',
+        COALESCE(next_item->>'name', ''),
+        COALESCE(next_item->>'description', ''),
+        COALESCE(next_item->'permissions', '{}'::jsonb),
+        FLOOR(EXTRACT(EPOCH FROM clock_timestamp()) * 1000)::BIGINT,
+        0
+      );
+    ELSE
+      previous_snapshot := jsonb_strip_nulls(previous_item - 'rowVersion' - 'updatedAt');
+      next_snapshot := jsonb_strip_nulls(next_item - 'rowVersion' - 'updatedAt');
+
+      IF previous_snapshot IS DISTINCT FROM next_snapshot THEN
+        expected_row_version := COALESCE((previous_item->>'rowVersion')::BIGINT, 0);
+
+        UPDATE public.system_roles
+        SET
+          name = COALESCE(next_item->>'name', ''),
+          description = COALESCE(next_item->>'description', ''),
+          permissions = COALESCE(next_item->'permissions', '{}'::jsonb),
+          updated_at = FLOOR(EXTRACT(EPOCH FROM clock_timestamp()) * 1000)::BIGINT,
+          row_version = expected_row_version + 1
+        WHERE id = next_item->>'id'
+          AND row_version = expected_row_version;
+
+        IF NOT FOUND THEN
+          RAISE EXCEPTION '系统角色已被其他人修改，请刷新最新数据后再重试。';
+        END IF;
+      END IF;
+    END IF;
+
+    previous_item := NULL;
+  END LOOP;
+
+  RETURN QUERY
+  SELECT *
+  FROM public.system_roles
+  ORDER BY id;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.save_businesses_atomic(
+  p_next_businesses JSONB,
+  p_previous_businesses JSONB
+)
+RETURNS SETOF public.businesses
+LANGUAGE plpgsql
+AS $$
+DECLARE
+  next_item JSONB;
+  previous_item JSONB;
+  expected_row_version BIGINT;
+  previous_snapshot JSONB;
+  next_snapshot JSONB;
+BEGIN
+  IF NOT public.is_admin() THEN
+    RAISE EXCEPTION '无权限保存业务定义';
+  END IF;
+
+  FOR previous_item IN
+    SELECT value
+    FROM jsonb_array_elements(COALESCE(p_previous_businesses, '[]'::jsonb))
+  LOOP
+    IF NOT EXISTS (
+      SELECT 1
+      FROM jsonb_array_elements(COALESCE(p_next_businesses, '[]'::jsonb)) AS next_values(value)
+      WHERE next_values.value->>'id' = previous_item->>'id'
+    ) THEN
+      expected_row_version := COALESCE((previous_item->>'rowVersion')::BIGINT, 0);
+
+      DELETE FROM public.businesses
+      WHERE id = previous_item->>'id'
+        AND row_version = expected_row_version;
+
+      IF NOT FOUND THEN
+        RAISE EXCEPTION '业务定义已被其他人修改或删除，请刷新最新数据后再重试。';
+      END IF;
+    END IF;
+  END LOOP;
+
+  FOR next_item IN
+    SELECT value
+    FROM jsonb_array_elements(COALESCE(p_next_businesses, '[]'::jsonb))
+  LOOP
+    SELECT value
+    INTO previous_item
+    FROM jsonb_array_elements(COALESCE(p_previous_businesses, '[]'::jsonb)) AS previous_values(value)
+    WHERE previous_values.value->>'id' = next_item->>'id'
+    LIMIT 1;
+
+    IF previous_item IS NULL THEN
+      IF EXISTS (
+        SELECT 1
+        FROM public.businesses
+        WHERE id = next_item->>'id'
+      ) THEN
+        RAISE EXCEPTION '业务定义创建失败，可能是重复提交或记录已存在。';
+      END IF;
+
+      INSERT INTO public.businesses (
+        id,
+        name,
+        business_format,
+        customer_persona,
+        customer_needs,
+        surface_product_power,
+        core_product_power,
+        updated_at,
+        row_version
+      )
+      VALUES (
+        next_item->>'id',
+        COALESCE(next_item->>'name', ''),
+        COALESCE(next_item->>'businessFormat', ''),
+        COALESCE(next_item->>'customerPersona', ''),
+        COALESCE(next_item->>'customerNeeds', ''),
+        COALESCE(next_item->>'surfaceProductPower', ''),
+        COALESCE(next_item->>'coreProductPower', ''),
+        FLOOR(EXTRACT(EPOCH FROM clock_timestamp()) * 1000)::BIGINT,
+        0
+      );
+    ELSE
+      previous_snapshot := jsonb_strip_nulls(previous_item - 'rowVersion' - 'updatedAt');
+      next_snapshot := jsonb_strip_nulls(next_item - 'rowVersion' - 'updatedAt');
+
+      IF previous_snapshot IS DISTINCT FROM next_snapshot THEN
+        expected_row_version := COALESCE((previous_item->>'rowVersion')::BIGINT, 0);
+
+        UPDATE public.businesses
+        SET
+          name = COALESCE(next_item->>'name', ''),
+          business_format = COALESCE(next_item->>'businessFormat', ''),
+          customer_persona = COALESCE(next_item->>'customerPersona', ''),
+          customer_needs = COALESCE(next_item->>'customerNeeds', ''),
+          surface_product_power = COALESCE(next_item->>'surfaceProductPower', ''),
+          core_product_power = COALESCE(next_item->>'coreProductPower', ''),
+          updated_at = FLOOR(EXTRACT(EPOCH FROM clock_timestamp()) * 1000)::BIGINT,
+          row_version = expected_row_version + 1
+        WHERE id = next_item->>'id'
+          AND row_version = expected_row_version;
+
+        IF NOT FOUND THEN
+          RAISE EXCEPTION '业务定义已被其他人修改，请刷新最新数据后再重试。';
+        END IF;
+      END IF;
+    END IF;
+
+    previous_item := NULL;
+  END LOOP;
+
+  RETURN QUERY
+  SELECT *
+  FROM public.businesses
+  ORDER BY id;
+END;
+$$;
+
 -- =========================
 -- 5) RLS policies (reset + recreate)
 -- =========================

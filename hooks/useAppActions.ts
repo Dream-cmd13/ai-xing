@@ -2,15 +2,10 @@ import { useCallback, useRef, useEffect } from 'react';
 import { useAppStore } from '@/store/useAppStore';
 import { useAuthStore } from '@/store/useAuthStore';
 import { 
-  getWorkspace, addProcess as addDbProcess, updateProcess as updateDbProcess, 
-  deleteProcess as deleteDbProcess, updateStrategy, addBusiness, updateBusiness, deleteBusiness, 
-  addUser as addDbUser, updateUser as updateDbUser, deleteUser as deleteDbUser, addSystemRole, 
-  updateSystemRole, deleteSystemRole, addDepartment as addDbDepartment, updateDepartment as updateDbDepartment, 
-  deleteDepartment as deleteDbDepartment, saveAISettings
+  getWorkspace, updateStrategy, saveDepartmentsAtomically, saveProcessesAtomically,
+  saveUsersAtomically, saveSystemRolesAtomically, saveBusinessesAtomically, saveAISettings
 } from '@/data';
 import { ProcessDefinition, ProcessHistory } from '@/types';
-import { normalizeForConflictComparison } from '@/syncConflictGuard';
-import { applyDepartmentPatch, buildDepartmentPatch, hasDepartmentPatchConflict } from '@/utils/departmentSyncState.js';
 import { useTaskActions } from '@/hooks/useTaskActions';
 
 type SaveDomain = 'strategy' | 'aiSettings' | 'processes' | 'departments' | 'users' | 'systemRoles' | 'businesses';
@@ -97,28 +92,12 @@ export const useAppActions = () => {
   };
 
   const saveProcessesDomain = async () => {
-    const dirtyIds = Array.from(dirtyProcessIdsRef.current);
-    const nextProcesses = [...stateRef.current.processes];
-    for (const id of dirtyIds as string[]) {
-      const processIndex = nextProcesses.findIndex(p => p.id === id);
-      const process = processIndex >= 0 ? nextProcesses[processIndex] : null;
-      if (process) {
-        const isNew = !store.lastSavedProcesses.some(p => p.id === id);
-        if (isNew) {
-          nextProcesses[processIndex] = await addDbProcess(process);
-        } else {
-          nextProcesses[processIndex] = await updateDbProcess(id, process);
-        }
-      }
-    }
+    const nextProcesses = stateRef.current.processes || [];
+    const previousProcesses = store.lastSavedProcesses || [];
+    const savedProcesses = await saveProcessesAtomically(nextProcesses, previousProcesses);
 
-    const deletedIds = Array.from(deletedProcessIdsRef.current);
-    for (const id of deletedIds as string[]) {
-      await deleteDbProcess(id);
-    }
-
-    store.setState({ processes: nextProcesses });
-    store.setLastSavedProcesses(nextProcesses);
+    store.setState({ processes: savedProcesses });
+    store.setLastSavedProcesses(savedProcesses);
     dirtyProcessIdsRef.current.clear();
     deletedProcessIdsRef.current.clear();
   };
@@ -126,40 +105,7 @@ export const useAppActions = () => {
   const saveDepartmentsDomain = async () => {
     const newDepts = stateRef.current.departments || [];
     const oldDepts = store.lastSavedDepartments;
-    const currentIds = new Set(newDepts.map(d => d.id));
-    const toDelete = oldDepts.filter(d => !currentIds.has(d.id));
-    for (const d of toDelete) {
-      await deleteDbDepartment(d.id);
-    }
-    const savedDepartments: any[] = [];
-    for (const newDept of newDepts) {
-      const oldDept = oldDepts.find(d => d.id === newDept.id);
-      if (!oldDept) {
-        savedDepartments.push(await addDbDepartment(newDept));
-      } else if (normalizeForConflictComparison(oldDept) !== normalizeForConflictComparison(newDept)) {
-        const departmentPatch = buildDepartmentPatch(oldDept, newDept);
-        try {
-          savedDepartments.push(await updateDbDepartment(newDept.id, departmentPatch));
-        } catch (error) {
-          const latestDept = (useAppStore.getState() as any).lastSavedDepartments?.find((dept: any) => dept.id === newDept.id);
-          if (!latestDept || hasDepartmentPatchConflict(oldDept, newDept, latestDept)) {
-            throw error;
-          }
-
-          const rebasedDept = applyDepartmentPatch(latestDept, departmentPatch);
-          const retryPatch = buildDepartmentPatch(latestDept, rebasedDept);
-          const retryFields = Object.keys(retryPatch).filter(key => key !== 'rowVersion');
-          if (retryFields.length === 0) {
-            savedDepartments.push(latestDept);
-            continue;
-          }
-
-          savedDepartments.push(await updateDbDepartment(newDept.id, retryPatch));
-        }
-      } else {
-        savedDepartments.push(oldDept);
-      }
-    }
+    const savedDepartments = await saveDepartmentsAtomically(newDepts, oldDepts);
 
     store.setState({ departments: savedDepartments });
     store.setLastSavedDepartments(savedDepartments);
@@ -168,18 +114,7 @@ export const useAppActions = () => {
   const saveUsersDomain = async () => {
     const newUsers = stateRef.current.users || [];
     const oldUsers = store.lastSavedUsers;
-    const userIds = new Set(newUsers.map(u => u.id));
-    const deletedUsers = oldUsers.filter(u => !userIds.has(u.id));
-    for (const user of deletedUsers) {
-      await deleteDbUser(user.id);
-    }
-    const savedUsers: any[] = [];
-    for (const newUser of newUsers) {
-      const oldUser = oldUsers.find(u => u.id === newUser.id);
-      if (!oldUser) savedUsers.push(await addDbUser(newUser));
-      else if (normalizeForConflictComparison(oldUser) !== normalizeForConflictComparison(newUser)) savedUsers.push(await updateDbUser(newUser.id, newUser));
-      else savedUsers.push(oldUser);
-    }
+    const savedUsers = await saveUsersAtomically(newUsers, oldUsers);
 
     store.setState({ users: savedUsers });
     store.setLastSavedUsers(savedUsers);
@@ -188,18 +123,7 @@ export const useAppActions = () => {
   const saveSystemRolesDomain = async () => {
     const newRoles = stateRef.current.systemRoles || [];
     const oldRoles = store.lastSavedSystemRoles;
-    const roleIds = new Set(newRoles.map(r => r.id));
-    const deletedRoles = oldRoles.filter(r => !roleIds.has(r.id));
-    for (const role of deletedRoles) {
-      await deleteSystemRole(role.id);
-    }
-    const savedRoles: any[] = [];
-    for (const newRole of newRoles) {
-      const oldRole = oldRoles.find(r => r.id === newRole.id);
-      if (!oldRole) savedRoles.push(await addSystemRole(newRole));
-      else if (normalizeForConflictComparison(oldRole) !== normalizeForConflictComparison(newRole)) savedRoles.push(await updateSystemRole(newRole.id, newRole));
-      else savedRoles.push(oldRole);
-    }
+    const savedRoles = await saveSystemRolesAtomically(newRoles, oldRoles);
 
     store.setState({ systemRoles: savedRoles });
     store.setLastSavedSystemRoles(savedRoles);
@@ -208,18 +132,7 @@ export const useAppActions = () => {
   const saveBusinessesDomain = async () => {
     const newBusinesses = stateRef.current.businesses || [];
     const oldBusinesses = store.lastSavedBusinesses;
-    const businessIds = new Set(newBusinesses.map(b => b.id));
-    const deletedBusinesses = oldBusinesses.filter(b => !businessIds.has(b.id));
-    for (const business of deletedBusinesses) {
-      await deleteBusiness(business.id);
-    }
-    const savedBusinesses: any[] = [];
-    for (const newBiz of newBusinesses) {
-      const oldBiz = oldBusinesses.find(b => b.id === newBiz.id);
-      if (!oldBiz) savedBusinesses.push(await addBusiness(newBiz));
-      else if (normalizeForConflictComparison(oldBiz) !== normalizeForConflictComparison(newBiz)) savedBusinesses.push(await updateBusiness(newBiz.id, newBiz));
-      else savedBusinesses.push(oldBiz);
-    }
+    const savedBusinesses = await saveBusinessesAtomically(newBusinesses, oldBusinesses);
 
     store.setState({ businesses: savedBusinesses });
     store.setLastSavedBusinesses(savedBusinesses);
