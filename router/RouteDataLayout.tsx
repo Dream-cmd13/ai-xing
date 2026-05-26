@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation } from 'react-router-dom';
 import { MainLayout } from '../layouts/MainLayout';
 import { useAuthStore } from '../store/useAuthStore';
@@ -12,7 +12,7 @@ import {
 } from '../data';
 
 const ROUTE_DOMAIN_MAP: Array<{ match: RegExp; domains: AppDomainKey[] }> = [
-  { match: /^\/workbench$/, domains: ['tasks', 'departments', 'strategy'] },
+  { match: /^\/workbench$/, domains: [] },
   { match: /^\/process$/, domains: ['processes', 'departments'] },
   { match: /^\/org$/, domains: ['departments'] },
   { match: /^\/okr$/, domains: ['strategy', 'departments'] },
@@ -71,14 +71,31 @@ export const RouteDataLayout: React.FC = () => {
   } = useAppStore();
   const [routeError, setRouteError] = useState<string | null>(null);
   const [retryToken, setRetryToken] = useState(0);
+  const routeLoadKeyRef = useRef('');
+  const domainRequestVersionRef = useRef<Record<AppDomainKey, number>>({
+    users: 0,
+    systemRoles: 0,
+    aiSettings: 0,
+    departments: 0,
+    processes: 0,
+    strategy: 0,
+    businesses: 0,
+    tasks: 0
+  });
 
   const requiredDomains = useMemo(() => getRequiredDomains(location.pathname), [location.pathname]);
 
   useEffect(() => {
-    if (!isAuthenticated || requiredDomains.length === 0) {
-      setRouteError(null);
+    setRouteError(null);
+  }, [location.pathname, retryToken]);
+
+  useEffect(() => {
+    if (!isAuthenticated || requiredDomains.length === 0 || routeError) {
       return;
     }
+
+    const routeLoadKey = `${location.pathname}:${retryToken}:${requiredDomains.join(',')}`;
+    routeLoadKeyRef.current = routeLoadKey;
 
     const currentDomainLoadStatus = useAppStore.getState().domainLoadStatus;
     const missingDomains = requiredDomains.filter((domain) => {
@@ -86,12 +103,16 @@ export const RouteDataLayout: React.FC = () => {
       return !status.loaded && !status.loading;
     });
     if (missingDomains.length === 0) {
-      setRouteError(null);
       return;
     }
+    const requestVersions = Object.fromEntries(
+      missingDomains.map((domain) => {
+        const nextVersion = domainRequestVersionRef.current[domain] + 1;
+        domainRequestVersionRef.current[domain] = nextVersion;
+        return [domain, nextVersion];
+      })
+    ) as Record<AppDomainKey, number>;
 
-    let cancelled = false;
-    setRouteError(null);
     missingDomains.forEach((domain) => setDomainLoadState(domain, { loading: true }));
 
     const loaders: Record<AppDomainKey, () => Promise<void>> = {
@@ -100,35 +121,40 @@ export const RouteDataLayout: React.FC = () => {
       aiSettings: async () => {},
       departments: async () => {
         const departments = await getDepartments();
-        if (cancelled) return;
+        if (routeLoadKeyRef.current !== routeLoadKey) return;
+        if (domainRequestVersionRef.current.departments !== requestVersions.departments) return;
         setState({ departments });
         setLastSavedDepartments(departments);
         setDomainLoadState('departments', { loaded: true });
       },
       processes: async () => {
         const processes = await getProcesses();
-        if (cancelled) return;
+        if (routeLoadKeyRef.current !== routeLoadKey) return;
+        if (domainRequestVersionRef.current.processes !== requestVersions.processes) return;
         setState({ processes });
         setLastSavedProcesses(processes);
         setDomainLoadState('processes', { loaded: true });
       },
       strategy: async () => {
         const strategy = await getStrategy();
-        if (cancelled) return;
+        if (routeLoadKeyRef.current !== routeLoadKey) return;
+        if (domainRequestVersionRef.current.strategy !== requestVersions.strategy) return;
         setState({ strategy });
         setLastSavedStrategy(strategy);
         setDomainLoadState('strategy', { loaded: true });
       },
       businesses: async () => {
         const businesses = await getBusinesses();
-        if (cancelled) return;
+        if (routeLoadKeyRef.current !== routeLoadKey) return;
+        if (domainRequestVersionRef.current.businesses !== requestVersions.businesses) return;
         setState({ businesses });
         setLastSavedBusinesses(businesses);
         setDomainLoadState('businesses', { loaded: true });
       },
       tasks: async () => {
         const tasks = await getTasks();
-        if (cancelled) return;
+        if (routeLoadKeyRef.current !== routeLoadKey) return;
+        if (domainRequestVersionRef.current.tasks !== requestVersions.tasks) return;
         setState({ tasks });
         setLastSavedTasks(tasks);
         setDomainLoadState('tasks', { loaded: true });
@@ -137,21 +163,23 @@ export const RouteDataLayout: React.FC = () => {
 
     Promise.all(missingDomains.map((domain) => loaders[domain]()))
       .catch((error: any) => {
-        if (cancelled) return;
+        if (routeLoadKeyRef.current !== routeLoadKey) return;
         const message = error?.message || '页面数据加载失败';
         setRouteError(message);
         setBackendError(message);
       })
       .finally(() => {
-        if (cancelled) return;
-        missingDomains.forEach((domain) => setDomainLoadState(domain, { loading: false }));
+        missingDomains.forEach((domain) => {
+          if (domainRequestVersionRef.current[domain] === requestVersions[domain]) {
+            setDomainLoadState(domain, { loading: false });
+          }
+        });
       });
-
-    return () => {
-      cancelled = true;
-    };
   }, [
+    location.pathname,
     isAuthenticated,
+    domainLoadStatus,
+    routeError,
     requiredDomains,
     retryToken,
     setBackendError,

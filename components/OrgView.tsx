@@ -367,7 +367,7 @@ const OrgView: React.FC = () => {
              <button onClick={() => setShowAddRootModal(true)} className="flex-1 md:flex-none justify-center bg-slate-100 text-slate-600 px-6 py-2.5 rounded-xl text-xs font-black uppercase hover:bg-slate-200 transition-all flex items-center gap-2 border border-slate-200"><Plus size={16}/> 创建根部门</button>
              {permissions.update && (
                <button 
-                 onClick={handleSave} 
+                 onClick={() => handleSave(['departments'])} 
                  disabled={isSaving} 
                  className={`flex-1 md:flex-none justify-center px-6 py-2.5 rounded-xl text-xs font-black uppercase flex items-center gap-2 transition-all shadow-md ${showSaveSuccess ? 'bg-emerald-50 text-emerald-600' : isDirty ? 'bg-brand-600 text-white hover:bg-brand-700 shadow-brand-100' : 'bg-slate-100 text-slate-400 cursor-default'}`}
                >

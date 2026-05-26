@@ -336,7 +336,7 @@ const ProcessView: React.FC = () => {
             <p className="text-slate-400 mt-2 font-bold uppercase tracking-widest text-[10px]">Value Streams & Enterprise Assets</p>
           </div>
           <button 
-            onClick={handleSave} 
+            onClick={() => handleSave(['processes'])} 
             disabled={isSaving} 
             className={`px-6 py-2.5 rounded-xl text-xs font-black uppercase flex items-center gap-2 transition-all shadow-md ${showSaveSuccess ? 'bg-emerald-50 text-emerald-600' : isDirty ? 'bg-brand-600 text-white hover:bg-brand-700 shadow-brand-100' : 'bg-slate-100 text-slate-400 cursor-default'}`}
           >
@@ -438,7 +438,7 @@ const ProcessView: React.FC = () => {
            <button onClick={() => setShowHistory(true)} className="p-2.5 text-slate-400 hover:text-brand-600 hover:bg-slate-50 rounded-xl transition-all" title="发布记录"><History size={18}/></button>
            <button onClick={() => setShowSettings(true)} className="p-2.5 text-slate-400 hover:text-brand-600 hover:bg-slate-50 rounded-xl transition-all" title="属性设置"><Settings size={18}/></button>
            <div className="hidden md:block w-px h-4 bg-slate-200 mx-2"></div>
-           <button onClick={handleSave} disabled={isSaving || backendError} className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase flex items-center gap-2 transition-all ${showSaveSuccess ? 'bg-emerald-50 text-emerald-600' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'} ${backendError ? 'opacity-50 cursor-not-allowed' : ''}`}>
+           <button onClick={() => handleSave(['processes'])} disabled={isSaving || backendError} className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase flex items-center gap-2 transition-all ${showSaveSuccess ? 'bg-emerald-50 text-emerald-600' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'} ${backendError ? 'opacity-50 cursor-not-allowed' : ''}`}>
              {showSaveSuccess ? <CheckCircle size={14}/> : (backendError ? <WifiOff size={14}/> : <Save size={14} />)} 保存
            </button>
            <button onClick={() => setShowPublishModal(true)} className="px-4 py-2 bg-slate-900 text-white rounded-xl text-[10px] font-black uppercase tracking-widest flex items-center gap-2 hover:bg-brand-600 transition-all"><Send size={14}/> 发布生效</button>

@@ -318,7 +318,7 @@ const UserView: React.FC = () => {
           <div className="hidden md:block w-px h-6 bg-slate-200 mx-2"></div>
           {permissions.update && (
             <button 
-              onClick={handleSave} 
+              onClick={() => handleSave(['users'])} 
               disabled={isSaving}
               className={`justify-center px-6 py-2.5 rounded-xl text-xs font-black uppercase flex items-center gap-2 transition-all shadow-lg ${showSaveSuccess ? 'bg-emerald-50 text-emerald-600' : isDirty ? 'bg-brand-600 text-white hover:bg-brand-700 shadow-brand-100' : 'bg-slate-100 text-slate-400 cursor-default'}`}
             >

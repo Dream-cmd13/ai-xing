@@ -7,7 +7,9 @@ import { isSupabaseConfigured, supabase } from "./supabase";
  */
 
 const handleSupabaseError = (error: any) => {
-  const message = error?.message || String(error);
+  const message =
+    error?.message ||
+    (typeof error === 'string' && error.trim().length > 0 ? error : "未知数据库错误");
   const isNetworkError = 
     message.includes('Failed to fetch') || 
     message.includes('network error') ||
@@ -205,7 +207,9 @@ export const getBootstrapData = async (): Promise<Pick<AppState, 'users' | 'syst
       fetchSettingsRow()
     ]);
 
-    const errors = [usersRes.error, systemRolesRes.error].filter((error) => !isIgnoredMissingTableError(error));
+    const errors = [usersRes.error, systemRolesRes.error].filter(
+      (error): error is NonNullable<typeof error> => Boolean(error) && !isIgnoredMissingTableError(error)
+    );
     if (errors.length > 0) {
       throw errors[0];
     }
@@ -305,6 +309,22 @@ export const getTasks = async (): Promise<PADEntry[]> => {
   if (!isSupabaseConfigured()) throw new Error("Supabase not configured");
   try {
     const { data, error } = await supabase.from('tasks').select(TASKS_SELECT_FIELDS);
+    if (error && !isIgnoredMissingTableError(error)) throw error;
+    return (data || []).map(mapTaskRow);
+  } catch (e) {
+    handleSupabaseError(e);
+    throw e;
+  }
+};
+
+export const getWorkbenchTasks = async (userId: string): Promise<PADEntry[]> => {
+  if (!isSupabaseConfigured()) throw new Error("Supabase not configured");
+  try {
+    const memberJson = JSON.stringify([userId]);
+    const { data, error } = await supabase
+      .from('tasks')
+      .select(TASKS_SELECT_FIELDS)
+      .or(`owner_id.eq.${userId},participant_ids.cs.${memberJson},approver_ids.cs.${memberJson}`);
     if (error && !isIgnoredMissingTableError(error)) throw error;
     return (data || []).map(mapTaskRow);
   } catch (e) {

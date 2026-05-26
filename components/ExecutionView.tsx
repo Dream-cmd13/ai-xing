@@ -7,7 +7,7 @@ import { usePermissions } from '../hooks/usePermissions';
 import { AppState, Department, User, WeeklyPAD, PADEntry, OKR, TaskLog, MenuPermission } from '../types';
 import PeriodAlignmentView from './PeriodAlignmentView';
 import TaskModal from './TaskModal';
-import { Building2, ChevronDown, ChevronRight, LayoutGrid, Plus, X, Calendar, User as UserIcon, Clock, Save, Loader2, CheckCircle, AlertCircle } from 'lucide-react';
+import { Building2, ChevronDown, ChevronRight, LayoutGrid, Plus, X, Calendar, User as UserIcon, Clock, CheckCircle, AlertCircle } from 'lucide-react';
 import { getVisibleDepartments } from '../utils/permissions';
 import { ensureTaskTargetWeeks } from '../utils/taskPeriods.js';
 
@@ -36,7 +36,6 @@ const ExecutionView: React.FC = () => {
   const actions = useAppActions();
   const permissions = usePermissions('execution');
   const { 
-    handleSave, 
     handleSetDepartments: setDepartments, handleSetUsers: setUsers, 
     handleSetSystemRoles: setSystemRoles, handleSetAISettings: setAISettings, 
     handleSetBusinesses: setBusinesses, setProcessData, updateProcessProps, 
@@ -44,9 +43,6 @@ const ExecutionView: React.FC = () => {
     handleSetTasks: setTasks, handleSetStrategy: setStrategy,
     persistTaskEntries, persistTaskDeletion
   } = actions;
-  const isSaving = state.isSaving;
-  const showSaveSuccess = state.showSaveSuccess;
-  const isDirty = state.isDirty;
   const setIsDirty = state.setIsDirty;
   const backendError = state.backendError;
   const currentProcessId = state.currentProcessId;
@@ -390,16 +386,6 @@ const ExecutionView: React.FC = () => {
                   <option value="Q3">Q3</option>
                   <option value="Q4">Q4</option>
                 </select>
-                {permissions.update && (
-                  <button 
-                    onClick={handleSave} 
-                    disabled={isSaving} 
-                    className={`flex-1 md:flex-none justify-center px-6 py-2.5 rounded-xl text-[10px] md:text-xs font-black uppercase flex items-center gap-2 transition-all shadow-md ${showSaveSuccess ? 'bg-emerald-50 text-emerald-600' : isDirty ? 'bg-brand-600 text-white hover:bg-brand-700 shadow-brand-100' : 'bg-slate-100 text-slate-400 cursor-default'}`}
-                  >
-                    {isSaving ? <Loader2 className="animate-spin" size={16}/> : showSaveSuccess ? <CheckCircle size={16}/> : <Save size={16} />} 
-                    {showSaveSuccess ? '已保存' : isDirty ? '立即保存' : '已是最新'}
-                  </button>
-                )}
              </div>
         </div>
 

@@ -8,7 +8,7 @@ import { AppState, WeeklyPAD, PADEntry, User, Department, OKR, TaskLog, MenuPerm
 import { 
   LayoutList, CheckCircle, Clock, AlertCircle, User as UserIcon, 
   Building2, Filter, Search, Calendar, Tag, ChevronDown, ChevronRight,
-  Save, Loader2, Plus
+  Plus
 } from 'lucide-react';
 import TaskModal from './TaskModal';
 import { getVisibleDepartments, canViewTask } from '../utils/permissions';
@@ -24,7 +24,6 @@ const TaskCenterView: React.FC = () => {
   const actions = useAppActions();
   const permissions = usePermissions('task-center');
   const { 
-    handleSave, 
     handleSetDepartments: setDepartments, handleSetUsers: setUsers, 
     handleSetSystemRoles: setSystemRoles, handleSetAISettings: setAISettings, 
     handleSetBusinesses: setBusinesses, setProcessData, updateProcessProps, 
@@ -32,9 +31,6 @@ const TaskCenterView: React.FC = () => {
     handleSetTasks: setTasks, handleSetStrategy: setStrategy,
     persistTaskEntries, persistTaskDeletion
   } = actions;
-  const isSaving = state.isSaving;
-  const showSaveSuccess = state.showSaveSuccess;
-  const isDirty = state.isDirty;
   const setIsDirty = state.setIsDirty;
   const backendError = state.backendError;
   const currentProcessId = state.currentProcessId;
@@ -423,14 +419,6 @@ const TaskCenterView: React.FC = () => {
                 className="px-6 py-2.5 bg-brand-600 text-white rounded-xl text-xs font-black uppercase flex items-center gap-2 hover:bg-brand-700 transition-all shadow-md shadow-brand-100"
               >
                 <Plus size={16} /> 新增任务
-              </button>
-              <button 
-                onClick={handleSave} 
-                disabled={isSaving} 
-                className={`px-6 py-2.5 rounded-xl text-xs font-black uppercase flex items-center gap-2 transition-all shadow-md ${showSaveSuccess ? 'bg-emerald-50 text-emerald-600' : isDirty ? 'bg-slate-800 text-white hover:bg-slate-900 shadow-slate-100' : 'bg-slate-100 text-slate-400 cursor-default'}`}
-              >
-                {isSaving ? <Loader2 className="animate-spin" size={16}/> : showSaveSuccess ? <CheckCircle size={16}/> : <Save size={16} />} 
-                {showSaveSuccess ? '已保存' : isDirty ? '立即保存' : '已是最新'}
               </button>
             </div>
           )}

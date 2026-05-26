@@ -10,7 +10,7 @@ import TaskModal from './TaskModal';
 import { 
   Calendar as CalendarIcon, Plus, Trash2, CheckCircle, Loader2, 
   Building2, ChevronDown, Link2, User as UserIcon, 
-  ChevronLeft, ChevronRight, LayoutGrid, Target, Clock, Save, WifiOff, List, X, Lock, MessageSquare, Edit2
+  ChevronLeft, ChevronRight, LayoutGrid, Target, Clock, WifiOff, List, X, Lock, MessageSquare, Edit2
 } from 'lucide-react';
 import { getVisibleDepartments, canViewTask } from '../utils/permissions';
 import { ensureTaskTargetWeeks } from '../utils/taskPeriods.js';
@@ -25,7 +25,6 @@ const WeeklyView: React.FC = () => {
   const actions = useAppActions();
   const permissions = usePermissions('execution');
   const { 
-    handleSave, 
     handleSetDepartments: setDepartments, handleSetUsers: setUsers, 
     handleSetSystemRoles: setSystemRoles, handleSetAISettings: setAISettings, 
     handleSetBusinesses: setBusinesses, setProcessData, updateProcessProps, 
@@ -33,9 +32,6 @@ const WeeklyView: React.FC = () => {
     handleSetTasks: setTasks, handleSetStrategy: setStrategy,
     persistTaskEntries, persistTaskDeletion
   } = actions;
-  const isSaving = state.isSaving;
-  const showSaveSuccess = state.showSaveSuccess;
-  const isDirty = state.isDirty;
   const setIsDirty = state.setIsDirty;
   const backendError = state.backendError;
   const currentProcessId = state.currentProcessId;
@@ -390,16 +386,6 @@ const WeeklyView: React.FC = () => {
             </button>
           </div>
 
-          {permissions.update && (
-            <button 
-              onClick={handleSave} 
-              disabled={isSaving} 
-              className={`flex-1 md:flex-none justify-center px-6 py-2.5 rounded-xl text-xs font-black uppercase flex items-center gap-2 transition-all shadow-md ${showSaveSuccess ? 'bg-emerald-50 text-emerald-600' : isDirty ? 'bg-brand-600 text-white hover:bg-brand-700 shadow-brand-100' : 'bg-slate-100 text-slate-400 cursor-default'}`}
-            >
-              {isSaving ? <Loader2 className="animate-spin" size={16}/> : showSaveSuccess ? <CheckCircle size={16}/> : <Save size={16} />} 
-              {showSaveSuccess ? '已保存' : isDirty ? '立即保存' : '已是最新'}
-            </button>
-          )}
         </div>
       </div>
 

@@ -132,6 +132,7 @@ const App: React.FC = () => {
           systemRoles: [],
           aiSettings: DEFAULT_AI_SETTINGS,
           isDirty: false,
+          dirtyDomains: [],
           isSaving: false,
           showSaveSuccess: false,
           backendError: null,

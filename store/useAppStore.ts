@@ -27,8 +27,9 @@ const createInitialDomainLoadStatus = (): Record<AppDomainKey, DomainLoadState> 
   tasks: { loaded: false, loading: false }
 });
 
-interface AppStoreState extends AppState {
+export interface AppStoreState extends AppState {
   isDirty: boolean;
+  dirtyDomains: AppDomainKey[];
   isSaving: boolean;
   showSaveSuccess: boolean;
   backendError: string | null;
@@ -51,6 +52,9 @@ interface AppStoreState extends AppState {
   setBackendError: (error: string | null) => void;
   setCurrentProcessId: (id: string | null) => void;
   setIsInitialLoadComplete: (isComplete: boolean) => void;
+  setDirtyDomains: (domains: AppDomainKey[]) => void;
+  markDirtyDomains: (domains: AppDomainKey[]) => void;
+  clearDirtyDomains: (domains: AppDomainKey[]) => void;
   setDomainLoadState: (domain: AppDomainKey, state: Partial<DomainLoadState>) => void;
   resetDomainLoadState: () => void;
   
@@ -91,6 +95,7 @@ export const useAppStore = create<AppStoreState>((set) => ({
   },
   
   isDirty: false,
+  dirtyDomains: [],
   isSaving: false,
   showSaveSuccess: false,
   backendError: null,
@@ -114,6 +119,16 @@ export const useAppStore = create<AppStoreState>((set) => ({
     return { ...state, ...newState };
   }),
   setIsDirty: (isDirty) => set({ isDirty }),
+  setDirtyDomains: (dirtyDomains) => set({ dirtyDomains, isDirty: dirtyDomains.length > 0 }),
+  markDirtyDomains: (domains) => set((state) => {
+    const dirtyDomains = Array.from(new Set([...state.dirtyDomains, ...domains]));
+    return { dirtyDomains, isDirty: dirtyDomains.length > 0 };
+  }),
+  clearDirtyDomains: (domains) => set((state) => {
+    const targetDomains = new Set(domains);
+    const dirtyDomains = state.dirtyDomains.filter((domain) => !targetDomains.has(domain));
+    return { dirtyDomains, isDirty: dirtyDomains.length > 0 };
+  }),
   setIsSaving: (isSaving) => set({ isSaving }),
   setShowSaveSuccess: (showSaveSuccess) => set({ showSaveSuccess }),
   setBackendError: (backendError) => set({ backendError }),
@@ -138,34 +153,56 @@ export const useAppStore = create<AppStoreState>((set) => ({
   setLastSavedSystemRoles: (lastSavedSystemRoles) => set({ lastSavedSystemRoles }),
   setLastSavedStrategy: (lastSavedStrategy) => set({ lastSavedStrategy }),
   
-  setDepartments: (departments) => set({ departments, isDirty: true }),
-  setUsers: (users) => set({ users, isDirty: true }),
-  setSystemRoles: (systemRoles) => set({ systemRoles, isDirty: true }),
-  setBusinesses: (businesses) => set({ 
-    businesses: businesses.map(b => ({ ...b, updatedAt: Date.now() })), 
+  setDepartments: (departments) => set((state) => ({
+    departments,
+    dirtyDomains: Array.from(new Set([...state.dirtyDomains, 'departments'])),
+    isDirty: true
+  })),
+  setUsers: (users) => set((state) => ({
+    users,
+    dirtyDomains: Array.from(new Set([...state.dirtyDomains, 'users'])),
+    isDirty: true
+  })),
+  setSystemRoles: (systemRoles) => set((state) => ({
+    systemRoles,
+    dirtyDomains: Array.from(new Set([...state.dirtyDomains, 'systemRoles'])),
+    isDirty: true
+  })),
+  setBusinesses: (businesses) => set((state) => ({ 
+    businesses: businesses.map(b => ({ ...b, updatedAt: Date.now() })),
+    dirtyDomains: Array.from(new Set([...state.dirtyDomains, 'businesses'])),
     isDirty: true 
-  }),
-  setTasks: (tasks) => set({ tasks, isDirty: true }),
+  })),
+  setTasks: (tasks) => set((state) => ({
+    tasks,
+    dirtyDomains: Array.from(new Set([...state.dirtyDomains, 'tasks'])),
+    isDirty: true
+  })),
   setStrategy: (strategyPartial) => set((state) => ({ 
     strategy: { ...state.strategy, ...strategyPartial, updatedAt: Date.now() },
+    dirtyDomains: Array.from(new Set([...state.dirtyDomains, 'strategy'])),
     isDirty: true
   })),
   setAISettings: (aiSettings) => set((state) => ({
     aiSettings: { ...state.aiSettings, ...aiSettings, updatedAt: Date.now() },
+    dirtyDomains: Array.from(new Set([...state.dirtyDomains, 'aiSettings'])),
     isDirty: true
   })),
   
   addProcess: (process) => set((state) => ({
     processes: [...state.processes, process],
+    dirtyDomains: Array.from(new Set([...state.dirtyDomains, 'processes'])),
     isDirty: true,
     currentProcessId: process.id
   })),
   updateProcess: (id, processProps) => set((state) => ({
     processes: state.processes.map(p => p.id === id ? { ...p, ...processProps, updatedAt: Date.now() } : p),
+    dirtyDomains: Array.from(new Set([...state.dirtyDomains, 'processes'])),
     isDirty: true
   })),
   deleteProcess: (id) => set((state) => ({
     processes: state.processes.filter(p => p.id !== id),
+    dirtyDomains: Array.from(new Set([...state.dirtyDomains, 'processes'])),
     isDirty: true
   }))
 }));

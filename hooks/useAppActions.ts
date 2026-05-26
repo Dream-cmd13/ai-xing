@@ -6,12 +6,24 @@ import {
   deleteProcess as deleteDbProcess, updateStrategy, addBusiness, updateBusiness, deleteBusiness, 
   addUser as addDbUser, updateUser as updateDbUser, deleteUser as deleteDbUser, addSystemRole, 
   updateSystemRole, deleteSystemRole, addDepartment as addDbDepartment, updateDepartment as updateDbDepartment, 
-  deleteDepartment as deleteDbDepartment, saveAISettings, addTask as addDbTask, updateTask as updateDbTask, deleteTask as deleteDbTask
+  deleteDepartment as deleteDbDepartment, saveAISettings
 } from '@/data';
-import { PADEntry, ProcessDefinition, ProcessHistory } from '@/types';
+import { ProcessDefinition, ProcessHistory } from '@/types';
 import { normalizeForConflictComparison } from '@/syncConflictGuard';
 import { applyDepartmentPatch, buildDepartmentPatch, hasDepartmentPatchConflict } from '@/utils/departmentSyncState.js';
-import { removeTasksById, upsertTasksById } from '@/utils/taskSyncState.js';
+import { useTaskActions } from '@/hooks/useTaskActions';
+
+type SaveDomain = 'strategy' | 'aiSettings' | 'processes' | 'departments' | 'users' | 'systemRoles' | 'businesses';
+
+const ALL_SAVE_DOMAINS: SaveDomain[] = [
+  'strategy',
+  'aiSettings',
+  'processes',
+  'departments',
+  'users',
+  'systemRoles',
+  'businesses'
+];
 
 export const useAppActions = () => {
   const store = useAppStore();
@@ -43,7 +55,6 @@ export const useAppActions = () => {
     try {
       await operation();
       store.setIsSaving(false);
-      store.setIsDirty(false); // Clear dirty on success
       store.setShowSaveSuccess(true);
       setTimeout(() => store.setShowSaveSuccess(false), 3000);
       store.setBackendError(null);
@@ -53,9 +64,9 @@ export const useAppActions = () => {
     }
   }, [isAuthenticated, store]);
 
-  const showSaveSuccessFeedback = (dirtyStateAfterSuccess: boolean) => {
+  const showSaveSuccessFeedback = (clearedDomains: Array<'tasks' | SaveDomain>) => {
     store.setIsSaving(false);
-    store.setIsDirty(dirtyStateAfterSuccess);
+    store.clearDirtyDomains(clearedDomains);
     store.setShowSaveSuccess(true);
     if (saveSuccessTimeoutRef.current) clearTimeout(saveSuccessTimeoutRef.current);
     saveSuccessTimeoutRef.current = setTimeout(() => {
@@ -65,227 +76,172 @@ export const useAppActions = () => {
     store.setBackendError(null);
   };
 
-  const rollbackTaskMutation = (
-    previousTasks: PADEntry[],
-    previousLastSavedTasks: PADEntry[],
-    previousDirtyState: boolean,
-    error: any
-  ) => {
-    store.setState({ tasks: previousTasks });
-    store.setLastSavedTasks(previousLastSavedTasks);
-    store.setIsSaving(false);
-    store.setIsDirty(previousDirtyState);
-    store.setBackendError(error?.message || '任务保存失败');
-    syncStateRef();
+  const { persistTaskEntries, persistTaskDeletion } = useTaskActions({
+    store,
+    isAuthenticated,
+    stateRef,
+    syncStateRef,
+    showSaveSuccessFeedback
+  });
+
+  const saveStrategyDomain = async () => {
+    const savedStrategy = await updateStrategy(stateRef.current.strategy);
+    store.setState({ strategy: savedStrategy });
+    store.setLastSavedStrategy(savedStrategy);
   };
 
-  const persistTaskEntries = useCallback(async (
-    optimisticTasks: PADEntry[],
-    entriesToPersist: PADEntry[],
-    mode: 'create' | 'update'
-  ) => {
-    if (!isAuthenticated) return [];
+  const saveAISettingsDomain = async () => {
+    if (!stateRef.current.aiSettings) return;
+    const savedSettings = await saveAISettings(stateRef.current.aiSettings);
+    store.setState({ aiSettings: savedSettings });
+  };
 
-    const previousTasks = stateRef.current.tasks || [];
-    const previousLastSavedTasks = stateRef.current.lastSavedTasks || [];
-    const previousDirtyState = store.isDirty;
-
-    store.setState({ tasks: optimisticTasks });
-    store.setIsDirty(true);
-    store.setIsSaving(true);
-    syncStateRef();
-
-    try {
-      const savedEntries: PADEntry[] = [];
-      for (const entry of entriesToPersist) {
-        const savedEntry = mode === 'create'
-          ? await addDbTask(entry)
-          : await updateDbTask(entry.id, entry);
-        savedEntries.push(savedEntry);
+  const saveProcessesDomain = async () => {
+    const dirtyIds = Array.from(dirtyProcessIdsRef.current);
+    const nextProcesses = [...stateRef.current.processes];
+    for (const id of dirtyIds as string[]) {
+      const processIndex = nextProcesses.findIndex(p => p.id === id);
+      const process = processIndex >= 0 ? nextProcesses[processIndex] : null;
+      if (process) {
+        const isNew = !store.lastSavedProcesses.some(p => p.id === id);
+        if (isNew) {
+          nextProcesses[processIndex] = await addDbProcess(process);
+        } else {
+          nextProcesses[processIndex] = await updateDbProcess(id, process);
+        }
       }
-
-      const currentTasks = (useAppStore.getState() as any).tasks || [];
-      const mergedTasks = upsertTasksById(currentTasks, savedEntries);
-      const mergedLastSavedTasks = upsertTasksById(previousLastSavedTasks, savedEntries);
-
-      store.setState({ tasks: mergedTasks });
-      store.setLastSavedTasks(mergedLastSavedTasks);
-      showSaveSuccessFeedback(previousDirtyState);
-      syncStateRef();
-      return savedEntries;
-    } catch (error: any) {
-      rollbackTaskMutation(previousTasks, previousLastSavedTasks, previousDirtyState, error);
-      throw error;
     }
-  }, [isAuthenticated, store]);
 
-  const persistTaskDeletion = useCallback(async (
-    optimisticTasks: PADEntry[],
-    taskIds: string[]
-  ) => {
-    if (!isAuthenticated) return;
+    const deletedIds = Array.from(deletedProcessIdsRef.current);
+    for (const id of deletedIds as string[]) {
+      await deleteDbProcess(id);
+    }
 
-    const previousTasks = stateRef.current.tasks || [];
-    const previousLastSavedTasks = stateRef.current.lastSavedTasks || [];
-    const previousDirtyState = store.isDirty;
+    store.setState({ processes: nextProcesses });
+    store.setLastSavedProcesses(nextProcesses);
+    dirtyProcessIdsRef.current.clear();
+    deletedProcessIdsRef.current.clear();
+  };
 
-    store.setState({ tasks: optimisticTasks });
-    store.setIsDirty(true);
-    store.setIsSaving(true);
-    syncStateRef();
+  const saveDepartmentsDomain = async () => {
+    const newDepts = stateRef.current.departments || [];
+    const oldDepts = store.lastSavedDepartments;
+    const currentIds = new Set(newDepts.map(d => d.id));
+    const toDelete = oldDepts.filter(d => !currentIds.has(d.id));
+    for (const d of toDelete) {
+      await deleteDbDepartment(d.id);
+    }
+    const savedDepartments: any[] = [];
+    for (const newDept of newDepts) {
+      const oldDept = oldDepts.find(d => d.id === newDept.id);
+      if (!oldDept) {
+        savedDepartments.push(await addDbDepartment(newDept));
+      } else if (normalizeForConflictComparison(oldDept) !== normalizeForConflictComparison(newDept)) {
+        const departmentPatch = buildDepartmentPatch(oldDept, newDept);
+        try {
+          savedDepartments.push(await updateDbDepartment(newDept.id, departmentPatch));
+        } catch (error) {
+          const latestDept = (useAppStore.getState() as any).lastSavedDepartments?.find((dept: any) => dept.id === newDept.id);
+          if (!latestDept || hasDepartmentPatchConflict(oldDept, newDept, latestDept)) {
+            throw error;
+          }
 
-    try {
-      for (const taskId of taskIds) {
-        await deleteDbTask(taskId);
+          const rebasedDept = applyDepartmentPatch(latestDept, departmentPatch);
+          const retryPatch = buildDepartmentPatch(latestDept, rebasedDept);
+          const retryFields = Object.keys(retryPatch).filter(key => key !== 'rowVersion');
+          if (retryFields.length === 0) {
+            savedDepartments.push(latestDept);
+            continue;
+          }
+
+          savedDepartments.push(await updateDbDepartment(newDept.id, retryPatch));
+        }
+      } else {
+        savedDepartments.push(oldDept);
       }
-
-      const mergedLastSavedTasks = removeTasksById(previousLastSavedTasks, taskIds);
-      store.setLastSavedTasks(mergedLastSavedTasks);
-      showSaveSuccessFeedback(previousDirtyState);
-      syncStateRef();
-    } catch (error: any) {
-      rollbackTaskMutation(previousTasks, previousLastSavedTasks, previousDirtyState, error);
-      throw error;
     }
-  }, [isAuthenticated, store]);
 
-  const handleSave = useCallback(async () => {
+    store.setState({ departments: savedDepartments });
+    store.setLastSavedDepartments(savedDepartments);
+  };
+
+  const saveUsersDomain = async () => {
+    const newUsers = stateRef.current.users || [];
+    const oldUsers = store.lastSavedUsers;
+    const userIds = new Set(newUsers.map(u => u.id));
+    const deletedUsers = oldUsers.filter(u => !userIds.has(u.id));
+    for (const user of deletedUsers) {
+      await deleteDbUser(user.id);
+    }
+    const savedUsers: any[] = [];
+    for (const newUser of newUsers) {
+      const oldUser = oldUsers.find(u => u.id === newUser.id);
+      if (!oldUser) savedUsers.push(await addDbUser(newUser));
+      else if (normalizeForConflictComparison(oldUser) !== normalizeForConflictComparison(newUser)) savedUsers.push(await updateDbUser(newUser.id, newUser));
+      else savedUsers.push(oldUser);
+    }
+
+    store.setState({ users: savedUsers });
+    store.setLastSavedUsers(savedUsers);
+  };
+
+  const saveSystemRolesDomain = async () => {
+    const newRoles = stateRef.current.systemRoles || [];
+    const oldRoles = store.lastSavedSystemRoles;
+    const roleIds = new Set(newRoles.map(r => r.id));
+    const deletedRoles = oldRoles.filter(r => !roleIds.has(r.id));
+    for (const role of deletedRoles) {
+      await deleteSystemRole(role.id);
+    }
+    const savedRoles: any[] = [];
+    for (const newRole of newRoles) {
+      const oldRole = oldRoles.find(r => r.id === newRole.id);
+      if (!oldRole) savedRoles.push(await addSystemRole(newRole));
+      else if (normalizeForConflictComparison(oldRole) !== normalizeForConflictComparison(newRole)) savedRoles.push(await updateSystemRole(newRole.id, newRole));
+      else savedRoles.push(oldRole);
+    }
+
+    store.setState({ systemRoles: savedRoles });
+    store.setLastSavedSystemRoles(savedRoles);
+  };
+
+  const saveBusinessesDomain = async () => {
+    const newBusinesses = stateRef.current.businesses || [];
+    const oldBusinesses = store.lastSavedBusinesses;
+    const businessIds = new Set(newBusinesses.map(b => b.id));
+    const deletedBusinesses = oldBusinesses.filter(b => !businessIds.has(b.id));
+    for (const business of deletedBusinesses) {
+      await deleteBusiness(business.id);
+    }
+    const savedBusinesses: any[] = [];
+    for (const newBiz of newBusinesses) {
+      const oldBiz = oldBusinesses.find(b => b.id === newBiz.id);
+      if (!oldBiz) savedBusinesses.push(await addBusiness(newBiz));
+      else if (normalizeForConflictComparison(oldBiz) !== normalizeForConflictComparison(newBiz)) savedBusinesses.push(await updateBusiness(newBiz.id, newBiz));
+      else savedBusinesses.push(oldBiz);
+    }
+
+    store.setState({ businesses: savedBusinesses });
+    store.setLastSavedBusinesses(savedBusinesses);
+  };
+
+  const handleSave = useCallback(async (domains: SaveDomain[] = ALL_SAVE_DOMAINS) => {
     if (!isAuthenticated) return;
     stateRef.current = useAppStore.getState() as any;
     
     store.setIsSaving(true);
     try {
-      const savedStrategy = await updateStrategy(stateRef.current.strategy);
-      store.setState({ strategy: savedStrategy });
-
-      if (stateRef.current.aiSettings) {
-        const savedSettings = await saveAISettings(stateRef.current.aiSettings);
-        store.setState({ aiSettings: savedSettings });
-      }
-      
-      const dirtyIds = Array.from(dirtyProcessIdsRef.current);
-      const nextProcesses = [...stateRef.current.processes];
-      for (const id of dirtyIds as string[]) {
-        const processIndex = nextProcesses.findIndex(p => p.id === id);
-        const process = processIndex >= 0 ? nextProcesses[processIndex] : null;
-        if (process) {
-          const isNew = !store.lastSavedProcesses.some(p => p.id === id);
-          if (isNew) {
-            nextProcesses[processIndex] = await addDbProcess(process);
-          } else {
-            nextProcesses[processIndex] = await updateDbProcess(id, process);
-          }
-        }
-      }
-      
-      const deletedIds = Array.from(deletedProcessIdsRef.current);
-      for (const id of deletedIds as string[]) {
-        await deleteDbProcess(id);
-      }
- 
-      const newDepts = stateRef.current.departments || [];
-      const oldDepts = store.lastSavedDepartments;
-      const currentIds = new Set(newDepts.map(d => d.id));
-      const toDelete = oldDepts.filter(d => !currentIds.has(d.id));
-      for (const d of toDelete) {
-        await deleteDbDepartment(d.id);
-      }
-      const savedDepartments: any[] = [];
-      for (const newDept of newDepts) {
-        const oldDept = oldDepts.find(d => d.id === newDept.id);
-        if (!oldDept) {
-          savedDepartments.push(await addDbDepartment(newDept));
-        } else if (normalizeForConflictComparison(oldDept) !== normalizeForConflictComparison(newDept)) {
-          const departmentPatch = buildDepartmentPatch(oldDept, newDept);
-          try {
-            savedDepartments.push(await updateDbDepartment(newDept.id, departmentPatch));
-          } catch (error) {
-            const latestDept = (useAppStore.getState() as any).lastSavedDepartments?.find((dept: any) => dept.id === newDept.id);
-            if (!latestDept || hasDepartmentPatchConflict(oldDept, newDept, latestDept)) {
-              throw error;
-            }
-
-            const rebasedDept = applyDepartmentPatch(latestDept, departmentPatch);
-            const retryPatch = buildDepartmentPatch(latestDept, rebasedDept);
-            const retryFields = Object.keys(retryPatch).filter(key => key !== 'rowVersion');
-            if (retryFields.length === 0) {
-              savedDepartments.push(latestDept);
-              continue;
-            }
-
-            savedDepartments.push(await updateDbDepartment(newDept.id, retryPatch));
-          }
-        } else {
-          savedDepartments.push(oldDept);
-        }
+      for (const domain of domains) {
+        if (domain === 'strategy') await saveStrategyDomain();
+        if (domain === 'aiSettings') await saveAISettingsDomain();
+        if (domain === 'processes') await saveProcessesDomain();
+        if (domain === 'departments') await saveDepartmentsDomain();
+        if (domain === 'users') await saveUsersDomain();
+        if (domain === 'systemRoles') await saveSystemRolesDomain();
+        if (domain === 'businesses') await saveBusinessesDomain();
       }
 
-      const newUsers = stateRef.current.users || [];
-      const oldUsers = store.lastSavedUsers;
-      const userIds = new Set(newUsers.map(u => u.id));
-      const deletedUsers = oldUsers.filter(u => !userIds.has(u.id));
-      for (const user of deletedUsers) {
-        await deleteDbUser(user.id);
-      }
-      const savedUsers: any[] = [];
-      for (const newUser of newUsers) {
-        const oldUser = oldUsers.find(u => u.id === newUser.id);
-        if (!oldUser) savedUsers.push(await addDbUser(newUser));
-        else if (normalizeForConflictComparison(oldUser) !== normalizeForConflictComparison(newUser)) savedUsers.push(await updateDbUser(newUser.id, newUser));
-        else savedUsers.push(oldUser);
-      }
-
-      const newRoles = stateRef.current.systemRoles || [];
-      const oldRoles = store.lastSavedSystemRoles;
-      const roleIds = new Set(newRoles.map(r => r.id));
-      const deletedRoles = oldRoles.filter(r => !roleIds.has(r.id));
-      for (const role of deletedRoles) {
-        await deleteSystemRole(role.id);
-      }
-      const savedRoles: any[] = [];
-      for (const newRole of newRoles) {
-        const oldRole = oldRoles.find(r => r.id === newRole.id);
-        if (!oldRole) savedRoles.push(await addSystemRole(newRole));
-        else if (normalizeForConflictComparison(oldRole) !== normalizeForConflictComparison(newRole)) savedRoles.push(await updateSystemRole(newRole.id, newRole));
-        else savedRoles.push(oldRole);
-      }
-
-      const newBusinesses = stateRef.current.businesses || [];
-      const oldBusinesses = store.lastSavedBusinesses;
-      const businessIds = new Set(newBusinesses.map(b => b.id));
-      const deletedBusinesses = oldBusinesses.filter(b => !businessIds.has(b.id));
-      for (const business of deletedBusinesses) {
-        await deleteBusiness(business.id);
-      }
-      const savedBusinesses: any[] = [];
-      for (const newBiz of newBusinesses) {
-        const oldBiz = oldBusinesses.find(b => b.id === newBiz.id);
-        if (!oldBiz) savedBusinesses.push(await addBusiness(newBiz));
-        else if (normalizeForConflictComparison(oldBiz) !== normalizeForConflictComparison(newBiz)) savedBusinesses.push(await updateBusiness(newBiz.id, newBiz));
-        else savedBusinesses.push(oldBiz);
-      }
-      
-      store.setState({ 
-        processes: nextProcesses,
-        departments: savedDepartments,
-        users: savedUsers,
-        systemRoles: savedRoles,
-        businesses: savedBusinesses
-      });
-      store.setLastSavedStrategy(savedStrategy);
-      store.setLastSavedDepartments(savedDepartments);
-      store.setLastSavedProcesses(nextProcesses);
-      store.setLastSavedUsers(savedUsers);
-      store.setLastSavedSystemRoles(savedRoles);
-      store.setLastSavedBusinesses(savedBusinesses);
-      dirtyProcessIdsRef.current.clear();
-      deletedProcessIdsRef.current.clear();
-
-      store.setIsSaving(false);
-      store.setIsDirty(false);
-      store.setShowSaveSuccess(true);
-      setTimeout(() => store.setShowSaveSuccess(false), 3000);
-      store.setBackendError(null);
+      showSaveSuccessFeedback(domains);
     } catch (error: any) {
       store.setIsSaving(false);
       store.setBackendError(error.message || "保存失败");
@@ -327,7 +283,7 @@ export const useAppActions = () => {
       const savedSettings = await saveAISettings(nextSettings);
       store.setState({ aiSettings: savedSettings });
       store.setBackendError(null);
-      store.setIsDirty(false);
+      store.clearDirtyDomains(['aiSettings']);
       store.setShowSaveSuccess(true);
       setTimeout(() => store.setShowSaveSuccess(false), 3000);
     } catch (error: any) {

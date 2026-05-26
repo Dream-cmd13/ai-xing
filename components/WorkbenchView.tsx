@@ -1,11 +1,12 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useAppStore } from '@/store/useAppStore';
 import { useAuthStore } from '@/store/useAuthStore';
 import { useAppActions } from '@/hooks/useAppActions';
 import { usePermissions } from '@/hooks/usePermissions';
+import { getDepartments, getStrategy, getWorkbenchTasks } from '@/data';
 
 import { AppState, PADEntry, OKR, WeeklyPAD, TaskLog } from '@/types';
-import { Calendar, CheckCircle, Clock, Target, ArrowRight, LayoutDashboard, ListTodo, Briefcase, Flag, AlertCircle, Save, Loader2 } from 'lucide-react';
+import { Calendar, CheckCircle, Clock, Target, ArrowRight, LayoutDashboard, ListTodo, Briefcase, Flag, AlertCircle, Loader2 } from 'lucide-react';
 import TaskModal from './TaskModal';
 import { ensureTaskTargetWeeks } from '@/utils/taskPeriods.js';
 
@@ -17,7 +18,6 @@ const WorkbenchView: React.FC = () => {
   const actions = useAppActions();
   const permissions = usePermissions('workbench');
   const { 
-    handleSave, 
     handleSetDepartments: setDepartments, handleSetUsers: setUsers, 
     handleSetSystemRoles: setSystemRoles, handleSetAISettings: setAISettings, 
     handleSetBusinesses: setBusinesses, setProcessData, updateProcessProps, 
@@ -25,9 +25,13 @@ const WorkbenchView: React.FC = () => {
     handleSetTasks: setTasks, handleSetStrategy: setStrategy,
     persistTaskEntries, persistTaskDeletion
   } = actions;
-  const isSaving = state.isSaving;
-  const showSaveSuccess = state.showSaveSuccess;
-  const isDirty = state.isDirty;
+  const domainLoadStatus = state.domainLoadStatus;
+  const setState = state.setState;
+  const setDomainLoadState = state.setDomainLoadState;
+  const setLastSavedDepartments = state.setLastSavedDepartments;
+  const setLastSavedStrategy = state.setLastSavedStrategy;
+  const setLastSavedTasks = state.setLastSavedTasks;
+  const setBackendError = state.setBackendError;
   const setIsDirty = state.setIsDirty;
   const backendError = state.backendError;
   const currentProcessId = state.currentProcessId;
@@ -43,11 +47,89 @@ const WorkbenchView: React.FC = () => {
 
   const [taskModal, setTaskModal] = useState<{ isOpen: boolean, weekId: string | null, mode: 'create' | 'edit', data: Partial<PADEntry> }>({ isOpen: false, weekId: null, mode: 'create', data: {} });
   const [notification, setNotification] = useState<{ message: string; type: 'success' | 'info' | 'error' } | null>(null);
+  const [isWorkbenchTasksLoading, setIsWorkbenchTasksLoading] = useState(false);
+  const backgroundPrefetchVersionRef = useRef(0);
 
   const showNotification = (message: string, type: 'success' | 'info' | 'error' = 'success') => {
     setNotification({ message, type });
     setTimeout(() => setNotification(null), 3000);
   };
+
+  useEffect(() => {
+    if (!currentUser?.id || domainLoadStatus.tasks.loaded) {
+      return;
+    }
+
+    let cancelled = false;
+    setIsWorkbenchTasksLoading(true);
+
+    getWorkbenchTasks(currentUser.id)
+      .then((loadedTasks) => {
+        if (cancelled) return;
+        setState({ tasks: loadedTasks });
+        setLastSavedTasks(loadedTasks);
+      })
+      .catch((error: any) => {
+        if (cancelled) return;
+        const message = error?.message || '工作台任务加载失败';
+        setBackendError(message);
+      })
+      .finally(() => {
+        if (cancelled) return;
+        setIsWorkbenchTasksLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [currentUser?.id, domainLoadStatus.tasks.loaded, setBackendError, setLastSavedTasks, setState]);
+
+  useEffect(() => {
+    const shouldLoadDepartments = !domainLoadStatus.departments.loaded && !domainLoadStatus.departments.loading;
+    const shouldLoadStrategy = !domainLoadStatus.strategy.loaded && !domainLoadStatus.strategy.loading;
+
+    if (!shouldLoadDepartments && !shouldLoadStrategy) {
+      return;
+    }
+
+    const currentPrefetchVersion = backgroundPrefetchVersionRef.current + 1;
+    backgroundPrefetchVersionRef.current = currentPrefetchVersion;
+
+    Promise.all([
+      shouldLoadDepartments ? getDepartments() : Promise.resolve(null),
+      shouldLoadStrategy ? getStrategy() : Promise.resolve(null)
+    ])
+      .then(([loadedDepartments, loadedStrategy]) => {
+        if (backgroundPrefetchVersionRef.current !== currentPrefetchVersion) return;
+
+        if (loadedDepartments) {
+          setState({ departments: loadedDepartments });
+          setLastSavedDepartments(loadedDepartments);
+          setDomainLoadState('departments', { loaded: true });
+        }
+
+        if (loadedStrategy) {
+          setState({ strategy: loadedStrategy });
+          setLastSavedStrategy(loadedStrategy);
+          setDomainLoadState('strategy', { loaded: true });
+        }
+      })
+      .catch((error: any) => {
+        if (backgroundPrefetchVersionRef.current !== currentPrefetchVersion) return;
+        const message = error?.message || '工作台背景数据加载失败';
+        setBackendError(message);
+      });
+  }, [
+    domainLoadStatus.departments.loaded,
+    domainLoadStatus.departments.loading,
+    domainLoadStatus.strategy.loaded,
+    domainLoadStatus.strategy.loading,
+    setBackendError,
+    setDomainLoadState,
+    setLastSavedDepartments,
+    setLastSavedStrategy,
+    setState
+  ]);
 
   // Helper to get tasks from all PADs
   const allMyTasks = useMemo(() => {
@@ -266,14 +348,6 @@ const WorkbenchView: React.FC = () => {
             <span>{today.toLocaleDateString()}</span>
             <span className="bg-slate-100 px-2 py-0.5 rounded text-[10px] md:text-xs text-slate-600">第 {currentWeek} 周</span>
           </div>
-          <button 
-            onClick={handleSave} 
-            disabled={isSaving} 
-            className={`px-6 py-2.5 rounded-xl text-xs font-black uppercase flex items-center gap-2 transition-all shadow-md ${showSaveSuccess ? 'bg-emerald-50 text-emerald-600' : isDirty ? 'bg-brand-600 text-white hover:bg-brand-700 shadow-brand-100' : 'bg-slate-100 text-slate-400 cursor-default'}`}
-          >
-            {isSaving ? <Loader2 className="animate-spin" size={16}/> : showSaveSuccess ? <CheckCircle size={16}/> : <Save size={16} />} 
-            {showSaveSuccess ? '已保存' : isDirty ? '立即保存' : '已是最新'}
-          </button>
         </div>
       </div>
 
@@ -288,7 +362,7 @@ const WorkbenchView: React.FC = () => {
             <span className="text-[10px] md:text-xs font-bold bg-emerald-50 text-emerald-600 px-3 py-1 rounded-full">{todayTasks.length}</span>
           </div>
           <div className="flex-1 overflow-y-auto custom-scrollbar space-y-3 pr-1">
-            {todayTasks.length > 0 ? todayTasks.map(t => (
+            {isWorkbenchTasksLoading ? <ColumnLoadingState label="正在加载今日工作..." /> : todayTasks.length > 0 ? todayTasks.map(t => (
               <TaskCard key={t.id} task={t} onClick={() => handleTaskClick(t)} />
             )) : <EmptyState label="今日暂无待办任务" />}
           </div>
@@ -302,7 +376,7 @@ const WorkbenchView: React.FC = () => {
             <span className="text-[10px] md:text-xs font-bold bg-indigo-50 text-indigo-600 px-3 py-1 rounded-full">{thisWeekTasks.length}</span>
           </div>
           <div className="flex-1 overflow-y-auto custom-scrollbar space-y-3 pr-1">
-            {thisWeekTasks.length > 0 ? thisWeekTasks.map(t => (
+            {isWorkbenchTasksLoading ? <ColumnLoadingState label="正在加载本周工作..." /> : thisWeekTasks.length > 0 ? thisWeekTasks.map(t => (
               <TaskCard key={t.id} task={t} onClick={() => handleTaskClick(t)} />
             )) : <EmptyState label="本周工作计划为空" />}
           </div>
@@ -316,7 +390,7 @@ const WorkbenchView: React.FC = () => {
             <span className="text-[10px] md:text-xs font-bold bg-amber-50 text-amber-600 px-3 py-1 rounded-full">{nextWeekTasks.length}</span>
           </div>
           <div className="flex-1 overflow-y-auto custom-scrollbar space-y-3 pr-1">
-            {nextWeekTasks.length > 0 ? nextWeekTasks.map(t => (
+            {isWorkbenchTasksLoading ? <ColumnLoadingState label="正在加载下周工作..." /> : nextWeekTasks.length > 0 ? nextWeekTasks.map(t => (
               <TaskCard key={t.id} task={t} onClick={() => handleTaskClick(t)} />
             )) : <EmptyState label="下周暂无计划" />}
           </div>
@@ -383,6 +457,13 @@ const TaskCard: React.FC<{ task: PADEntry, onClick: () => void }> = ({ task, onC
 const EmptyState = ({ label }: { label: string }) => (
   <div className="h-full flex flex-col items-center justify-center text-slate-300 gap-2">
     <ListTodo size={32} className="opacity-20"/>
+    <span className="text-xs font-bold">{label}</span>
+  </div>
+);
+
+const ColumnLoadingState = ({ label }: { label: string }) => (
+  <div className="h-full flex flex-col items-center justify-center text-slate-400 gap-3">
+    <Loader2 size={28} className="animate-spin opacity-60" />
     <span className="text-xs font-bold">{label}</span>
   </div>
 );
