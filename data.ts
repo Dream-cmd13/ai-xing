@@ -1,5 +1,5 @@
 
-import { AppState, User, Department, ProcessDefinition, CompanyStrategy, BusinessDefinition, SystemRole, PADEntry, AISettings } from "./types";
+import { AppState, User, Department, ProcessDefinition, CompanyStrategy, BusinessDefinition, SystemRole, PADEntry, AISettings, UserRole } from "./types";
 import { isSupabaseConfigured, supabase } from "./supabase";
 
 /**
@@ -37,6 +37,11 @@ const normalizeRowVersion = (value: any) =>
 const normalizeUpdatedAt = (value: any) =>
   typeof value === 'number' ? value : Number(value || Date.now());
 
+const normalizeUserRole = (value: any): UserRole => {
+  if (value === 'Admin' || value === 'Manager' || value === 'Employee') return value;
+  return 'Employee';
+};
+
 const mapSettingsRow = (settingsData: any): AISettings => ({
   selectedModelId: settingsData?.ai_settings?.selectedModelId || 'gemini',
   configs: settingsData?.ai_settings?.configs || [
@@ -57,7 +62,7 @@ const mapUserRow = (u: any): User => {
     auth_id: u.auth_id,
     username: u.username,
     name: u.name,
-    role: u.role,
+    role: normalizeUserRole(u.role),
     departmentId: u.department_id,
     padPermissions: u.pad_permissions,
     reviews: reviewsMap,
@@ -83,6 +88,7 @@ const mapDepartmentRow = (d: any): Department => {
     id: d.id,
     name: d.name,
     managerName: d.manager_name ?? '',
+    managerUserId: d.manager_user_id ?? undefined,
     responsibilities: d.responsibilities ?? '',
     roles: d.roles || [],
     roleMembers,
@@ -171,7 +177,7 @@ const mapTaskRow = (t: any): PADEntry => ({
 });
 
 const USERS_SELECT_FIELDS = 'id,auth_id,username,name,role,department_id,pad_permissions,reviews,system_role_ids,custom_permissions,updated_at,row_version';
-const DEPARTMENTS_SELECT_FIELDS = 'id,name,manager_name,responsibilities,roles,role_members,attributes,sub_departments,okrs,reviews,updated_at,row_version';
+const DEPARTMENTS_SELECT_FIELDS = 'id,name,manager_name,manager_user_id,responsibilities,roles,role_members,attributes,sub_departments,okrs,reviews,updated_at,row_version';
 const PROCESSES_SELECT_FIELDS = 'id,department_id,created_by,name,category,level,version,is_active,type,owner,co_owner,objective,nodes,links,history,updated_at,row_version';
 const STRATEGY_SELECT_FIELDS = 'id,mission,vision,customer_issues,employee_issues,company_okrs,updated_at,row_version';
 const BUSINESSES_SELECT_FIELDS = 'id,name,business_format,customer_persona,customer_needs,surface_product_power,core_product_power,updated_at,row_version';
@@ -788,7 +794,7 @@ export const addDepartment = async (dept: Department): Promise<Department> => {
   if (!isSupabaseConfigured()) throw new Error("Supabase not configured")
   try {
     const { data, error } = await supabase.from('departments').insert({
-      id: dept.id, name: dept.name, manager_name: dept.managerName ?? '',
+      id: dept.id, name: dept.name, manager_name: dept.managerName ?? '', manager_user_id: dept.managerUserId ?? null,
       responsibilities: dept.responsibilities ?? '', roles: dept.roles || [],
       role_members: dept.roleMembers ?? {}, attributes: dept.attributes ?? '',
       sub_departments: dept.subDepartments ?? [], okrs: dept.okrs ?? {}, reviews: dept.reviews ?? {},
@@ -810,6 +816,7 @@ export const updateDepartment = async (id: string, updates: Partial<Department>)
     const dbUpdates: any = {};
     if (updates.name !== undefined) dbUpdates.name = updates.name;
     if (updates.managerName !== undefined) dbUpdates.manager_name = updates.managerName ?? '';
+    if (updates.managerUserId !== undefined) dbUpdates.manager_user_id = updates.managerUserId ?? null;
     if (updates.responsibilities !== undefined) dbUpdates.responsibilities = updates.responsibilities ?? '';
     if (updates.roles !== undefined) dbUpdates.roles = updates.roles || [];
     if (updates.roleMembers !== undefined) dbUpdates.role_members = updates.roleMembers ?? {};
@@ -952,7 +959,7 @@ export const addUser = async (user: User): Promise<User> => {
   try {
     const { data, error } = await supabase.from('users').insert({
       id: user.id, username: user.username,
-      name: user.name, role: user.role, department_id: user.departmentId || null,
+      name: user.name, role: normalizeUserRole(user.role), department_id: user.departmentId || null,
       pad_permissions: user.padPermissions || null, reviews: null,
       system_role_ids: user.systemRoleIds || null, custom_permissions: user.customPermissions || null,
       auth_id: user.auth_id || null, updated_at: Date.now(), row_version: 0
@@ -973,7 +980,7 @@ export const updateUser = async (id: string, updates: Partial<User>): Promise<Us
     const dbUpdates: any = {};
     if (updates.username !== undefined) dbUpdates.username = updates.username;
     if (updates.name !== undefined) dbUpdates.name = updates.name;
-    if (updates.role !== undefined) dbUpdates.role = updates.role;
+    if (updates.role !== undefined) dbUpdates.role = normalizeUserRole(updates.role);
     if (updates.departmentId !== undefined) dbUpdates.department_id = updates.departmentId || null;
     if (updates.padPermissions !== undefined) dbUpdates.pad_permissions = updates.padPermissions || null;
     if (updates.reviews !== undefined) dbUpdates.reviews = updates.reviews || null;

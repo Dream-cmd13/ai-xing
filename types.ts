@@ -96,6 +96,7 @@ export interface Department {
   id: string;
   name: string;
   managerName?: string; 
+  managerUserId?: string;
   responsibilities?: string; 
   roles: string[];
   roleMembers?: Record<string, string[]>; // New: Map role name -> array of user IDs
@@ -139,13 +140,15 @@ export interface SystemRole {
   rowVersion?: number;
 }
 
+export type UserRole = 'Admin' | 'Manager' | 'Employee';
+
 export interface User {
   id: string;
   auth_id?: string;
   username: string;
   password?: string;
   name: string;
-  role: 'Admin' | 'User';
+  role: UserRole;
   departmentId?: string;
   padPermissions?: string[]; 
   reviews?: Record<string, ReviewEntry[]>;

@@ -28,6 +28,7 @@ CREATE TABLE IF NOT EXISTS public.departments (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL,
   manager_name TEXT,
+  manager_user_id TEXT,
   responsibilities TEXT,
   roles JSONB,
   role_members JSONB,
@@ -138,6 +139,7 @@ ALTER TABLE public.users ADD COLUMN IF NOT EXISTS row_version BIGINT NOT NULL DE
 ALTER TABLE public.departments DROP COLUMN IF EXISTS ent_name;
 ALTER TABLE public.departments ADD COLUMN IF NOT EXISTS updated_at BIGINT NOT NULL DEFAULT 0;
 ALTER TABLE public.departments ADD COLUMN IF NOT EXISTS row_version BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE public.departments ADD COLUMN IF NOT EXISTS manager_user_id TEXT;
 ALTER TABLE public.processes DROP COLUMN IF EXISTS ent_name;
 ALTER TABLE public.processes ADD COLUMN IF NOT EXISTS department_id TEXT;
 ALTER TABLE public.processes ADD COLUMN IF NOT EXISTS created_by TEXT;
@@ -150,6 +152,16 @@ SET
 FROM public.users AS owner_user
 WHERE owner_user.name = process_row.owner
   AND (process_row.department_id IS NULL OR process_row.created_by IS NULL);
+
+UPDATE public.departments AS department_row
+SET manager_user_id = manager_user.id
+FROM public.users AS manager_user
+WHERE manager_user.name = department_row.manager_name
+  AND department_row.manager_user_id IS NULL;
+
+UPDATE public.users
+SET role = 'Employee'
+WHERE role = 'User';
 ALTER TABLE public.businesses DROP COLUMN IF EXISTS ent_name;
 ALTER TABLE public.businesses ADD COLUMN IF NOT EXISTS row_version BIGINT NOT NULL DEFAULT 0;
 ALTER TABLE public.system_roles DROP COLUMN IF EXISTS ent_name;
@@ -214,6 +226,7 @@ DROP TABLE IF EXISTS public.enterprises CASCADE;
 CREATE INDEX IF NOT EXISTS idx_users_auth_id ON public.users(auth_id);
 CREATE INDEX IF NOT EXISTS idx_users_department_id ON public.users(department_id);
 CREATE INDEX IF NOT EXISTS idx_users_username ON public.users(username);
+CREATE INDEX IF NOT EXISTS idx_departments_manager_user_id ON public.departments(manager_user_id);
 
 CREATE INDEX IF NOT EXISTS idx_tasks_owner_id ON public.tasks(owner_id);
 CREATE INDEX IF NOT EXISTS idx_tasks_created_by ON public.tasks(created_by);
@@ -235,6 +248,31 @@ BEGIN
     SELECT 1 FROM public.users
     WHERE auth_id = auth.uid() AND role = 'Admin'
   );
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER STABLE;
+
+CREATE OR REPLACE FUNCTION public.current_user_role()
+RETURNS TEXT AS $$
+  SELECT CASE
+    WHEN role = 'User' THEN 'Employee'
+    ELSE role
+  END
+  FROM public.users
+  WHERE auth_id = auth.uid()
+  LIMIT 1;
+$$ LANGUAGE sql SECURITY DEFINER STABLE;
+
+CREATE OR REPLACE FUNCTION public.is_manager()
+RETURNS BOOLEAN AS $$
+BEGIN
+  RETURN public.current_user_role() = 'Manager';
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER STABLE;
+
+CREATE OR REPLACE FUNCTION public.is_employee()
+RETURNS BOOLEAN AS $$
+BEGIN
+  RETURN public.current_user_role() = 'Employee';
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER STABLE;
 
@@ -263,6 +301,10 @@ DECLARE
   pad_permissions JSONB;
 BEGIN
   IF public.is_admin() THEN
+    RETURN true;
+  END IF;
+
+  IF public.is_manager() THEN
     RETURN true;
   END IF;
 
@@ -413,6 +455,7 @@ BEGIN
         id,
         name,
         manager_name,
+        manager_user_id,
         responsibilities,
         roles,
         role_members,
@@ -427,6 +470,7 @@ BEGIN
         next_item->>'id',
         COALESCE(next_item->>'name', ''),
         COALESCE(next_item->>'managerName', ''),
+        NULLIF(next_item->>'managerUserId', ''),
         COALESCE(next_item->>'responsibilities', ''),
         COALESCE(next_item->'roles', '[]'::jsonb),
         COALESCE(next_item->'roleMembers', '{}'::jsonb),
@@ -448,6 +492,7 @@ BEGIN
         SET
           name = COALESCE(next_item->>'name', ''),
           manager_name = COALESCE(next_item->>'managerName', ''),
+          manager_user_id = NULLIF(next_item->>'managerUserId', ''),
           responsibilities = COALESCE(next_item->>'responsibilities', ''),
           roles = COALESCE(next_item->'roles', '[]'::jsonb),
           role_members = COALESCE(next_item->'roleMembers', '{}'::jsonb),
@@ -728,7 +773,7 @@ BEGIN
         next_item->>'id',
         COALESCE(next_item->>'username', ''),
         COALESCE(next_item->>'name', ''),
-        COALESCE(next_item->>'role', 'User'),
+        COALESCE(NULLIF(next_item->>'role', ''), 'Employee'),
         NULLIF(next_item->>'departmentId', ''),
         CASE WHEN next_item ? 'padPermissions' THEN COALESCE(next_item->'padPermissions', '[]'::jsonb) ELSE NULL END,
         CASE WHEN next_item ? 'reviews' THEN COALESCE(next_item->'reviews', '{}'::jsonb) ELSE NULL END,
@@ -749,7 +794,7 @@ BEGIN
         SET
           username = COALESCE(next_item->>'username', ''),
           name = COALESCE(next_item->>'name', ''),
-          role = COALESCE(next_item->>'role', 'User'),
+          role = COALESCE(NULLIF(next_item->>'role', ''), 'Employee'),
           department_id = NULLIF(next_item->>'departmentId', ''),
           pad_permissions = CASE WHEN next_item ? 'padPermissions' THEN COALESCE(next_item->'padPermissions', '[]'::jsonb) ELSE NULL END,
           reviews = CASE WHEN next_item ? 'reviews' THEN COALESCE(next_item->'reviews', '{}'::jsonb) ELSE NULL END,

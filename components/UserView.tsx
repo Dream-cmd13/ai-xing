@@ -5,9 +5,10 @@ import { useAuthStore } from '../store/useAuthStore';
 import { useAppActions } from '../hooks/useAppActions';
 import { usePermissions } from '../hooks/usePermissions';
 
-import { AppState, User, Department, MenuPermission } from '../types';
+import { AppState, User, Department, MenuPermission, UserRole } from '../types';
 import { addUser as addDbUser, updateUser as updateDbUser, deleteUser as deleteDbUser } from '../data';
 import { supabase } from '../supabase';
+import { getUserRoleLabel } from '../utils/permissions';
 import { 
   Plus, Trash2, ShieldCheck, User as UserIcon, Key, RotateCcw,
   Building2, EyeOff, Save, WifiOff, CheckCircle, Lock, Unlock, AlertTriangle, UserMinus,
@@ -41,7 +42,7 @@ const UserView: React.FC = () => {
 
   const [newName, setNewName] = useState('');
   const [newUsername, setNewUsername] = useState('');
-  const [newRole, setNewRole] = useState<'Admin' | 'User'>('User');
+  const [newRole, setNewRole] = useState<UserRole>('Employee');
   const [newDeptId, setNewDeptId] = useState('');
   
   const [selectedDeptId, setSelectedDeptId] = useState<string | null>(null);
@@ -206,13 +207,8 @@ const UserView: React.FC = () => {
     setPendingDeleteUser(null);
   };
 
-  const toggleUserRole = (userId: string) => {
-    const userToUpdate = state.users.find(u => u.id === userId);
-    if (!userToUpdate) return;
-    
-    const newRole = userToUpdate.role === 'Admin' ? 'User' : 'Admin';
-    const updatedUsers = state.users.map(u => u.id === userId ? { ...u, role: newRole as 'Admin' | 'User' } : u);
-    
+  const updateUserRole = (userId: string, role: UserRole) => {
+    const updatedUsers = state.users.map(u => u.id === userId ? { ...u, role } : u);
     setUsers(updatedUsers);
     setIsDirty(true);
   };
@@ -261,7 +257,7 @@ const UserView: React.FC = () => {
           id: `imp-${uid}-${Date.now()}`,
           username: uid,
           name: uname,
-          role: 'User',
+          role: 'Employee',
           departmentId: deptId,
           padPermissions: []
         });
@@ -359,7 +355,7 @@ const UserView: React.FC = () => {
                   {flatDepts.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
                 </select>
               </div>
-              <div className="w-full md:w-40 space-y-2"><label className="text-[10px] font-black uppercase text-brand-600 tracking-widest">系统角色</label><select className="w-full px-4 py-3 bg-white border border-brand-200 rounded-2xl text-sm font-bold outline-none" value={newRole} onChange={e => setNewRole(e.target.value as any)}><option value="User">普通成员</option><option value="Admin">管理员</option></select></div>
+              <div className="w-full md:w-40 space-y-2"><label className="text-[10px] font-black uppercase text-brand-600 tracking-widest">业务角色</label><select className="w-full px-4 py-3 bg-white border border-brand-200 rounded-2xl text-sm font-bold outline-none" value={newRole} onChange={e => setNewRole(e.target.value as UserRole)}><option value="Employee">普通员工</option><option value="Manager">部门长</option><option value="Admin">管理员</option></select></div>
               <button onClick={addUser} className="w-full md:w-auto justify-center bg-brand-600 text-white px-8 py-4 rounded-2xl text-xs font-black uppercase tracking-widest shadow-xl transition-all flex items-center gap-2"><Plus size={16}/> 创建用户</button>
             </div>
           )}
@@ -373,7 +369,7 @@ const UserView: React.FC = () => {
                     <div className="flex-1 flex flex-col md:flex-row gap-6 md:gap-10">
                       <div className="w-full md:w-80 flex flex-col gap-4 border-b md:border-b-0 md:border-r pb-6 md:pb-0 pr-0 md:pr-10">
                         <div className="flex items-center gap-4">
-                          <div className={`w-14 h-14 rounded-2xl flex items-center justify-center ${u.role === 'Admin' ? 'bg-brand-50 text-brand-600' : 'bg-slate-50 text-slate-400'}`}>{u.role === 'Admin' ? <ShieldCheck size={28}/> : <UserIcon size={28}/>}</div>
+                          <div className={`w-14 h-14 rounded-2xl flex items-center justify-center ${u.role === 'Admin' ? 'bg-brand-50 text-brand-600' : u.role === 'Manager' ? 'bg-amber-50 text-amber-600' : 'bg-slate-50 text-slate-400'}`}>{u.role === 'Admin' ? <ShieldCheck size={28}/> : <UserIcon size={28}/>}</div>
                           <div><h4 className="font-black text-xl text-slate-800">{u.name}</h4><p className="text-[10px] font-black text-slate-400 uppercase">账号: {u.username}</p></div>
                         </div>
                         <div className="space-y-2 mt-4">
@@ -389,13 +385,20 @@ const UserView: React.FC = () => {
                                 {flatDepts.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
                             </select>
                           </div>
-                          <button 
-                            disabled={!permissions.update}
-                            onClick={() => u.id !== currentUser.id && toggleUserRole(u.id)} 
-                            className={`w-full mt-2 flex items-center gap-2 text-[10px] font-black uppercase px-2 py-2 rounded transition-colors ${u.role === 'Admin' ? 'bg-brand-50 text-brand-600' : 'bg-slate-100 text-slate-400 hover:bg-brand-50 hover:text-brand-600'} ${!permissions.update ? 'opacity-50 cursor-not-allowed' : ''}`}
-                          >
-                            <ShieldCheck size={12}/> 系统角色: {u.role}
-                          </button>
+                          <div className="w-full mt-2 flex items-center gap-2">
+                            <ShieldCheck size={12} className={u.role === 'Admin' ? 'text-brand-600' : u.role === 'Manager' ? 'text-amber-600' : 'text-slate-400'} />
+                            <select
+                              disabled={!permissions.update || u.id === currentUser.id}
+                              value={u.role}
+                              onChange={(e) => updateUserRole(u.id, e.target.value as UserRole)}
+                              className={`w-full bg-slate-50 border rounded-lg text-[10px] font-black uppercase px-2 py-2 outline-none ${u.role === 'Admin' ? 'border-brand-200 text-brand-600' : u.role === 'Manager' ? 'border-amber-200 text-amber-600' : 'border-slate-200 text-slate-500'} ${(!permissions.update || u.id === currentUser.id) ? 'opacity-50 cursor-not-allowed' : ''}`}
+                            >
+                              <option value="Employee">普通员工</option>
+                              <option value="Manager">部门长</option>
+                              <option value="Admin">管理员</option>
+                            </select>
+                          </div>
+                          <p className="text-[9px] font-bold text-slate-400">{getUserRoleLabel(u.role)}</p>
                         </div>
                       </div>
 

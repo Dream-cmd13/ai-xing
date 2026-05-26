@@ -3,6 +3,7 @@ import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { useAuthStore } from '../store/useAuthStore';
 import { useAppStore } from '../store/useAppStore';
 import { MENU_GROUPS } from '../constants';
+import { hasPermission as hasMenuPermission } from '../utils/permissions';
 import { 
   ShieldCheck, Settings, LogOut, X, Menu, LayoutDashboard, GitGraph, Target, Building2,
   Calendar, Users, UserCog, ShieldCheck as ShieldCheckIcon, Settings as SettingsIcon,
@@ -47,14 +48,10 @@ export const MainLayout: React.FC = () => {
     }
   };
 
-  const hasPermission = (menuId: string) => {
+  const canAccessMenu = (menuId: string) => {
     if (menuId === 'workbench') return true;
     if (!currentUser) return false;
-    if (currentUser.role === 'Admin') return true;
-    const userRole = systemRoles?.find(r => r.name === currentUser.role);
-    if (!userRole) return false;
-    const perm = userRole.permissions[menuId];
-    return perm ? perm.view : false;
+    return hasMenuPermission(currentUser, systemRoles || [], menuId, 'view');
   };
 
   return (
@@ -95,7 +92,7 @@ export const MainLayout: React.FC = () => {
 
         <nav className="flex-1 p-4 space-y-4 overflow-y-auto custom-scrollbar">
           {MENU_GROUPS.map((group, idx) => {
-            const visibleItems = group.items.filter(item => hasPermission(item.id));
+            const visibleItems = group.items.filter(item => canAccessMenu(item.id));
             if (visibleItems.length === 0) return null;
             
             return (

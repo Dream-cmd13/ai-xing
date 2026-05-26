@@ -117,7 +117,7 @@ const OrgView: React.FC = () => {
 
   const addRootDepartment = () => {
     if (!newRootDeptName.trim()) return;
-    const newDept: Department = { id: `dept-${Date.now()}`, name: newRootDeptName, roles: [], subDepartments: [], attributes: '', managerName: '', responsibilities: '' };
+    const newDept: Department = { id: `dept-${Date.now()}`, name: newRootDeptName, roles: [], subDepartments: [], attributes: '', managerName: '', managerUserId: undefined, responsibilities: '' };
     updateDepartments([...departments, newDept]);
     setNewRootDeptName('');
     setShowAddRootModal(false);
@@ -125,7 +125,7 @@ const OrgView: React.FC = () => {
 
   const addSubDepartment = (parentId: string) => {
     if (!newSubDeptName.trim()) return;
-    const newDept: Department = { id: `dept-${Date.now()}`, name: newSubDeptName, roles: [], subDepartments: [], attributes: '', managerName: '', responsibilities: '' };
+    const newDept: Department = { id: `dept-${Date.now()}`, name: newSubDeptName, roles: [], subDepartments: [], attributes: '', managerName: '', managerUserId: undefined, responsibilities: '' };
     updateDepartments(updateDeptRecursive(departments, parentId, d => ({ ...d, subDepartments: [...(d.subDepartments || []), newDept] })));
     setNewSubDeptName('');
     setAddingToId(null);
@@ -172,6 +172,15 @@ const OrgView: React.FC = () => {
 
   const updateDeptField = (deptId: string, field: keyof Department, val: string) => {
     updateDepartments(updateDeptRecursive(departments, deptId, d => ({ ...d, [field]: val })));
+  };
+
+  const updateDeptManager = (deptId: string, managerUserId: string) => {
+    const manager = users.find((user) => user.id === managerUserId);
+    updateDepartments(updateDeptRecursive(departments, deptId, (department) => ({
+      ...department,
+      managerUserId: managerUserId || undefined,
+      managerName: manager?.name || ''
+    })));
   };
 
   const performDeleteDept = () => {
@@ -229,12 +238,12 @@ const OrgView: React.FC = () => {
                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-1"><UserIcon size={10}/> 部门负责人</label>
                  <select 
                   className="w-full p-2.5 bg-slate-50 border rounded-xl text-xs font-bold outline-none border-slate-200 focus:border-brand-500 disabled:opacity-50" 
-                  value={d.managerName || ''} 
+                  value={d.managerUserId || ''} 
                   disabled={!permissions.update}
-                  onChange={e => updateDeptField(d.id, 'managerName', e.target.value)} 
+                  onChange={e => updateDeptManager(d.id, e.target.value)} 
                 >
                   <option value="">选择负责人...</option>
-                  {users.map(u => <option key={u.id} value={u.name}>{u.name}</option>)}
+                  {users.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
                 </select>
               </div>
               <div className="space-y-1">

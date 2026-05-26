@@ -3,6 +3,7 @@ import { normalizeForConflictComparison } from '../syncConflictGuard.ts';
 const DEPARTMENT_PATCH_FIELDS = [
   'name',
   'managerName',
+  'managerUserId',
   'responsibilities',
   'roles',
   'roleMembers',

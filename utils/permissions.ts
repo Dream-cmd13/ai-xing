@@ -1,6 +1,11 @@
-import { User, SystemRole, MenuPermission, Department, PADEntry } from '../types';
+import { User, SystemRole, MenuPermission, Department, PADEntry, UserRole } from '../types';
 
-const hasAdminAccess = (user: User, systemRoles: SystemRole[] = []): boolean => {
+export const normalizeUserRole = (role: string | undefined): UserRole => {
+  if (role === 'Admin' || role === 'Manager' || role === 'Employee') return role;
+  return 'Employee';
+};
+
+export const isAdminUser = (user: User, systemRoles: SystemRole[] = []): boolean => {
   if (user.role === 'Admin') return true;
 
   if (user.systemRoleIds && systemRoles.length > 0) {
@@ -13,8 +18,21 @@ const hasAdminAccess = (user: User, systemRoles: SystemRole[] = []): boolean => 
   return false;
 };
 
+export const isManagerUser = (user: User): boolean => normalizeUserRole(user.role) === 'Manager';
+
+export const getUserRoleLabel = (role: UserRole): string => {
+  switch (role) {
+    case 'Admin':
+      return '管理员';
+    case 'Manager':
+      return '部门长';
+    default:
+      return '普通员工';
+  }
+};
+
 export const canViewTask = (task: PADEntry, currentUser: User, users: User[], systemRoles: SystemRole[] = []): boolean => {
-  if (hasAdminAccess(currentUser, systemRoles)) return true;
+  if (isAdminUser(currentUser, systemRoles) || isManagerUser(currentUser)) return true;
 
   const taskDeptId = task.departmentId || users.find(u => u.id === task.ownerId)?.departmentId;
   
@@ -31,7 +49,7 @@ export const canViewTask = (task: PADEntry, currentUser: User, users: User[], sy
 };
 
 export const canManageTask = (task: PADEntry, currentUser: User, systemRoles: SystemRole[] = []): boolean => {
-  if (hasAdminAccess(currentUser, systemRoles)) return true;
+  if (isAdminUser(currentUser, systemRoles)) return true;
   return task.createdBy === currentUser.id;
 };
 
@@ -40,7 +58,7 @@ export const canManageProcess = (
   currentUser: User,
   systemRoles: SystemRole[] = []
 ): boolean => {
-  if (hasAdminAccess(currentUser, systemRoles)) return true;
+  if (isAdminUser(currentUser, systemRoles)) return true;
   return process.createdBy === currentUser.id;
 };
 
@@ -51,7 +69,7 @@ export const hasPermission = (
   action: keyof MenuPermission
 ): boolean => {
   if (menuId === 'workbench') return true;
-  if (hasAdminAccess(user, systemRoles)) return true;
+  if (isAdminUser(user, systemRoles)) return true;
 
   // Check custom permissions first (override)
   if (user.customPermissions && user.customPermissions[menuId]) {
@@ -73,7 +91,7 @@ export const hasPermission = (
 };
 
 export const getVisibleDepartments = (user: User, allDepartments: Department[], systemRoles: SystemRole[] = []): Department[] => {
-  if (hasAdminAccess(user, systemRoles)) return allDepartments;
+  if (isAdminUser(user, systemRoles) || isManagerUser(user)) return allDepartments;
 
   const visibleIds = new Set<string>();
   if (user.departmentId) visibleIds.add(user.departmentId);
