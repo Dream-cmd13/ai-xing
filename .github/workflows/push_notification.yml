@@ -1,0 +1,41 @@
+name: Dev Branch Push Notification
+
+on:
+  push:
+    branches:
+      - dev # 只在 dev 分支有代码推送时触发
+
+jobs:
+  send-email:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 发送 QQ 邮件通知
+        uses: dawidd6/action-send-mail@v3
+        with:
+          # 配置 QQ 邮箱的 SMTP 服务器信息
+          server_address: smtp.qq.com
+          server_port: 465
+          secure: true
+          
+          # 发件人身份验证（使用你配置的 Secret）
+          username: 981130406@qq.com
+          password: ${{ secrets.QQ_MAIL_KEY }}
+          
+          # 邮件内容设置
+          subject: "【AI星组织通知】dev 分支有新的代码推送！"
+          from: GitHub 机器人 <981130406@qq.com>
+          
+          # 收件人列表（用英文逗号隔开，全员接收最为简单稳妥，推送者也能收到确认）
+          to: 981130406@qq.com,2012209952@qq.com
+          
+          # 邮件正文（支持多行文本）
+          body: |
+            项目仓库: ${{ github.repository }}
+            触发分支: ${{ github.ref_name }}
+            代码推送者: ${{ github.actor }}
+            
+            最新提交信息:
+            ${{ github.event.head_commit.message }}
+            
+            查看本次提交对比详情:
+            ${{ github.event.compare }}
