@@ -12,7 +12,6 @@ jobs:
       - name: 发送 QQ 邮件通知
         uses: dawidd6/action-send-mail@v3
         env:
-          # 修复 Node.js 20 弃用警告，强制使用 Node 24 运行
           FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true 
         with:
           server_address: smtp.qq.com
@@ -20,7 +19,10 @@ jobs:
           secure: true
           username: 981130406@qq.com
           password: ${{ secrets.QQ_MAIL_KEY }}
-          subject: "【GitHub 通知】dev 分支有新的代码推送！"
+          
+          # 🌟 这里将邮件标题改为了具体的 commit 消息
+          subject: "【dev】${{ github.event.head_commit.message }}"
+          
           from: GitHub 机器人 <981130406@qq.com>
           to: 981130406@qq.com,2012209952@qq.com
           body: |
