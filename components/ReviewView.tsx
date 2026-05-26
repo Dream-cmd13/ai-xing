@@ -8,7 +8,7 @@ import { usePermissions } from '../hooks/usePermissions';
 import { AppState, Department, ReviewEntry, ObjectiveReview, User, PADEntry, MenuPermission, OKR } from '../types';
 import { Calendar, Building2, ClipboardCheck, Save, CheckCircle, Loader2, Target, TrendingUp, MessageSquare, FileText, AlertCircle, Lock, Download, RefreshCw } from 'lucide-react';
 import TaskModal from './TaskModal';
-import { getVisibleDepartments, canViewTask } from '../utils/permissions';
+import { canManageTask, getVisibleDepartments, canViewTask } from '../utils/permissions';
 import { isTaskInMonthlyPeriod, isTaskInWeeklyPeriod } from '../utils/taskPeriods.js';
 import { readTaskReviewState, updateTaskReviewState } from '../utils/reviewTaskState.js';
 
@@ -746,7 +746,7 @@ const ReviewView: React.FC = () => {
         departments={state.departments}
         groupedAvailableKRs={groupedAvailableKRs}
         mode={taskModal.mode}
-        readOnly={false}
+        readOnly={!canManageTask(taskModal.data as PADEntry, currentUser, state.systemRoles || [])}
       />
     </div>
   );

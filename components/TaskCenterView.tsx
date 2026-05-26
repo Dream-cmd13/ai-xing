@@ -11,7 +11,7 @@ import {
   Plus
 } from 'lucide-react';
 import TaskModal from './TaskModal';
-import { getVisibleDepartments, canViewTask } from '../utils/permissions';
+import { getVisibleDepartments, canManageTask, canViewTask } from '../utils/permissions';
 import { ensureTaskTargetWeeks } from '../utils/taskPeriods.js';
 
 
@@ -575,7 +575,11 @@ const TaskCenterView: React.FC = () => {
         departments={departments}
         groupedAvailableKRs={groupedAvailableKRs}
         mode={taskModal.mode}
-        readOnly={!permissions.update}
+        readOnly={
+          taskModal.mode === 'create'
+            ? !permissions.create
+            : (!permissions.update || !canManageTask(taskModal.data as PADEntry, currentUser, state.systemRoles || []))
+        }
         aiSettings={state.aiSettings}
       />
     </div>

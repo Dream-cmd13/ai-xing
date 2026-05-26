@@ -8,7 +8,7 @@ import { AppState, Department, User, WeeklyPAD, PADEntry, OKR, TaskLog, MenuPerm
 import PeriodAlignmentView from './PeriodAlignmentView';
 import TaskModal from './TaskModal';
 import { Building2, ChevronDown, ChevronRight, LayoutGrid, Plus, X, Calendar, User as UserIcon, Clock, CheckCircle, AlertCircle } from 'lucide-react';
-import { getVisibleDepartments } from '../utils/permissions';
+import { canManageTask, getVisibleDepartments } from '../utils/permissions';
 import { ensureTaskTargetWeeks } from '../utils/taskPeriods.js';
 
 
@@ -433,7 +433,11 @@ const ExecutionView: React.FC = () => {
         departments={state.departments}
         groupedAvailableKRs={groupedAvailableKRs}
         mode={taskModal.mode}
-        readOnly={taskModal.mode === 'create' ? !permissions.create : !permissions.update}
+        readOnly={
+          taskModal.mode === 'create'
+            ? !permissions.create
+            : (!permissions.update || !canManageTask(taskModal.data as PADEntry, currentUser, state.systemRoles || []))
+        }
         periodWeeks={periodWeeks}
       />
     </div>

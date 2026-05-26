@@ -1,19 +1,24 @@
 import { User, SystemRole, MenuPermission, Department, PADEntry } from '../types';
 
-export const canViewTask = (task: PADEntry, currentUser: User, users: User[], systemRoles: SystemRole[] = []): boolean => {
-  if (currentUser.role === 'Admin') return true;
+const hasAdminAccess = (user: User, systemRoles: SystemRole[] = []): boolean => {
+  if (user.role === 'Admin') return true;
 
-  // Check if user has a system role named 'admin'
-  if (currentUser.systemRoleIds && systemRoles.length > 0) {
-    const hasAdminRole = currentUser.systemRoleIds.some(roleId => {
+  if (user.systemRoleIds && systemRoles.length > 0) {
+    return user.systemRoleIds.some(roleId => {
       const role = systemRoles.find(r => r.id === roleId);
       return role && (role.name.toLowerCase() === 'admin' || role.id === 'admin');
     });
-    if (hasAdminRole) return true;
   }
+
+  return false;
+};
+
+export const canViewTask = (task: PADEntry, currentUser: User, users: User[], systemRoles: SystemRole[] = []): boolean => {
+  if (hasAdminAccess(currentUser, systemRoles)) return true;
 
   const taskDeptId = task.departmentId || users.find(u => u.id === task.ownerId)?.departmentId;
   
+  if (task.createdBy === currentUser.id) return true;
   if (taskDeptId === currentUser.departmentId) return true;
   if (currentUser.padPermissions && taskDeptId && currentUser.padPermissions.includes(taskDeptId)) return true;
   
@@ -25,6 +30,11 @@ export const canViewTask = (task: PADEntry, currentUser: User, users: User[], sy
   return false;
 };
 
+export const canManageTask = (task: PADEntry, currentUser: User, systemRoles: SystemRole[] = []): boolean => {
+  if (hasAdminAccess(currentUser, systemRoles)) return true;
+  return task.createdBy === currentUser.id;
+};
+
 export const hasPermission = (
   user: User,
   systemRoles: SystemRole[],
@@ -32,17 +42,7 @@ export const hasPermission = (
   action: keyof MenuPermission
 ): boolean => {
   if (menuId === 'workbench') return true;
-  // Admin role has all permissions
-  if (user.role === 'Admin') return true;
-
-  // Check if user has a system role named 'admin'
-  if (user.systemRoleIds && systemRoles.length > 0) {
-    const hasAdminRole = user.systemRoleIds.some(roleId => {
-      const role = systemRoles.find(r => r.id === roleId);
-      return role && (role.name.toLowerCase() === 'admin' || role.id === 'admin');
-    });
-    if (hasAdminRole) return true;
-  }
+  if (hasAdminAccess(user, systemRoles)) return true;
 
   // Check custom permissions first (override)
   if (user.customPermissions && user.customPermissions[menuId]) {
@@ -64,16 +64,7 @@ export const hasPermission = (
 };
 
 export const getVisibleDepartments = (user: User, allDepartments: Department[], systemRoles: SystemRole[] = []): Department[] => {
-  if (user.role === 'Admin') return allDepartments;
-
-  // Check if user has a system role named 'admin'
-  if (user.systemRoleIds && systemRoles.length > 0) {
-    const hasAdminRole = user.systemRoleIds.some(roleId => {
-      const role = systemRoles.find(r => r.id === roleId);
-      return role && (role.name.toLowerCase() === 'admin' || role.id === 'admin');
-    });
-    if (hasAdminRole) return allDepartments;
-  }
+  if (hasAdminAccess(user, systemRoles)) return allDepartments;
 
   const visibleIds = new Set<string>();
   if (user.departmentId) visibleIds.add(user.departmentId);

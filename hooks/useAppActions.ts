@@ -74,6 +74,7 @@ export const useAppActions = () => {
   const { persistTaskEntries, persistTaskDeletion } = useTaskActions({
     store,
     isAuthenticated,
+    currentUser,
     stateRef,
     syncStateRef,
     showSaveSuccessFeedback

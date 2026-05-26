@@ -146,6 +146,7 @@ const mapSystemRoleRow = (r: any): SystemRole => ({
 
 const mapTaskRow = (t: any): PADEntry => ({
   id: t.id,
+  createdBy: t.created_by ?? t.owner_id,
   title: t.title,
   status: t.status,
   priority: t.priority,
@@ -173,7 +174,7 @@ const PROCESSES_SELECT_FIELDS = 'id,name,category,level,version,is_active,type,o
 const STRATEGY_SELECT_FIELDS = 'id,mission,vision,customer_issues,employee_issues,company_okrs,updated_at,row_version';
 const BUSINESSES_SELECT_FIELDS = 'id,name,business_format,customer_persona,customer_needs,surface_product_power,core_product_power,updated_at,row_version';
 const SYSTEM_ROLES_SELECT_FIELDS = 'id,name,description,permissions,updated_at,row_version';
-const TASKS_SELECT_FIELDS = 'id,title,status,priority,owner_id,department_id,visibility,aligned_kr_id,target_weeks,start_date,due_date,tags,participant_ids,approver_ids,logs,plan,action,deliverable,updated_at,row_version';
+const TASKS_SELECT_FIELDS = 'id,created_by,title,status,priority,owner_id,department_id,visibility,aligned_kr_id,target_weeks,start_date,due_date,tags,participant_ids,approver_ids,logs,plan,action,deliverable,updated_at,row_version';
 
 const isIgnoredNoRowsError = (error: any) => error?.code === 'PGRST116';
 const isIgnoredMissingTableError = (error: any) => error?.code === '42P01';
@@ -1019,6 +1020,7 @@ export const addTask = async (task: PADEntry): Promise<PADEntry> => {
     const taskData = {
       id: task.id,
       department_id: task.departmentId || null,
+      created_by: task.createdBy || task.ownerId || null,
       title: task.title || '',
       status: task.status || 'draft',
       priority: task.priority || 'medium',

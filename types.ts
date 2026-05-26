@@ -164,6 +164,7 @@ export interface TaskLog {
 export interface PADEntry {
   id: string;
   departmentId?: string;
+  createdBy?: string;
   title: string;
   status: 'draft' | 'submitted' | 'approved' | 'completed' | 'in-progress' | 'paused' | 'terminated';
   priority: 'low' | 'medium' | 'high';

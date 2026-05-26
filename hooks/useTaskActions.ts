@@ -1,12 +1,13 @@
 import { MutableRefObject, useCallback } from 'react';
 import { addTask as addDbTask, updateTask as updateDbTask, deleteTask as deleteDbTask } from '@/data';
 import { AppStoreState, useAppStore } from '@/store/useAppStore';
-import { PADEntry } from '@/types';
+import { PADEntry, User } from '@/types';
 import { removeTasksById, upsertTasksById } from '@/utils/taskSyncState.js';
 
 interface UseTaskActionsOptions {
   store: AppStoreState;
   isAuthenticated: boolean;
+  currentUser: User | null;
   stateRef: MutableRefObject<any>;
   syncStateRef: () => void;
   showSaveSuccessFeedback: (clearedDomains: string[]) => void;
@@ -15,6 +16,7 @@ interface UseTaskActionsOptions {
 export const useTaskActions = ({
   store,
   isAuthenticated,
+  currentUser,
   stateRef,
   syncStateRef,
   showSaveSuccessFeedback
@@ -38,20 +40,32 @@ export const useTaskActions = ({
     entriesToPersist: PADEntry[],
     mode: 'create' | 'update'
   ) => {
-    if (!isAuthenticated) return [];
+    if (!isAuthenticated || !currentUser) return [];
 
     const previousTasks = stateRef.current.tasks || [];
     const previousLastSavedTasks = stateRef.current.lastSavedTasks || [];
     const previousDirtyDomains = [...store.dirtyDomains];
+    const normalizedEntries = entriesToPersist.map((entry) => {
+      const previousTask = previousLastSavedTasks.find((task) => task.id === entry.id);
+      return {
+        ...entry,
+        createdBy: mode === 'create'
+          ? currentUser.id
+          : entry.createdBy ?? previousTask?.createdBy ?? currentUser.id,
+        departmentId: entry.departmentId ?? previousTask?.departmentId ?? currentUser.departmentId
+      };
+    });
+    const optimisticTaskMap = new Map(normalizedEntries.map((entry) => [entry.id, entry]));
+    const nextOptimisticTasks = optimisticTasks.map((task) => optimisticTaskMap.get(task.id) ?? task);
 
-    store.setState({ tasks: optimisticTasks });
+    store.setState({ tasks: nextOptimisticTasks });
     store.setIsDirty(true);
     store.setIsSaving(true);
     syncStateRef();
 
     try {
       const savedEntries: PADEntry[] = [];
-      for (const entry of entriesToPersist) {
+      for (const entry of normalizedEntries) {
         const savedEntry = mode === 'create'
           ? await addDbTask(entry)
           : await updateDbTask(entry.id, entry);
@@ -71,7 +85,7 @@ export const useTaskActions = ({
       rollbackTaskMutation(previousTasks, previousLastSavedTasks, previousDirtyDomains, error);
       throw error;
     }
-  }, [isAuthenticated, showSaveSuccessFeedback, stateRef, store, syncStateRef]);
+  }, [currentUser, isAuthenticated, showSaveSuccessFeedback, stateRef, store, syncStateRef]);
 
   const persistTaskDeletion = useCallback(async (
     optimisticTasks: PADEntry[],

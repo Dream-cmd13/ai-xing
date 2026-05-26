@@ -12,7 +12,7 @@ import {
   Building2, ChevronDown, Link2, User as UserIcon, 
   ChevronLeft, ChevronRight, LayoutGrid, Target, Clock, WifiOff, List, X, Lock, MessageSquare, Edit2
 } from 'lucide-react';
-import { getVisibleDepartments, canViewTask } from '../utils/permissions';
+import { canManageTask, getVisibleDepartments, canViewTask } from '../utils/permissions';
 import { ensureTaskTargetWeeks } from '../utils/taskPeriods.js';
 
 
@@ -511,7 +511,11 @@ const WeeklyView: React.FC = () => {
         departments={state.departments}
         groupedAvailableKRs={groupedAvailableKRs}
         mode={taskModal.mode}
-        readOnly={taskModal.mode === 'create' ? !permissions.create : (!permissions.update || selectedOwnerId !== currentUser.id)}
+        readOnly={
+          taskModal.mode === 'create'
+            ? !permissions.create
+            : (!permissions.update || !canManageTask(taskModal.data as PADEntry, currentUser, state.systemRoles || []))
+        }
         aiSettings={state.aiSettings}
       />
 

@@ -9,6 +9,7 @@ import { AppState, PADEntry, OKR, WeeklyPAD, TaskLog } from '@/types';
 import { Calendar, CheckCircle, Clock, Target, ArrowRight, LayoutDashboard, ListTodo, Briefcase, Flag, AlertCircle, Loader2 } from 'lucide-react';
 import TaskModal from './TaskModal';
 import { ensureTaskTargetWeeks } from '@/utils/taskPeriods.js';
+import { canManageTask } from '@/utils/permissions';
 
 const WorkbenchView: React.FC = () => {
   const state = useAppStore();
@@ -423,6 +424,11 @@ const WorkbenchView: React.FC = () => {
         departments={state.departments}
         groupedAvailableKRs={groupedAvailableKRs}
         mode={taskModal.mode}
+        readOnly={
+          taskModal.mode === 'create'
+            ? !permissions.create
+            : (!permissions.update || !canManageTask(taskModal.data as PADEntry, currentUser, state.systemRoles || []))
+        }
         aiSettings={state.aiSettings}
       />
     </div>

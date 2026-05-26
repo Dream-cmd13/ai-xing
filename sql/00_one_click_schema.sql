@@ -83,6 +83,7 @@ CREATE TABLE IF NOT EXISTS public.businesses (
 CREATE TABLE IF NOT EXISTS public.tasks (
   id TEXT PRIMARY KEY,
   department_id TEXT,
+  created_by TEXT,
   title TEXT NOT NULL,
   status TEXT NOT NULL,
   priority TEXT NOT NULL,
@@ -146,8 +147,13 @@ ALTER TABLE public.system_roles ADD COLUMN IF NOT EXISTS row_version BIGINT NOT 
 ALTER TABLE public.tasks DROP COLUMN IF EXISTS ent_name;
 ALTER TABLE public.tasks ADD COLUMN IF NOT EXISTS pad_id TEXT;
 ALTER TABLE public.tasks ADD COLUMN IF NOT EXISTS version TEXT;
+ALTER TABLE public.tasks ADD COLUMN IF NOT EXISTS created_by TEXT;
 ALTER TABLE public.tasks ADD COLUMN IF NOT EXISTS updated_at BIGINT NOT NULL DEFAULT 0;
 ALTER TABLE public.tasks ADD COLUMN IF NOT EXISTS row_version BIGINT NOT NULL DEFAULT 0;
+
+UPDATE public.tasks
+SET created_by = owner_id
+WHERE created_by IS NULL;
 
 -- Strategy migration from old multi-tenant shape (ent_name as PK) to id='default'
 DO $$
@@ -198,6 +204,7 @@ CREATE INDEX IF NOT EXISTS idx_users_department_id ON public.users(department_id
 CREATE INDEX IF NOT EXISTS idx_users_username ON public.users(username);
 
 CREATE INDEX IF NOT EXISTS idx_tasks_owner_id ON public.tasks(owner_id);
+CREATE INDEX IF NOT EXISTS idx_tasks_created_by ON public.tasks(created_by);
 CREATE INDEX IF NOT EXISTS idx_tasks_department_id ON public.tasks(department_id);
 CREATE INDEX IF NOT EXISTS idx_tasks_status ON public.tasks(status);
 CREATE INDEX IF NOT EXISTS idx_tasks_priority ON public.tasks(priority);
@@ -221,6 +228,93 @@ CREATE OR REPLACE FUNCTION public.current_user_id()
 RETURNS TEXT AS $$
   SELECT id FROM public.users WHERE auth_id = auth.uid() LIMIT 1;
 $$ LANGUAGE sql SECURITY DEFINER STABLE;
+
+CREATE OR REPLACE FUNCTION public.current_user_department_id()
+RETURNS TEXT AS $$
+  SELECT department_id FROM public.users WHERE auth_id = auth.uid() LIMIT 1;
+$$ LANGUAGE sql SECURITY DEFINER STABLE;
+
+CREATE OR REPLACE FUNCTION public.current_user_pad_permissions()
+RETURNS JSONB AS $$
+  SELECT COALESCE(pad_permissions, '[]'::jsonb)
+  FROM public.users
+  WHERE auth_id = auth.uid()
+  LIMIT 1;
+$$ LANGUAGE sql SECURITY DEFINER STABLE;
+
+CREATE OR REPLACE FUNCTION public.current_user_has_department_visibility(target_department_id TEXT)
+RETURNS BOOLEAN AS $$
+DECLARE
+  current_department_id TEXT;
+  pad_permissions JSONB;
+BEGIN
+  IF public.is_admin() THEN
+    RETURN true;
+  END IF;
+
+  IF target_department_id IS NULL THEN
+    RETURN false;
+  END IF;
+
+  current_department_id := public.current_user_department_id();
+  IF current_department_id IS NOT NULL AND current_department_id = target_department_id THEN
+    RETURN true;
+  END IF;
+
+  pad_permissions := public.current_user_pad_permissions();
+  RETURN EXISTS (
+    SELECT 1
+    FROM jsonb_array_elements_text(COALESCE(pad_permissions, '[]'::jsonb)) AS permission_value(value)
+    WHERE permission_value.value = target_department_id
+  );
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER STABLE;
+
+CREATE OR REPLACE FUNCTION public.current_user_can_view_task(
+  task_department_id TEXT,
+  task_created_by TEXT,
+  task_owner_id TEXT,
+  task_participant_ids JSONB,
+  task_approver_ids JSONB
+)
+RETURNS BOOLEAN AS $$
+DECLARE
+  current_id TEXT;
+  resolved_department_id TEXT;
+BEGIN
+  IF public.is_admin() THEN
+    RETURN true;
+  END IF;
+
+  current_id := public.current_user_id();
+  resolved_department_id := COALESCE(
+    task_department_id,
+    (SELECT department_id FROM public.users WHERE id = task_owner_id LIMIT 1)
+  );
+
+  IF task_created_by = current_id OR task_owner_id = current_id THEN
+    RETURN true;
+  END IF;
+
+  IF EXISTS (
+    SELECT 1
+    FROM jsonb_array_elements_text(COALESCE(task_participant_ids, '[]'::jsonb)) AS participant_value(value)
+    WHERE participant_value.value = current_id
+  ) THEN
+    RETURN true;
+  END IF;
+
+  IF EXISTS (
+    SELECT 1
+    FROM jsonb_array_elements_text(COALESCE(task_approver_ids, '[]'::jsonb)) AS approver_value(value)
+    WHERE approver_value.value = current_id
+  ) THEN
+    RETURN true;
+  END IF;
+
+  RETURN public.current_user_has_department_visibility(resolved_department_id);
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER STABLE;
 
 CREATE OR REPLACE FUNCTION public.save_departments_atomic(
   p_next_departments JSONB,
@@ -885,12 +979,35 @@ CREATE POLICY businesses_insert ON public.businesses FOR INSERT TO authenticated
 CREATE POLICY businesses_update ON public.businesses FOR UPDATE TO authenticated USING (public.is_admin()) WITH CHECK (public.is_admin());
 CREATE POLICY businesses_delete ON public.businesses FOR DELETE TO authenticated USING (public.is_admin());
 
-CREATE POLICY tasks_select ON public.tasks FOR SELECT TO authenticated USING (true);
-CREATE POLICY tasks_insert ON public.tasks FOR INSERT TO authenticated WITH CHECK (true);
+CREATE POLICY tasks_select ON public.tasks FOR SELECT TO authenticated
+  USING (
+    public.current_user_can_view_task(
+      department_id,
+      created_by,
+      owner_id,
+      participant_ids,
+      approver_ids
+    )
+  );
+CREATE POLICY tasks_insert ON public.tasks FOR INSERT TO authenticated
+  WITH CHECK (
+    public.is_admin()
+    OR (
+      created_by = public.current_user_id()
+      AND department_id = public.current_user_department_id()
+    )
+  );
 CREATE POLICY tasks_update ON public.tasks FOR UPDATE TO authenticated
-  USING (owner_id = public.current_user_id() OR public.is_admin())
-  WITH CHECK (owner_id = public.current_user_id() OR public.is_admin());
-CREATE POLICY tasks_delete ON public.tasks FOR DELETE TO authenticated USING (public.is_admin());
+  USING (created_by = public.current_user_id() OR public.is_admin())
+  WITH CHECK (
+    public.is_admin()
+    OR (
+      created_by = public.current_user_id()
+      AND department_id = public.current_user_department_id()
+    )
+  );
+CREATE POLICY tasks_delete ON public.tasks FOR DELETE TO authenticated
+  USING (created_by = public.current_user_id() OR public.is_admin());
 
 CREATE POLICY system_roles_select ON public.system_roles FOR SELECT TO authenticated USING (true);
 CREATE POLICY system_roles_insert ON public.system_roles FOR INSERT TO authenticated WITH CHECK (public.is_admin());
