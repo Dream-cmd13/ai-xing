@@ -52,6 +52,40 @@ const findDepartmentById = (
   return undefined;
 };
 
+const collectManagedDepartments = (
+  departments: Department[] = [],
+  currentUserId: string
+): Department[] => {
+  const matches: Department[] = [];
+
+  departments.forEach((department) => {
+    if (department.managerUserId === currentUserId) {
+      matches.push(department);
+    }
+
+    if (department.subDepartments?.length) {
+      matches.push(...collectManagedDepartments(department.subDepartments, currentUserId));
+    }
+  });
+
+  return matches;
+};
+
+export const getManagedDepartments = (
+  currentUser: User,
+  departments: Department[] = []
+): Department[] => collectManagedDepartments(departments, currentUser.id);
+
+export const getManagedDepartmentIds = (
+  currentUser: User,
+  departments: Department[] = []
+): string[] => getManagedDepartments(currentUser, departments).map((department) => department.id);
+
+export const getPrimaryManagedDepartmentId = (
+  currentUser: User,
+  departments: Department[] = []
+): string | undefined => getManagedDepartmentIds(currentUser, departments)[0];
+
 const isManagedDepartment = (targetDepartmentId: string | undefined, currentUser: User, departments: Department[] = []): boolean => {
   if (!targetDepartmentId) return false;
 
@@ -100,6 +134,17 @@ export const canManageProcess = (
   if (isAdminUser(currentUser, systemRoles)) return true;
   if (isManagerUser(currentUser) && isManagedDepartment(process.departmentId, currentUser, departments)) return true;
   return process.createdBy === currentUser.id;
+};
+
+export const canPersistProcess = (
+  process: { departmentId?: string },
+  currentUser: User,
+  systemRoles: SystemRole[] = [],
+  departments: Department[] = []
+): boolean => {
+  if (isAdminUser(currentUser, systemRoles)) return true;
+  if (!isManagerUser(currentUser)) return false;
+  return getManagedDepartmentIds(currentUser, departments).includes(process.departmentId || '');
 };
 
 export const canManageDepartment = (

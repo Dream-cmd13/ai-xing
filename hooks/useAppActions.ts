@@ -7,6 +7,8 @@ import {
 } from '@/data';
 import { ProcessDefinition, ProcessHistory } from '@/types';
 import { useTaskActions } from '@/hooks/useTaskActions';
+import { getUserFacingError } from '@/utils/userFacingError';
+import { getPrimaryManagedDepartmentId, isAdminUser, isManagerUser } from '@/utils/permissions';
 
 type SaveDomain = 'strategy' | 'aiSettings' | 'processes' | 'departments' | 'users' | 'systemRoles' | 'businesses';
 
@@ -55,7 +57,7 @@ export const useAppActions = () => {
       store.setBackendError(null);
     } catch (error: any) {
       store.setIsSaving(false);
-      store.setBackendError(error.message || "操作失败");
+      store.setBackendError(getUserFacingError(error, '操作失败，请稍后重试'));
     }
   }, [isAuthenticated, store]);
 
@@ -158,7 +160,7 @@ export const useAppActions = () => {
       showSaveSuccessFeedback(domains);
     } catch (error: any) {
       store.setIsSaving(false);
-      store.setBackendError(error.message || "保存失败");
+      store.setBackendError(getUserFacingError(error, '保存失败，请稍后重试'));
     }
   }, [isAuthenticated, store]);
 
@@ -201,7 +203,7 @@ export const useAppActions = () => {
       store.setShowSaveSuccess(true);
       setTimeout(() => store.setShowSaveSuccess(false), 3000);
     } catch (error: any) {
-      store.setBackendError(error.message || '保存系统设置失败');
+      store.setBackendError(getUserFacingError(error, '保存系统设置失败，请稍后重试'));
     } finally {
       store.setIsSaving(false);
     }
@@ -228,11 +230,35 @@ export const useAppActions = () => {
   };
 
   const addProcess = (category: any, level: 1 | 2, name: string) => {
+    const trimmedName = name.trim();
+    if (!trimmedName) {
+      store.setBackendError('请输入流程名称');
+      return false;
+    }
+
+    if (!currentUser) {
+      store.setBackendError('当前未登录，无法创建流程');
+      return false;
+    }
+
+    const currentDepartments = stateRef.current.departments || [];
+    const departmentId = isAdminUser(currentUser, store.systemRoles || [])
+      ? currentUser.departmentId
+      : isManagerUser(currentUser)
+        ? getPrimaryManagedDepartmentId(currentUser, currentDepartments)
+        : undefined;
+
+    if (!departmentId) {
+      store.setBackendError('当前账号未绑定可管理部门，无法创建流程，请联系管理员配置部门负责人');
+      return false;
+    }
+
+    store.setBackendError(null);
     const newProcess: ProcessDefinition = {
       id: `proc-${Date.now()}`,
-      departmentId: currentUser?.departmentId,
-      createdBy: currentUser?.id,
-      name,
+      departmentId,
+      createdBy: currentUser.id,
+      name: trimmedName,
       category,
       level,
       version: 'Draft',
@@ -250,6 +276,7 @@ export const useAppActions = () => {
     dirtyProcessIdsRef.current.add(newProcess.id);
     store.setIsDirty(true);
     syncStateRef();
+    return true;
   };
 
   const deleteProcessFn = (id: string) => {

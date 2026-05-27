@@ -1,11 +1,13 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../store/useAuthStore';
 
-import { ShieldCheck, Loader2 as Spinner, AlertCircle } from 'lucide-react';
-import { toast } from 'sonner';
+import { ShieldCheck, Loader2 as Spinner } from 'lucide-react';
+import PageToast from './PageToast';
+import { usePageToast } from '../hooks/usePageToast';
 import { cn } from '../utils/cn';
 import { supabase } from '../supabase';
+import { getUserFacingError } from '../utils/userFacingError';
 
 
 
@@ -13,21 +15,26 @@ const LoginView: React.FC = () => {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const { toastState, showToast, clearToast } = usePageToast();
 
   const { isAuthenticated } = useAuthStore();
   const navigate = useNavigate();
 
-  React.useEffect(() => {
+  useEffect(() => {
     if (isAuthenticated) {
       navigate('/workbench', { replace: true });
     }
   }, [isAuthenticated, navigate]);
 
+  useEffect(() => {
+    clearToast();
+  }, [clearToast, username, password]);
+
   const handleLogin = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     
     if (!username.trim() || !password.trim()) {
-      toast.error('请输入用户名和密码');
+      showToast('请输入用户名和密码', 'error');
       return;
     }
 
@@ -42,15 +49,15 @@ const LoginView: React.FC = () => {
       });
 
       if (authError) {
-        toast.error(`登录失败：${authError.message}`);
+        showToast(getUserFacingError(authError, '登录失败，请检查账号或密码后重试'), 'error');
         return;
       }
 
       if (authData.user) {
-        toast.success('登录成功，正在初始化数据...');
+        showToast('登录成功，正在初始化数据...', 'success');
       }
     } catch (error: any) {
-      toast.error(`登录出错：${error.message || '未知错误'}`);
+      showToast(getUserFacingError(error, '登录失败，请稍后重试'), 'error');
     } finally {
       setIsLoading(false);
     }
@@ -58,13 +65,19 @@ const LoginView: React.FC = () => {
 
   return (
     <div className="min-h-screen w-full flex items-center justify-center bg-slate-900 p-6 relative">
+      <PageToast
+        visible={!!toastState}
+        message={toastState?.message || ''}
+        type={toastState?.type}
+        onClose={clearToast}
+      />
       <div className="w-full max-w-md bg-white rounded-[2.5rem] shadow-2xl overflow-hidden p-10 animate-in fade-in zoom-in duration-500">
         <div className="text-center mb-8">
           <div className="inline-flex items-center justify-center w-20 h-20 bg-brand-50 rounded-3xl mb-4">
             <ShieldCheck className="h-10 w-10 text-brand-600" />
           </div>
           <h1 className="text-2xl font-black text-slate-800 tracking-tighter text-center">AI星组织 工作台</h1>
-          <p className="text-slate-400 text-xs font-bold mt-2 uppercase tracking-widest">StratFlow AI Enterprise</p>
+          <p className="text-slate-400 text-xs font-bold mt-2 uppercase tracking-widest">组织协同工作平台</p>
         </div>
         
         <form onSubmit={handleLogin} className="space-y-4">
@@ -114,7 +127,7 @@ const LoginView: React.FC = () => {
         
         <div className="mt-8 pt-6 border-t border-slate-50 text-center">
           <p className="text-[10px] text-slate-400 font-bold uppercase tracking-tighter">
-            &copy; 2026 StratFlow AI. All rights reserved.
+            &copy; 2026 AI星组织 版权所有
           </p>
         </div>
       </div>

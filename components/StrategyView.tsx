@@ -3,6 +3,9 @@ import { useAppStore } from '@/store/useAppStore';
 import { useAuthStore } from '@/store/useAuthStore';
 import { useAppActions } from '@/hooks/useAppActions';
 import { usePermissions } from '@/hooks/usePermissions';
+import { usePageToast } from '@/hooks/usePageToast';
+import PageToast from '@/components/PageToast';
+import { canManageDepartment, getVisibleDepartments } from '@/utils/permissions';
 
 import { AppState, OKR, Department, CompanyStrategy, ReviewEntry, ObjectiveReview, KRReview, WeeklyPAD, PADEntry, User, MenuPermission } from '@/types';
 import { checkOKRQuality, checkStrategyQuality } from '@/services/gemini';
@@ -82,8 +85,10 @@ const StrategyView: React.FC = () => {
   const dirtyDomains = state.dirtyDomains;
   const setIsDirty = state.setIsDirty;
   const backendError = state.backendError;
+  const setBackendError = state.setBackendError;
   const currentProcessId = state.currentProcessId;
   const setCurrentProcessId = state.setCurrentProcessId;
+  const { toastState, showToast, clearToast } = usePageToast();
 
   // State
   const [selectedYear, setSelectedYear] = useState<number>(new Date().getFullYear());
@@ -214,6 +219,33 @@ const StrategyView: React.FC = () => {
     collect(state.departments);
     return list;
   }, [state.departments]);
+
+  const visibleDeptCards = useMemo(() => {
+    if (!currentUser) return [];
+
+    const visibleDepartments = getVisibleDepartments(currentUser, state.departments, state.systemRoles || []);
+    const list: Array<{ department: Department; depth: number }> = [];
+    const collect = (departments: Department[], depth = 0) => {
+      departments.forEach((department) => {
+        list.push({ department, depth });
+        if (department.subDepartments?.length) {
+          collect(department.subDepartments, depth + 1);
+        }
+      });
+    };
+
+    collect(visibleDepartments);
+    return list;
+  }, [currentUser, state.departments, state.systemRoles]);
+
+  const canEditDeptOkr = (department: Department) =>
+    !!currentUser && permissions.update && canManageDepartment(department, currentUser, state.systemRoles || []);
+
+  useEffect(() => {
+    if (!backendError) return;
+    showToast(backendError, 'error');
+    setBackendError(null);
+  }, [backendError, setBackendError, showToast]);
 
   // Sync available years from data
   const calculatedYears = useMemo(() => {
@@ -449,6 +481,12 @@ const StrategyView: React.FC = () => {
 
   return (
     <div className="h-full flex flex-col gap-4 md:gap-6 p-4 md:p-6 bg-slate-50 relative overflow-hidden">
+      <PageToast
+        visible={!!toastState}
+        message={toastState?.message || ''}
+        type={toastState?.type}
+        onClose={clearToast}
+      />
       <div className="bg-white p-4 md:p-6 rounded-[2.5rem] border shadow-sm flex flex-col md:flex-row justify-between items-start md:items-center gap-4 shrink-0">
         <div className="flex items-center gap-4 w-full md:w-auto">
           <div className="w-10 h-10 md:w-12 md:h-12 bg-brand-50 rounded-2xl flex items-center justify-center text-brand-600 shadow-inner shrink-0"><Target size={20} className="md:w-6 md:h-6"/></div>
@@ -461,7 +499,7 @@ const StrategyView: React.FC = () => {
                   {availableYears.map(y => <option key={y} value={y}>{y} 年度</option>)}
                 </select>
               </div>
-              {permissions.create && (
+              {permissions.update && (
                 <button onClick={addNewYear} className="p-1 md:p-1.5 text-slate-400 hover:text-brand-600 hover:bg-brand-50 rounded-lg transition-all" title="新增规划年度"><Plus size={14} className="md:w-4 md:h-4"/></button>
               )}
               <div className="w-px h-4 bg-slate-200 mx-1 md:mx-2 hidden md:block"></div>
@@ -497,7 +535,7 @@ const StrategyView: React.FC = () => {
           <div className="max-w-4xl mx-auto space-y-6 md:space-y-8 pb-12 py-4 md:py-6">
             <header className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
                <h3 className="text-xs md:text-sm font-black text-slate-400 uppercase tracking-widest flex items-center gap-2"><Calendar size={16}/> {selectedYear} 年度公司核心战略目标</h3>
-               {permissions.create && (
+              {permissions.update && (
                  <button onClick={() => updateStrategy({ companyOKRs: { ...state.strategy.companyOKRs, [selectedYear]: [...currentCompanyOKRs, { id: `c-okr-${Date.now()}`, objective: '', keyResults: [''] }] } })} className="bg-brand-600 text-white font-black text-xs px-4 md:px-6 py-2 md:py-2.5 rounded-xl md:rounded-2xl shadow-xl shadow-brand-100 hover:bg-brand-700 transition-all flex items-center gap-2 w-full md:w-auto justify-center">
                    <Plus size={16}/> 新增年度战略
                  </button>
@@ -589,16 +627,29 @@ const StrategyView: React.FC = () => {
                )}
             </div>
 
-            {state.departments.map(d => {
+            {visibleDeptCards.map(({ department: d, depth }) => {
               const targetPeriod = deptViewMode === 'Annual' ? 'Annual' : activeQuarter;
               const periodOkrs = (d.okrs?.[selectedYear]?.[targetPeriod]) || [];
+              const canEditCurrentDepartment = canEditDeptOkr(d);
               return (
                 <div key={d.id} className="bg-white rounded-[2rem] md:rounded-[3rem] border shadow-sm overflow-hidden mb-4 md:mb-6 group">
                   <div onClick={() => setExpandedDept(expandedDept === d.id ? null : d.id)} className="p-4 md:p-8 flex flex-col md:flex-row justify-between items-start md:items-center cursor-pointer hover:bg-slate-50 transition-colors gap-4">
                     <div className="flex items-center gap-4 md:gap-5 w-full md:w-auto">
                       <div className={`p-3 md:p-4 rounded-xl md:rounded-2xl shrink-0 ${expandedDept === d.id ? 'bg-brand-600 text-white' : 'bg-slate-100 text-slate-400'}`}><Building2 size={20} className="md:w-6 md:h-6"/></div>
                       <div className="flex-1">
-                        <h4 className="font-black text-lg md:text-xl text-slate-800">{d.name}</h4>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <h4 className="font-black text-lg md:text-xl text-slate-800">{d.name}</h4>
+                          {depth > 0 && (
+                            <span className="text-[10px] font-black bg-slate-100 text-slate-500 px-2 py-0.5 rounded uppercase">
+                              L{depth + 1}
+                            </span>
+                          )}
+                          {!canEditCurrentDepartment && (
+                            <span className="text-[10px] font-black bg-slate-100 text-slate-500 px-2 py-0.5 rounded uppercase">
+                              只读
+                            </span>
+                          )}
+                        </div>
                         <div className="flex flex-wrap items-center gap-2 md:gap-3 mt-1">
                           <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{targetPeriod} 治理</span>
                           {d.managerName && <span className="text-[10px] font-black bg-brand-50 text-brand-600 px-2 py-0.5 rounded uppercase">负责人: {d.managerName}</span>}
@@ -620,7 +671,7 @@ const StrategyView: React.FC = () => {
                                <IMEInput 
                                  className="w-full font-black text-slate-800 outline-none text-base md:text-lg border-b-2 border-slate-50 focus:border-brand-300 transition-colors bg-transparent pb-1 disabled:opacity-50" 
                                  value={okr.objective || ''} 
-                                 disabled={!permissions.update}
+                                 disabled={!canEditCurrentDepartment}
                                  onChange={e => updateDeptOkrField(d.id, targetPeriod, idx, { objective: e.target.value })} 
                                  placeholder="输入部门目标..." 
                                />
@@ -636,7 +687,7 @@ const StrategyView: React.FC = () => {
                                      okrIdx: idx,
                                      currentAlignedIds: okr.alignedToIds || []
                                    })}
-                                   disabled={!permissions.update}
+                                  disabled={!canEditCurrentDepartment}
                                    className="bg-transparent text-[10px] font-black outline-none w-full md:max-w-[200px] truncate hover:text-brand-600 text-left disabled:opacity-50"
                                  >
                                    {okr.alignedToIds && okr.alignedToIds.length > 0 
@@ -648,7 +699,7 @@ const StrategyView: React.FC = () => {
                                  {checking === okr.id ? <Loader2 className="animate-spin h-3 w-3 md:h-4 md:w-4"/> : <Wand2 size={14} className="md:w-4 md:h-4"/>}
                                  <span className="text-[10px] font-black uppercase">AI 检查</span>
                                </button>
-                               {permissions.update && (
+                               {canEditCurrentDepartment && (
                                  <button onClick={() => setPendingDeleteOkr({deptId: d.id, period: targetPeriod, okrIdx: idx})} className="p-2 md:p-3 text-red-100 hover:text-red-400 rounded-xl bg-red-50 md:bg-transparent"><Trash2 size={14} className="md:w-4 md:h-4"/></button>
                                )}
                              </div>
@@ -661,15 +712,15 @@ const StrategyView: React.FC = () => {
                                  <IMEInput 
                                    className="flex-1 bg-slate-50 p-2 rounded-xl text-[10px] md:text-xs font-bold text-slate-600 border border-transparent focus:border-brand-100 focus:bg-white outline-none disabled:opacity-50"
                                    value={kr || ''}
-                                   disabled={!permissions.update}
+                                   disabled={!canEditCurrentDepartment}
                                    onChange={e => updateDeptKR(d.id, targetPeriod, idx, ki, e.target.value)}
                                  />
-                                 {permissions.update && (
+                                 {canEditCurrentDepartment && (
                                    <button onClick={() => deleteDeptKR(d.id, targetPeriod, idx, ki)} className="p-1 text-slate-300 hover:text-red-500"><Minus size={14}/></button>
                                  )}
                                </div>
                              ))}
-                             {permissions.update && (
+                             {canEditCurrentDepartment && (
                                <button onClick={() => addDeptKR(d.id, targetPeriod, idx)} className="ml-3 md:ml-4 text-[10px] font-black text-brand-600 py-1 flex items-center gap-1"><Plus size={12}/> 添加量化指标</button>
                              )}
                           </div>
@@ -682,7 +733,7 @@ const StrategyView: React.FC = () => {
                           )}
                         </div>
                       ))}
-                      {permissions.create && (
+                      {canEditCurrentDepartment && (
                         <button onClick={() => addDeptOkr(d.id, targetPeriod)} className="w-full py-4 md:py-5 border-2 border-dashed border-slate-200 rounded-2xl md:rounded-[2.5rem] text-slate-400 font-black uppercase text-[10px] md:text-xs hover:border-brand-300 hover:text-brand-600 hover:bg-white transition-all flex items-center justify-center gap-2">
                           <Plus size={16} className="md:w-[18px] md:h-[18px]"/> 录入 {targetPeriod} 目标
                         </button>

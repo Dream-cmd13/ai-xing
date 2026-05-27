@@ -1,4 +1,4 @@
-﻿import React, { useState, useMemo } from 'react';
+﻿import React, { useEffect, useMemo, useState } from 'react';
 import { useAppStore } from '../store/useAppStore';
 import { useAuthStore } from '../store/useAuthStore';
 import { useAppActions } from '../hooks/useAppActions';
@@ -6,11 +6,14 @@ import { usePermissions } from '../hooks/usePermissions';
 
 import { AppState, WeeklyPAD, PADEntry, User, Department, OKR, TaskLog, MenuPermission } from '../types';
 import { 
-  LayoutList, CheckCircle, Clock, AlertCircle, User as UserIcon, 
+  LayoutList, Clock, User as UserIcon, 
   Building2, Filter, Search, Calendar, Tag, ChevronDown, ChevronRight,
   Plus
 } from 'lucide-react';
+import PageToast from './PageToast';
 import TaskModal from './TaskModal';
+import { usePageToast } from '../hooks/usePageToast';
+import { getUserFacingError } from '../utils/userFacingError';
 import { getVisibleDepartments, canManageTask, canViewTask } from '../utils/permissions';
 import { ensureTaskTargetWeeks } from '../utils/taskPeriods.js';
 
@@ -51,12 +54,11 @@ const TaskCenterView: React.FC = () => {
   const [priorityFilter, setPriorityFilter] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [taskModal, setTaskModal] = useState<{ isOpen: boolean, weekId: string | null, padId: string | null, mode: 'create' | 'edit', data: Partial<PADEntry> }>({ isOpen: false, weekId: null, padId: null, mode: 'create', data: {} });
-  const [notification, setNotification] = useState<{ message: string; type: 'success' | 'info' | 'error' } | null>(null);
+  const { toastState, showToast, clearToast } = usePageToast();
 
-  const showNotification = (message: string, type: 'success' | 'info' | 'error' = 'success') => {
-    setNotification({ message, type });
-    setTimeout(() => setNotification(null), 3000);
-  };
+  useEffect(() => {
+    clearToast();
+  }, [clearToast, filterType, statusFilter, priorityFilter]);
 
   const handleTaskClick = (task: PADEntry, padId: string) => {
     const isOwner = task.ownerId === currentUser.id;
@@ -79,7 +81,7 @@ const TaskCenterView: React.FC = () => {
     }
 
     if (!hasPermission) {
-      showNotification(`无任务查看权限，如果需要查看任务，请联系任务创建人【${owner?.name || ''}】`, 'info');
+      showToast(`无任务查看权限，如果需要查看任务，请联系任务创建人【${owner?.name || ''}】`, 'info');
       return;
     }
 
@@ -177,9 +179,9 @@ const TaskCenterView: React.FC = () => {
       } else {
         setTaskModal({ isOpen: false, weekId: null, padId: null, mode: 'create', data: {} });
       }
-      showNotification('任务已保存', 'success');
+      showToast('任务已保存', 'success');
     } catch (error: any) {
-      showNotification(error.message || '任务保存失败', 'error');
+      showToast(getUserFacingError(error, '任务保存失败，请稍后重试'), 'error');
     }
   };
 
@@ -191,9 +193,9 @@ const TaskCenterView: React.FC = () => {
     try {
       await persistTaskDeletion(nextTasks, [taskId]);
       setTaskModal({ isOpen: false, weekId: null, padId: null, mode: 'create', data: {} });
-      showNotification('任务已删除', 'info');
+      showToast('任务已删除', 'info');
     } catch (error: any) {
-      showNotification(error.message || '任务删除失败', 'error');
+      showToast(getUserFacingError(error, '任务删除失败，请稍后重试'), 'error');
     }
   };
 
@@ -514,7 +516,7 @@ const TaskCenterView: React.FC = () => {
                   <div className="flex items-center gap-4 text-[10px] font-bold text-slate-500 mb-3">
                     <div className="flex items-center gap-1">
                       <UserIcon size={12} />
-                      <span>{owner?.name || 'Unknown'}</span>
+                      <span>{owner?.name || '未知用户'}</span>
                     </div>
                     {dept && (
                       <div className="flex items-center gap-1">
@@ -550,23 +552,19 @@ const TaskCenterView: React.FC = () => {
       </div>
       </div>
 
-      {/* Notification Toast */}
-      {notification && (
-        <div className="fixed bottom-8 left-1/2 -translate-x-1/2 z-[100] animate-in fade-in slide-in-from-bottom-4 duration-300">
-          <div className="bg-slate-800 text-white px-6 py-3 rounded-2xl shadow-2xl flex items-center gap-3 border border-slate-700">
-            {notification.type === 'success' ? (
-              <CheckCircle size={18} className="text-emerald-400" />
-            ) : (
-              <AlertCircle size={18} className="text-amber-400" />
-            )}
-            <span className="text-sm font-bold">{notification.message}</span>
-          </div>
-        </div>
-      )}
+      <PageToast
+        visible={!!toastState}
+        message={toastState?.message || ''}
+        type={toastState?.type}
+        onClose={clearToast}
+      />
 
       <TaskModal
         isOpen={taskModal.isOpen}
-        onClose={() => setTaskModal({ ...taskModal, isOpen: false })}
+        onClose={() => {
+          clearToast();
+          setTaskModal({ ...taskModal, isOpen: false });
+        }}
         data={taskModal.data}
         setData={(newData) => setTaskModal({ ...taskModal, data: newData })}
         onSave={saveTask}

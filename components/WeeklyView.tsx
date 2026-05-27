@@ -6,12 +6,15 @@ import { useAppActions } from '../hooks/useAppActions';
 import { usePermissions } from '../hooks/usePermissions';
 
 import { AppState, WeeklyPAD, PADEntry, Department, User, OKR, TaskLog, MenuPermission } from '../types';
+import PageToast from './PageToast';
 import TaskModal from './TaskModal';
 import { 
-  Calendar as CalendarIcon, Plus, Trash2, CheckCircle, Loader2, 
+  Calendar as CalendarIcon, Plus, Trash2, Loader2, 
   Building2, ChevronDown, Link2, User as UserIcon, 
   ChevronLeft, ChevronRight, LayoutGrid, Target, Clock, WifiOff, List, X, Lock, MessageSquare, Edit2
 } from 'lucide-react';
+import { usePageToast } from '../hooks/usePageToast';
+import { getUserFacingError } from '../utils/userFacingError';
 import { canManageTask, getVisibleDepartments, canViewTask } from '../utils/permissions';
 import { ensureTaskTargetWeeks } from '../utils/taskPeriods.js';
 
@@ -65,13 +68,11 @@ const WeeklyView: React.FC = () => {
     collect(visibleDepartments);
     return list;
   }, [visibleDepartments]);
+  const { toastState, showToast, clearToast } = usePageToast();
 
-  const [notification, setNotification] = useState<{ message: string; type: 'success' | 'info' | 'error' } | null>(null);
-
-  const showNotification = (message: string, type: 'success' | 'info' | 'error' = 'success') => {
-    setNotification({ message, type });
-    setTimeout(() => setNotification(null), 3000);
-  };
+  useEffect(() => {
+    clearToast();
+  }, [clearToast, selectedWeek, selectedOwnerId, activeTab, viewMode]);
 
   const currentTasks = useMemo(() => {
     return state.tasks.filter(t => t.ownerId === selectedOwnerId && t.targetWeeks?.includes(selectedWeek));
@@ -119,9 +120,9 @@ const WeeklyView: React.FC = () => {
       const newTasks = state.tasks.filter(t => t.id !== taskToDelete.id);
       try {
         await persistTaskDeletion(newTasks, [taskToDelete.id]);
-        showNotification('任务已删除');
+        showToast('任务已删除');
       } catch (error: any) {
-        showNotification(error.message || '任务删除失败', 'error');
+        showToast(getUserFacingError(error, '任务删除失败，请稍后重试'), 'error');
       }
     }
     setDeleteConfirmIndex(null);
@@ -171,9 +172,9 @@ const WeeklyView: React.FC = () => {
       try {
         await persistTaskDeletion(newTasks, [taskToDelete.id]);
         setDeleteConfirmIndex(null);
-        showNotification('任务已从您的计划中移除');
+        showToast('任务已从您的计划中移除');
       } catch (error: any) {
-        showNotification(error.message || '任务删除失败', 'error');
+        showToast(getUserFacingError(error, '任务删除失败，请稍后重试'), 'error');
       }
     }
   };
@@ -184,9 +185,9 @@ const WeeklyView: React.FC = () => {
       const newTasks = state.tasks.filter(t => t.id !== taskToDelete.id);
       try {
         await persistTaskDeletion(newTasks, [taskToDelete.id]);
-        showNotification('任务已删除', 'info');
+        showToast('任务已删除', 'info');
       } catch (error: any) {
-        showNotification(error.message || '任务删除失败', 'error');
+        showToast(getUserFacingError(error, '任务删除失败，请稍后重试'), 'error');
         return;
       }
     }
@@ -250,9 +251,9 @@ const WeeklyView: React.FC = () => {
 
     try {
       await persistTaskEntries(nextTasks, entriesToAdd, taskModal.index !== null ? 'update' : 'create');
-      showNotification('任务已成功保存');
+      showToast('任务已成功保存');
     } catch (error: any) {
-      showNotification(error.message || '任务保存失败', 'error');
+      showToast(getUserFacingError(error, '任务保存失败，请稍后重试'), 'error');
       return;
     }
 
@@ -357,7 +358,7 @@ const WeeklyView: React.FC = () => {
           </div>
           <div>
             <h2 className="text-xl font-black text-slate-800 tracking-tighter">个人计划</h2>
-            <p className="text-[10px] font-black text-slate-400 uppercase mt-0.5">Personal PAD</p>
+            <p className="text-[10px] font-black text-slate-400 uppercase mt-0.5">个人计划看板</p>
           </div>
         </div>
 
@@ -419,7 +420,7 @@ const WeeklyView: React.FC = () => {
              <div className="flex items-center gap-4">
                <div className="p-3 bg-brand-50 text-brand-600 rounded-2xl"><Target size={24}/></div>
                <div>
-                  <h3 className="text-xl md:text-2xl font-black">{state.users.find(u => u.id === selectedOwnerId)?.name || 'Unknown'}</h3>
+                  <h3 className="text-xl md:text-2xl font-black">{state.users.find(u => u.id === selectedOwnerId)?.name || '未知用户'}</h3>
                   <p className="text-[10px] font-black text-slate-400 uppercase mt-1">
                     归属治理：<span className="text-brand-600">个人岗位指标</span>
                   </p>
@@ -478,7 +479,7 @@ const WeeklyView: React.FC = () => {
                        </div>
                        
                        <div className="flex items-center gap-4 text-[10px] font-bold text-slate-400">
-                          <div className="flex items-center gap-1"><UserIcon size={12}/> {state.users.find(u => u.id === entry.ownerId)?.name || 'Unknown'}</div>
+                          <div className="flex items-center gap-1"><UserIcon size={12}/> {state.users.find(u => u.id === entry.ownerId)?.name || '未知用户'}</div>
                           {entry.dueDate && <div className="flex items-center gap-1"><Clock size={12}/> {new Date(entry.dueDate).toLocaleDateString()}</div>}
                           {entry.alignedKrId && <div className="flex items-center gap-1 text-brand-600"><Link2 size={12}/> 已对齐 KR</div>}
                        </div>
@@ -489,20 +490,20 @@ const WeeklyView: React.FC = () => {
       </div>
       </div>
 
-      {/* Notification Toast */}
-      {notification && (
-        <div className="fixed bottom-8 left-1/2 -translate-x-1/2 z-[100] animate-in fade-in slide-in-from-bottom-4 duration-300">
-          <div className="bg-slate-800 text-white px-6 py-3 rounded-2xl shadow-2xl flex items-center gap-3 border border-slate-700">
-            <CheckCircle size={18} className="text-emerald-400" />
-            <span className="text-sm font-bold">{notification.message}</span>
-          </div>
-        </div>
-      )}
+      <PageToast
+        visible={!!toastState}
+        message={toastState?.message || ''}
+        type={toastState?.type}
+        onClose={clearToast}
+      />
 
       {/* Task Modal */}
       <TaskModal
         isOpen={taskModal.isOpen}
-        onClose={() => setTaskModal({ ...taskModal, isOpen: false })}
+        onClose={() => {
+          clearToast();
+          setTaskModal({ ...taskModal, isOpen: false });
+        }}
         data={taskModal.data}
         setData={(newData) => setTaskModal({ ...taskModal, data: newData })}
         onSave={saveTask}
@@ -528,7 +529,7 @@ const WeeklyView: React.FC = () => {
                <Trash2 size={32}/>
              </div>
              <div className="text-center mb-8">
-               <h3 className="text-xl font-black text-slate-800 mb-2">确认删除此任务?</h3>
+               <h3 className="text-xl font-black text-slate-800 mb-2">确认删除此任务？</h3>
                <p className="text-xs text-slate-500 font-bold leading-relaxed">此操作将永久移除该治理条目且无法撤销。<br/>请确认是否继续。</p>
              </div>
              <div className="flex gap-4">

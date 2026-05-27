@@ -2,7 +2,6 @@ import React, { useState, useEffect } from 'react';
 import { PADEntry, User, Department, AISettings } from '../types';
 import { X, AlertCircle, Wand2, Loader2, Sparkles, CheckCircle, Trash2 } from 'lucide-react';
 import { checkPADQuality } from '../services/gemini';
-import { toast } from 'sonner';
 
 interface TaskModalProps {
   isOpen: boolean;
@@ -70,28 +69,23 @@ const TaskModal: React.FC<TaskModalProps> = ({
   const handleSave = (status: string, keepOpen?: boolean) => {
     // Validation
     if (!data.title || data.title.trim() === '') {
-      toast.error('任务标题不能为空');
       setError('任务标题不能为空');
       return;
     }
     if (!data.ownerId) {
-      toast.error('请选择负责人');
       setError('请选择负责人');
       return;
     }
     if (!data.startDate) {
-      toast.error('请选择开始时间');
       setError('请选择开始时间');
       return;
     }
     if (!data.dueDate) {
-      toast.error('请选择截止时间');
       setError('请选择截止时间');
       return;
     }
 
     if (data.startDate && data.dueDate && data.startDate > data.dueDate) {
-      toast.error('截止时间不得早于开始时间');
       setError('截止时间不得早于开始时间');
       return;
     }

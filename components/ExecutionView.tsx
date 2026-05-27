@@ -1,13 +1,16 @@
-import React, { useState, useMemo } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useAppStore } from '../store/useAppStore';
 import { useAuthStore } from '../store/useAuthStore';
 import { useAppActions } from '../hooks/useAppActions';
 import { usePermissions } from '../hooks/usePermissions';
 
 import { AppState, Department, User, WeeklyPAD, PADEntry, OKR, TaskLog, MenuPermission } from '../types';
+import PageToast from './PageToast';
 import PeriodAlignmentView from './PeriodAlignmentView';
 import TaskModal from './TaskModal';
-import { Building2, ChevronDown, ChevronRight, LayoutGrid, Plus, X, Calendar, User as UserIcon, Clock, CheckCircle, AlertCircle } from 'lucide-react';
+import { Building2, ChevronDown, ChevronRight, LayoutGrid, Plus, X, Calendar, User as UserIcon, Clock } from 'lucide-react';
+import { usePageToast } from '../hooks/usePageToast';
+import { getUserFacingError } from '../utils/userFacingError';
 import { canManageTask, getVisibleDepartments } from '../utils/permissions';
 import { ensureTaskTargetWeeks } from '../utils/taskPeriods.js';
 
@@ -53,8 +56,7 @@ const ExecutionView: React.FC = () => {
   const [selectedYear, setSelectedYear] = useState<number>(currentInfo.year);
   const [selectedPeriod, setSelectedPeriod] = useState<string>(currentInfo.q);
   const [taskModal, setTaskModal] = useState<{ isOpen: boolean, weekId: string | null, mode: 'create' | 'edit', data: Partial<PADEntry> }>({ isOpen: false, weekId: null, mode: 'create', data: {} });
-
-  const [notification, setNotification] = useState<{ message: string; type: 'success' | 'info' | 'error' } | null>(null);
+  const { toastState, showToast, clearToast } = usePageToast();
 
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 
@@ -76,10 +78,9 @@ const ExecutionView: React.FC = () => {
     return weeks;
   }, [selectedYear, selectedPeriod]);
 
-  const showNotification = (message: string, type: 'success' | 'info' | 'error' = 'success') => {
-    setNotification({ message, type });
-    setTimeout(() => setNotification(null), 3000);
-  };
+  useEffect(() => {
+    clearToast();
+  }, [clearToast, selectedDeptId, selectedYear, selectedPeriod]);
 
   const visibleDepartments = useMemo(() => getVisibleDepartments(currentUser, state.departments, state.systemRoles || []), [currentUser, state.departments, state.systemRoles]);
 
@@ -197,7 +198,7 @@ const ExecutionView: React.FC = () => {
     }
 
     if (!hasPermission) {
-      showNotification(`无任务查看权限，如果需要查看任务，请联系任务创建人【${owner?.name || ''}】`, 'info');
+      showToast(`无任务查看权限，如果需要查看任务，请联系任务创建人【${owner?.name || ''}】`, 'info');
       return;
     }
 
@@ -274,7 +275,7 @@ const ExecutionView: React.FC = () => {
     try {
       await persistTaskEntries(nextTasks, entriesToAdd, isNewTask ? 'create' : 'update');
     } catch (error: any) {
-      showNotification(error.message || '任务保存失败', 'error');
+      showToast(getUserFacingError(error, '任务保存失败，请稍后重试'), 'error');
       return;
     }
 
@@ -282,7 +283,7 @@ const ExecutionView: React.FC = () => {
     const ownerName = state.users.find(u => u.id === targetOwnerId)?.name || '个人';
     const weekNum = taskModal.weekId?.split('-W')[1] || '';
     const actionText = status === 'submitted' ? '提交' : '保存';
-    showNotification(`第 ${weekNum} 周任务已成功${actionText}至 [${ownerName}] 的个人计划中`);
+    showToast(`第 ${weekNum} 周任务已成功${actionText}至 [${ownerName}] 的个人计划中`);
 
     if (keepOpen) {
       setTaskModal({ 
@@ -318,9 +319,9 @@ const ExecutionView: React.FC = () => {
     try {
       await persistTaskDeletion(updatedTasks, [taskId]);
       setTaskModal({ ...taskModal, isOpen: false });
-      showNotification('任务已删除', 'info');
+      showToast('任务已删除', 'info');
     } catch (error: any) {
-      showNotification(error.message || '任务删除失败', 'error');
+      showToast(getUserFacingError(error, '任务删除失败，请稍后重试'), 'error');
     }
   };
 
@@ -365,7 +366,7 @@ const ExecutionView: React.FC = () => {
                 <div className="p-2 md:p-3 bg-brand-50 text-brand-600 rounded-xl md:rounded-2xl"><LayoutGrid size={20} className="md:w-6 md:h-6"/></div>
                 <div>
                   <h3 className="text-lg md:text-xl font-black text-slate-800">OKR 执行</h3>
-                  <p className="text-[9px] md:text-[10px] font-black text-slate-400 uppercase tracking-widest">OKR Execution</p>
+                  <p className="text-[9px] md:text-[10px] font-black text-slate-400 uppercase tracking-widest">目标执行看板</p>
                 </div>
              </div>
              <div className="flex flex-wrap items-center gap-2 md:gap-4 w-full md:w-auto">
@@ -381,10 +382,10 @@ const ExecutionView: React.FC = () => {
                   value={selectedPeriod}
                   onChange={e => setSelectedPeriod(e.target.value)}
                 >
-                  <option value="Q1">Q1</option>
-                  <option value="Q2">Q2</option>
-                  <option value="Q3">Q3</option>
-                  <option value="Q4">Q4</option>
+                  <option value="Q1">第一季度</option>
+                  <option value="Q2">第二季度</option>
+                  <option value="Q3">第三季度</option>
+                  <option value="Q4">第四季度</option>
                 </select>
              </div>
         </div>
@@ -407,24 +408,20 @@ const ExecutionView: React.FC = () => {
         </div>
       </div>
 
-      {/* Notification Toast */}
-      {notification && (
-        <div className="fixed bottom-8 left-1/2 -translate-x-1/2 z-[100] animate-in fade-in slide-in-from-bottom-4 duration-300">
-          <div className="bg-slate-800 text-white px-6 py-3 rounded-2xl shadow-2xl flex items-center gap-3 border border-slate-700">
-            {notification.type === 'success' ? (
-              <CheckCircle size={18} className="text-emerald-400" />
-            ) : (
-              <AlertCircle size={18} className="text-amber-400" />
-            )}
-            <span className="text-sm font-bold">{notification.message}</span>
-          </div>
-        </div>
-      )}
+      <PageToast
+        visible={!!toastState}
+        message={toastState?.message || ''}
+        type={toastState?.type}
+        onClose={clearToast}
+      />
 
       {/* Task Modal */}
       <TaskModal
         isOpen={taskModal.isOpen}
-        onClose={() => setTaskModal({ ...taskModal, isOpen: false })}
+        onClose={() => {
+          clearToast();
+          setTaskModal({ ...taskModal, isOpen: false });
+        }}
         data={taskModal.data}
         setData={(newData) => setTaskModal({ ...taskModal, data: newData })}
         onSave={saveTask}

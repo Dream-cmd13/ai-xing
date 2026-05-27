@@ -1,6 +1,5 @@
 import React, { useEffect, useRef } from 'react';
 import { BrowserRouter } from 'react-router-dom';
-import { Toaster } from 'sonner';
 import { AppRoutes } from './router/AppRoutes';
 import { UnsavedChangesGuard } from './components/UnsavedChangesGuard';
 import { useAuthStore } from '@/store/useAuthStore';
@@ -167,7 +166,6 @@ const App: React.FC = () => {
 
   return (
     <BrowserRouter>
-      <Toaster position="top-center" richColors />
       <UnsavedChangesGuard />
       <AppRoutes />
     </BrowserRouter>

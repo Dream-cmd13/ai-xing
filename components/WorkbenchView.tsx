@@ -2,13 +2,16 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useAppStore } from '@/store/useAppStore';
 import { useAuthStore } from '@/store/useAuthStore';
 import { useAppActions } from '@/hooks/useAppActions';
+import { usePageToast } from '@/hooks/usePageToast';
 import { usePermissions } from '@/hooks/usePermissions';
 import { getDepartments, getStrategy, getWorkbenchTasks } from '@/data';
 
 import { AppState, PADEntry, OKR, WeeklyPAD, TaskLog } from '@/types';
-import { Calendar, CheckCircle, Clock, Target, ArrowRight, LayoutDashboard, ListTodo, Briefcase, Flag, AlertCircle, Loader2 } from 'lucide-react';
+import { Calendar, CheckCircle, Clock, Target, ArrowRight, LayoutDashboard, ListTodo, Briefcase, Flag, Loader2 } from 'lucide-react';
+import PageToast from './PageToast';
 import TaskModal from './TaskModal';
 import { ensureTaskTargetWeeks } from '@/utils/taskPeriods.js';
+import { getUserFacingError } from '@/utils/userFacingError';
 import { canManageTask } from '@/utils/permissions';
 
 const WorkbenchView: React.FC = () => {
@@ -47,14 +50,9 @@ const WorkbenchView: React.FC = () => {
   const nextWeekId = `${currentYear}-W${(currentWeek + 1).toString().padStart(2, '0')}`;
 
   const [taskModal, setTaskModal] = useState<{ isOpen: boolean, weekId: string | null, mode: 'create' | 'edit', data: Partial<PADEntry> }>({ isOpen: false, weekId: null, mode: 'create', data: {} });
-  const [notification, setNotification] = useState<{ message: string; type: 'success' | 'info' | 'error' } | null>(null);
+  const { toastState, showToast, clearToast } = usePageToast();
   const [isWorkbenchTasksLoading, setIsWorkbenchTasksLoading] = useState(false);
   const backgroundPrefetchVersionRef = useRef(0);
-
-  const showNotification = (message: string, type: 'success' | 'info' | 'error' = 'success') => {
-    setNotification({ message, type });
-    setTimeout(() => setNotification(null), 3000);
-  };
 
   useEffect(() => {
     if (!currentUser?.id || domainLoadStatus.tasks.loaded) {
@@ -72,7 +70,7 @@ const WorkbenchView: React.FC = () => {
       })
       .catch((error: any) => {
         if (cancelled) return;
-        const message = error?.message || '工作台任务加载失败';
+        const message = getUserFacingError(error, '工作台任务加载失败，请稍后重试');
         setBackendError(message);
       })
       .finally(() => {
@@ -117,7 +115,7 @@ const WorkbenchView: React.FC = () => {
       })
       .catch((error: any) => {
         if (backgroundPrefetchVersionRef.current !== currentPrefetchVersion) return;
-        const message = error?.message || '工作台背景数据加载失败';
+        const message = getUserFacingError(error, '工作台背景数据加载失败，请稍后重试');
         setBackendError(message);
       });
   }, [
@@ -208,7 +206,7 @@ const WorkbenchView: React.FC = () => {
     }
 
     if (!hasPermission) {
-      showNotification(`无任务查看权限，如果需要查看任务，请联系任务创建人【${owner?.name || ''}】`, 'info');
+      showToast(`无任务查看权限，如果需要查看任务，请联系任务创建人【${owner?.name || ''}】`, 'info');
       return;
     }
 
@@ -287,7 +285,7 @@ const WorkbenchView: React.FC = () => {
     try {
       await persistTaskEntries(nextTasks, entriesToAdd, isNewTask ? 'create' : 'update');
     } catch (error: any) {
-      showNotification(error.message || '任务保存失败', 'error');
+      showToast(getUserFacingError(error, '任务保存失败，请稍后重试'), 'error');
       return;
     }
     
@@ -324,9 +322,9 @@ const WorkbenchView: React.FC = () => {
     try {
       await persistTaskDeletion(nextTasks, [taskId]);
       setTaskModal({ isOpen: false, weekId: null, mode: 'create', data: {} });
-      showNotification('任务已删除', 'info');
+      showToast('任务已删除', 'info');
     } catch (error: any) {
-      showNotification(error.message || '任务删除失败', 'error');
+      showToast(getUserFacingError(error, '任务删除失败，请稍后重试'), 'error');
     }
   };
 
@@ -340,7 +338,7 @@ const WorkbenchView: React.FC = () => {
           </div>
           <div>
             <h2 className="text-xl md:text-2xl font-black tracking-tighter text-slate-800">工作台</h2>
-            <p className="text-[10px] md:text-xs font-bold text-slate-400 uppercase tracking-widest">My Workbench</p>
+            <p className="text-[10px] md:text-xs font-bold text-slate-400 uppercase tracking-widest">个人工作台</p>
           </div>
         </div>
         <div className="flex items-center gap-4">
@@ -399,23 +397,19 @@ const WorkbenchView: React.FC = () => {
 
       </div>
 
-      {/* Notification Toast */}
-      {notification && (
-        <div className="fixed bottom-8 left-1/2 -translate-x-1/2 z-[100] animate-in fade-in slide-in-from-bottom-4 duration-300">
-          <div className="bg-slate-800 text-white px-6 py-3 rounded-2xl shadow-2xl flex items-center gap-3 border border-slate-700">
-            {notification.type === 'success' ? (
-              <CheckCircle size={18} className="text-emerald-400" />
-            ) : (
-              <AlertCircle size={18} className="text-amber-400" />
-            )}
-            <span className="text-sm font-bold">{notification.message}</span>
-          </div>
-        </div>
-      )}
+      <PageToast
+        visible={!!toastState}
+        message={toastState?.message || ''}
+        type={toastState?.type}
+        onClose={clearToast}
+      />
 
       <TaskModal
         isOpen={taskModal.isOpen}
-        onClose={() => setTaskModal({ ...taskModal, isOpen: false })}
+        onClose={() => {
+          clearToast();
+          setTaskModal({ ...taskModal, isOpen: false });
+        }}
         data={taskModal.data}
         setData={(newData) => setTaskModal({ ...taskModal, data: newData })}
         onSave={saveTask}
@@ -443,7 +437,9 @@ const TaskCard: React.FC<{ task: PADEntry, onClick: () => void }> = ({ task, onC
         task.priority === 'high' ? 'bg-red-50 text-red-600' : 
         task.priority === 'medium' ? 'bg-amber-50 text-amber-600' : 
         'bg-slate-200 text-slate-500'
-      }`}>{task.priority}</span>
+      }`}>
+        {task.priority === 'high' ? '高优先级' : task.priority === 'medium' ? '中优先级' : '低优先级'}
+      </span>
     </div>
     <div className="flex items-center gap-3 text-[10px] font-bold text-slate-400">
       <span className="flex items-center gap-1"><Clock size={10}/> {task.dueDate ? new Date(task.dueDate).toLocaleDateString() : '无截止日期'}</span>

@@ -3,11 +3,14 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import { useAppStore } from '../store/useAppStore';
 import { useAuthStore } from '../store/useAuthStore';
 import { useAppActions } from '../hooks/useAppActions';
+import { usePageToast } from '../hooks/usePageToast';
 import { usePermissions } from '../hooks/usePermissions';
 
 import { AppState, Department, ReviewEntry, ObjectiveReview, User, PADEntry, MenuPermission, OKR } from '../types';
-import { Calendar, Building2, ClipboardCheck, Save, CheckCircle, Loader2, Target, TrendingUp, MessageSquare, FileText, AlertCircle, Lock, Download, RefreshCw } from 'lucide-react';
+import { Calendar, Building2, ClipboardCheck, Save, CheckCircle, Loader2, Target, TrendingUp, MessageSquare, FileText, Lock, Download, RefreshCw } from 'lucide-react';
+import PageToast from './PageToast';
 import TaskModal from './TaskModal';
+import { getUserFacingError } from '../utils/userFacingError';
 import { canManageTask, getVisibleDepartments, canViewTask } from '../utils/permissions';
 import { isTaskInMonthlyPeriod, isTaskInWeeklyPeriod } from '../utils/taskPeriods.js';
 import { readTaskReviewState, updateTaskReviewState } from '../utils/reviewTaskState.js';
@@ -69,12 +72,11 @@ const ReviewView: React.FC = () => {
   const [reviewSubTab, setReviewSubTab] = useState<'tasks' | 'okrs'>('tasks');
 
   const [taskModal, setTaskModal] = useState<{ isOpen: boolean, weekId: string | null, mode: 'create' | 'edit', data: Partial<PADEntry> }>({ isOpen: false, weekId: null, mode: 'edit', data: {} });
-  const [notification, setNotification] = useState<{ message: string; type: 'success' | 'info' | 'error' } | null>(null);
+  const { toastState, showToast, clearToast } = usePageToast();
 
-  const showNotification = (message: string, type: 'success' | 'info' | 'error' = 'success') => {
-    setNotification({ message, type });
-    setTimeout(() => setNotification(null), 3000);
-  };
+  useEffect(() => {
+    clearToast();
+  }, [clearToast, activeTab, selectedDeptId, selectedWeek, selectedMonth, reviewSubTab]);
 
   const updateReviewScore = (score: number) => {
     setReviewScore(score);
@@ -96,10 +98,10 @@ const ReviewView: React.FC = () => {
     try {
       const updatedTasks = state.tasks.filter(t => t.id !== taskModal.data.id);
       await persistTaskDeletion(updatedTasks, [taskModal.data.id]);
-      showNotification('任务已删除', 'info');
+      showToast('任务已删除', 'info');
       setTaskModal({ ...taskModal, isOpen: false });
     } catch (e: any) {
-      showNotification(e.message || '删除失败', 'error');
+      showToast(getUserFacingError(e, '删除失败，请稍后重试'), 'error');
     }
   };
 
@@ -108,19 +110,19 @@ const ReviewView: React.FC = () => {
     try {
       const updatedTasks = state.tasks.map(t => t.id === task.id ? task : t);
       await persistTaskEntries(updatedTasks, [task], 'update');
-      showNotification('任务已保存', 'success');
+      showToast('任务已保存', 'success');
       if (!keepOpen) {
         setTaskModal({ ...taskModal, isOpen: false });
       }
     } catch (e: any) {
-      showNotification(e.message || '保存失败', 'error');
+      showToast(getUserFacingError(e, '保存失败，请稍后重试'), 'error');
     }
   };
 
   const handleTaskClick = (task: PADEntry) => {
     if (!canViewTask(task, currentUser, state.users, state.systemRoles || [])) {
       const owner = state.users.find(u => u.id === task.ownerId);
-      showNotification(`无任务查看权限，如果需要查看任务，请联系任务创建人【${owner?.name || ''}】`, 'info');
+      showToast(`无任务查看权限，如果需要查看任务，请联系任务创建人【${owner?.name || ''}】`, 'info');
       return;
     }
 
@@ -319,7 +321,7 @@ const ReviewView: React.FC = () => {
           <div className="p-3 bg-brand-50 text-brand-600 rounded-2xl"><ClipboardCheck size={24}/></div>
           <div>
             <h3 className="text-xl font-black text-slate-800">复盘中心</h3>
-            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Review Center</p>
+            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">工作复盘中心</p>
           </div>
         </div>
 
@@ -476,7 +478,7 @@ const ReviewView: React.FC = () => {
                                 : '暂无关联任务';
                               const prefix = reviewContent ? reviewContent + '\n\n' : '';
                               updateReviewContent(`${prefix}本期任务汇总：\n${taskSummary}`);
-                              showNotification('已将任务读取到总结中', 'success');
+                              showToast('已将任务读取到总结中', 'success');
                             }}
                             className="px-3 py-1.5 bg-indigo-50 text-indigo-600 rounded-lg text-xs font-bold hover:bg-indigo-100 transition-colors flex items-center gap-1"
                           >
@@ -665,7 +667,7 @@ const ReviewView: React.FC = () => {
                          
                          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                             <div className="space-y-2">
-                               <label className="text-[10px] font-black text-slate-400 uppercase flex items-center gap-1"><MessageSquare size={12}/> 经验教训 (Lessons Learned)</label>
+                               <label className="text-[10px] font-black text-slate-400 uppercase flex items-center gap-1"><MessageSquare size={12}/> 经验教训</label>
                                <textarea 
                                  className="w-full h-24 p-4 bg-white border border-slate-200 rounded-2xl text-xs font-bold outline-none focus:border-brand-300 resize-none"
                                  value={currentReview.lessonsLearned || ''}
@@ -673,7 +675,7 @@ const ReviewView: React.FC = () => {
                                />
                             </div>
                             <div className="space-y-2">
-                               <label className="text-[10px] font-black text-slate-400 uppercase flex items-center gap-1"><FileText size={12}/> 方法论沉淀 (Methodology)</label>
+                               <label className="text-[10px] font-black text-slate-400 uppercase flex items-center gap-1"><FileText size={12}/> 方法论沉淀</label>
                                <textarea 
                                  className="w-full h-24 p-4 bg-white border border-slate-200 rounded-2xl text-xs font-bold outline-none focus:border-brand-300 resize-none"
                                  value={currentReview.methodology || ''}
@@ -681,7 +683,7 @@ const ReviewView: React.FC = () => {
                                />
                             </div>
                             <div className="space-y-2">
-                               <label className="text-[10px] font-black text-slate-400 uppercase flex items-center gap-1"><TrendingUp size={12}/> 下一步计划 (Next Steps)</label>
+                               <label className="text-[10px] font-black text-slate-400 uppercase flex items-center gap-1"><TrendingUp size={12}/> 下一步计划</label>
                                <textarea 
                                  className="w-full h-24 p-4 bg-white border border-slate-200 rounded-2xl text-xs font-bold outline-none focus:border-brand-300 resize-none"
                                  value={currentReview.nextSteps || ''}
@@ -718,26 +720,20 @@ const ReviewView: React.FC = () => {
         </div>
       </div>
 
-      {/* Notification Toast */}
-      {notification && (
-        <div className="fixed bottom-8 left-1/2 -translate-x-1/2 z-[100] animate-in fade-in slide-in-from-bottom-4 duration-300">
-          <div className="bg-slate-800 text-white px-6 py-3 rounded-2xl shadow-2xl flex items-center gap-3 border border-slate-700">
-            {notification.type === 'success' ? (
-              <CheckCircle size={18} className="text-emerald-400" />
-            ) : notification.type === 'error' ? (
-              <AlertCircle size={18} className="text-red-400" />
-            ) : (
-              <AlertCircle size={18} className="text-amber-400" />
-            )}
-            <span className="text-sm font-bold">{notification.message}</span>
-          </div>
-        </div>
-      )}
+      <PageToast
+        visible={!!toastState}
+        message={toastState?.message || ''}
+        type={toastState?.type}
+        onClose={clearToast}
+      />
 
       {/* Task Modal (Read Only) */}
       <TaskModal
         isOpen={taskModal.isOpen}
-        onClose={() => setTaskModal({ ...taskModal, isOpen: false })}
+        onClose={() => {
+          clearToast();
+          setTaskModal({ ...taskModal, isOpen: false });
+        }}
         data={taskModal.data}
         setData={(newData) => setTaskModal({ ...taskModal, data: newData })}
         onSave={saveTask}

@@ -3,6 +3,7 @@ import { addTask as addDbTask, updateTask as updateDbTask, deleteTask as deleteD
 import { AppStoreState, useAppStore } from '@/store/useAppStore';
 import { PADEntry, User } from '@/types';
 import { removeTasksById, upsertTasksById } from '@/utils/taskSyncState.js';
+import { getUserFacingError } from '@/utils/userFacingError';
 
 interface UseTaskActionsOptions {
   store: AppStoreState;
@@ -31,7 +32,7 @@ export const useTaskActions = ({
     store.setLastSavedTasks(previousLastSavedTasks);
     store.setDirtyDomains(previousDirtyDomains as any);
     store.setIsSaving(false);
-    store.setBackendError(error?.message || '任务保存失败');
+    store.setBackendError(getUserFacingError(error, '任务保存失败，请稍后重试'));
     syncStateRef();
   };
 

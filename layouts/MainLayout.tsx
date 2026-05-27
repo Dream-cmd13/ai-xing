@@ -6,6 +6,8 @@ import { MENU_GROUPS } from '../constants';
 import { hasPermission as hasMenuPermission } from '../utils/permissions';
 import { updateMyProfileName } from '../data';
 import { supabase } from '../supabase';
+import { getUserFacingError } from '../utils/userFacingError';
+import { getRequiredDomains } from '../utils/routeDomains';
 import { 
   ShieldCheck, Settings, LogOut, X, Menu, LayoutDashboard, GitGraph, Target, Building2,
   Calendar, Users, UserCog, ShieldCheck as ShieldCheckIcon, Settings as SettingsIcon,
@@ -29,7 +31,7 @@ const iconMap: Record<string, React.ReactNode> = {
 
 export const MainLayout: React.FC = () => {
   const { currentUser, logout, updateCurrentUser } = useAuthStore();
-  const { isDirty, isSaving, showSaveSuccess, backendError, systemRoles, users, lastSavedUsers } = useAppStore();
+  const { dirtyDomains, isSaving, showSaveSuccess, backendError, systemRoles, users, lastSavedUsers } = useAppStore();
   const navigate = useNavigate();
   const location = useLocation();
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(true);
@@ -65,7 +67,7 @@ export const MainLayout: React.FC = () => {
   };
 
   const handleNavigation = (path: string) => {
-    if (isDirty) {
+    if (isCurrentRouteDirty) {
       // In a real app, you might want to show a modal here
       // For now, we just navigate
       navigate(path);
@@ -80,6 +82,37 @@ export const MainLayout: React.FC = () => {
     if (!currentUser) return false;
     return hasMenuPermission(currentUser, systemRoles || [], menuId, 'view');
   };
+
+  const activeRouteDomains = getRequiredDomains(location.pathname);
+  const isCurrentRouteDirty = activeRouteDomains.length === 0
+    ? false
+    : activeRouteDomains.some((domain) => dirtyDomains.includes(domain));
+
+  const headerStatus = isSaving
+    ? {
+        icon: <Spinner size={12} className="animate-spin text-brand-500" />,
+        text: '保存中...',
+        className: 'text-slate-500 bg-slate-100'
+      }
+    : backendError
+      ? {
+          icon: <AlertCircle size={14} className="text-red-500" />,
+          text: backendError,
+          className: 'text-red-600 bg-red-50 border border-red-100'
+        }
+      : isCurrentRouteDirty
+        ? {
+            icon: <div className="h-1.5 w-1.5 rounded-full bg-amber-500 animate-pulse" />,
+            text: '未保存',
+            className: 'text-amber-600 bg-amber-50 border border-amber-100'
+          }
+        : showSaveSuccess
+          ? {
+              icon: <CheckCircle size={12} className="text-emerald-500" />,
+              text: '已保存',
+              className: 'text-emerald-600 bg-emerald-50 border border-emerald-100'
+            }
+          : null;
 
   const handleSaveProfileName = async () => {
     if (!currentUser) return;
@@ -109,7 +142,7 @@ export const MainLayout: React.FC = () => {
       });
       setProfileSuccess('姓名已更新');
     } catch (error: any) {
-      setProfileError(error.message || '姓名更新失败');
+      setProfileError(getUserFacingError(error, '姓名更新失败，请稍后重试'));
     } finally {
       setIsProfileSaving(false);
     }
@@ -144,7 +177,7 @@ export const MainLayout: React.FC = () => {
       setConfirmPassword('');
       setProfileSuccess('密码已更新');
     } catch (error: any) {
-      setProfileError(error.message || '密码更新失败');
+      setProfileError(getUserFacingError(error, '密码更新失败，请稍后重试'));
     } finally {
       setIsPasswordSaving(false);
     }
@@ -244,33 +277,12 @@ export const MainLayout: React.FC = () => {
             </h2>
           </div>
           <div className="flex items-center gap-3">
-            {backendError && (
-              <div className="flex items-center gap-1.5 text-xs font-medium text-red-600 bg-red-50 px-2.5 py-1.5 rounded-full border border-red-100">
-                <AlertCircle size={14} />
-                <span>{backendError}</span>
-              </div>
+            {headerStatus && (
+              <span className={`flex max-w-[320px] items-center gap-1.5 rounded-full px-2.5 py-1.5 text-xs font-medium ${headerStatus.className}`}>
+                {headerStatus.icon}
+                <span className="truncate">{headerStatus.text}</span>
+              </span>
             )}
-            
-            <div className="flex items-center gap-2">
-              {isSaving && (
-                <span className="text-xs text-slate-500 flex items-center gap-1.5 bg-slate-100 px-2.5 py-1.5 rounded-full font-medium">
-                  <Spinner size={12} className="animate-spin text-brand-500" />
-                  保存中...
-                </span>
-              )}
-              {showSaveSuccess && !isSaving && (
-                <span className="text-xs text-emerald-600 flex items-center gap-1.5 bg-emerald-50 px-2.5 py-1.5 rounded-full font-medium border border-emerald-100 animate-in fade-in duration-300">
-                  <CheckCircle size={12} />
-                  已保存
-                </span>
-              )}
-              {isDirty && !isSaving && (
-                <span className="text-xs text-amber-600 flex items-center gap-1.5 bg-amber-50 px-2.5 py-1.5 rounded-full font-medium border border-amber-100">
-                  <div className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
-                  未保存
-                </span>
-              )}
-            </div>
           </div>
         </header>
 
@@ -285,7 +297,7 @@ export const MainLayout: React.FC = () => {
             <div className="flex items-center justify-between mb-6">
               <div>
                 <h3 className="text-xl font-black text-slate-800">个人资料</h3>
-                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-1">Profile & Password</p>
+                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-1">个人资料与密码</p>
               </div>
               <button onClick={closeProfileModal} className="p-2 hover:bg-slate-100 rounded-full">
                 <X size={18} />

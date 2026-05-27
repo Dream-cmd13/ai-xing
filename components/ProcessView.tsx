@@ -12,7 +12,7 @@ import {
   ArrowUpRight, CheckCircle2, Settings, History, Send, Info, User, Users, Target, RotateCcw, Layout,
   GitMerge, PlayCircle, StopCircle, Save, WifiOff, CheckCircle, Clock, AlertTriangle, Check, Lock, Loader2, Search
 } from 'lucide-react';
-import { canManageProcess } from '../utils/permissions';
+import { canPersistProcess, getManagedDepartmentIds } from '../utils/permissions';
 
 
 
@@ -138,17 +138,30 @@ const ProcessView: React.FC = () => {
   const [confirmDeleteAssetId, setConfirmDeleteAssetId] = useState<string | null>(null);
 
   const currentProcess = useMemo(() => processes.find(p => p.id === currentProcessId), [processes, currentProcessId]);
-  const canCreateProcess = permissions.create && !!currentUser;
+  const managedDepartmentIds = useMemo(() => {
+    if (!currentUser) return [];
+    return getManagedDepartmentIds(currentUser, departments);
+  }, [currentUser, departments]);
+  const canCreateProcess = useMemo(() => {
+    if (!currentUser || !permissions.create) return false;
+    if (currentUser.role === 'Admin') return true;
+    return managedDepartmentIds.length > 0;
+  }, [currentUser, managedDepartmentIds.length, permissions.create]);
   const canEditCurrentProcess = useMemo(() => {
     if (!currentUser || !currentProcess) return false;
-    return permissions.update && canManageProcess(currentProcess, currentUser, state.systemRoles || [], departments);
+    return permissions.update && canPersistProcess(currentProcess, currentUser, state.systemRoles || [], departments);
   }, [currentProcess, currentUser, departments, permissions.update, state.systemRoles]);
-  const canSaveProcessChanges = !!currentUser && (permissions.update || permissions.create);
+  const canSaveProcessChanges = useMemo(() => {
+    if (!currentUser) return false;
+    if (currentProcess) return (permissions.update || permissions.create) && canPersistProcess(currentProcess, currentUser, state.systemRoles || [], departments);
+    if (currentUser.role === 'Admin') return permissions.update || permissions.create;
+    return (permissions.update || permissions.create) && managedDepartmentIds.length > 0;
+  }, [currentProcess, currentUser, departments, managedDepartmentIds.length, permissions.create, permissions.update, state.systemRoles]);
   const canManageProcessEntry = useCallback((processId: string) => {
     if (!currentUser) return false;
     const targetProcess = processes.find((process) => process.id === processId);
     if (!targetProcess) return false;
-    return permissions.update && canManageProcess(targetProcess, currentUser, state.systemRoles || [], departments);
+    return permissions.update && canPersistProcess(targetProcess, currentUser, state.systemRoles || [], departments);
   }, [currentUser, departments, permissions.update, processes, state.systemRoles]);
 
   const availableRoles = useMemo(() => {
@@ -410,7 +423,13 @@ const ProcessView: React.FC = () => {
               <IMEInput autoFocus className="w-full p-5 bg-slate-50 border rounded-2xl mb-8 font-bold outline-none focus:border-brand-500" placeholder="资产名称..." value={newProcName} onChange={e => setNewProcName(e.target.value)} />
               <div className="flex gap-4">
                 <button onClick={() => setShowNewModal(null)} className="flex-1 py-4 font-bold text-slate-500">取消</button>
-                <button onClick={() => { addProcess(showNewModal.category, showNewModal.level, newProcName); setShowNewModal(null); setNewProcName(''); }} className="flex-1 py-4 bg-brand-600 text-white rounded-2xl font-black shadow-lg">确认创建</button>
+                <button onClick={() => {
+                  const created = addProcess(showNewModal.category, showNewModal.level, newProcName);
+                  if (created) {
+                    setShowNewModal(null);
+                    setNewProcName('');
+                  }
+                }} className="flex-1 py-4 bg-brand-600 text-white rounded-2xl font-black shadow-lg">确认创建</button>
               </div>
             </div>
           </div>
