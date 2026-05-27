@@ -142,7 +142,7 @@ export const useAppActions = () => {
   };
 
   const handleSave = useCallback(async (domains: SaveDomain[] = ALL_SAVE_DOMAINS) => {
-    if (!isAuthenticated) return;
+    if (!isAuthenticated) return false;
     stateRef.current = useAppStore.getState() as any;
     
     store.setIsSaving(true);
@@ -158,9 +158,11 @@ export const useAppActions = () => {
       }
 
       showSaveSuccessFeedback(domains);
+      return true;
     } catch (error: any) {
       store.setIsSaving(false);
       store.setBackendError(getUserFacingError(error, '保存失败，请稍后重试'));
+      return false;
     }
   }, [isAuthenticated, store]);
 

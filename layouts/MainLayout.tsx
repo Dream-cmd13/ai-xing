@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { Suspense, useState } from 'react';
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { useAuthStore } from '../store/useAuthStore';
 import { useAppStore } from '../store/useAppStore';
@@ -29,9 +29,20 @@ const iconMap: Record<string, React.ReactNode> = {
   'system-config': <SettingsIcon size={18} />
 };
 
-export const MainLayout: React.FC = () => {
+const ContentLoadingFallback: React.FC = () => (
+  <div className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-slate-50/96 gap-5">
+    <div className="w-14 h-14 border-4 border-brand-100 border-t-brand-600 rounded-full animate-spin" />
+    <p className="text-slate-500 font-black text-sm tracking-wide animate-pulse">页面加载中...</p>
+  </div>
+);
+
+interface MainLayoutProps {
+  content?: React.ReactNode;
+}
+
+export const MainLayout: React.FC<MainLayoutProps> = ({ content }) => {
   const { currentUser, logout, updateCurrentUser } = useAuthStore();
-  const { dirtyDomains, isSaving, showSaveSuccess, backendError, systemRoles, users, lastSavedUsers } = useAppStore();
+  const { dirtyDomains, isDirty, isSaving, showSaveSuccess, backendError, systemRoles, users, lastSavedUsers } = useAppStore();
   const navigate = useNavigate();
   const location = useLocation();
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(true);
@@ -67,13 +78,27 @@ export const MainLayout: React.FC = () => {
   };
 
   const handleNavigation = (path: string) => {
-    if (isCurrentRouteDirty) {
-      // In a real app, you might want to show a modal here
-      // For now, we just navigate
-      navigate(path);
-    } else {
+    const proceed = () => {
       navigate(path);
       setIsSidebarCollapsed(true);
+    };
+
+    if (!shouldGuardNavigation) {
+      proceed();
+      return;
+    }
+
+    const navigationEvent = new CustomEvent('app:navigation-attempt', {
+      cancelable: true,
+      detail: {
+        path,
+        retry: proceed
+      }
+    });
+
+    const shouldProceed = window.dispatchEvent(navigationEvent);
+    if (shouldProceed) {
+      proceed();
     }
   };
 
@@ -87,6 +112,7 @@ export const MainLayout: React.FC = () => {
   const isCurrentRouteDirty = activeRouteDomains.length === 0
     ? false
     : activeRouteDomains.some((domain) => dirtyDomains.includes(domain));
+  const shouldGuardNavigation = isCurrentRouteDirty || (location.pathname === '/review' && isDirty);
 
   const headerStatus = isSaving
     ? {
@@ -287,7 +313,11 @@ export const MainLayout: React.FC = () => {
         </header>
 
         <div className="flex-1 overflow-hidden relative">
-          <Outlet />
+          {content ?? (
+            <Suspense fallback={<ContentLoadingFallback />}>
+              <Outlet />
+            </Suspense>
+          )}
         </div>
       </main>
 

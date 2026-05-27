@@ -136,6 +136,29 @@ const TaskModal: React.FC<TaskModalProps> = ({
             />
           </div>
 
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">工作活动</label>
+              <textarea
+                placeholder="输入本任务的关键工作活动..."
+                className="w-full h-28 p-4 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold outline-none focus:border-brand-500 resize-none disabled:opacity-50"
+                value={data.action || ''}
+                disabled={readOnly}
+                onChange={e => setData({ ...data, action: e.target.value })}
+              />
+            </div>
+            <div className="space-y-2">
+              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">预期成果</label>
+              <textarea
+                placeholder="输入本任务的预期成果..."
+                className="w-full h-28 p-4 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold outline-none focus:border-brand-500 resize-none disabled:opacity-50"
+                value={data.deliverable || ''}
+                disabled={readOnly}
+                onChange={e => setData({ ...data, deliverable: e.target.value })}
+              />
+            </div>
+          </div>
+
           {aiResult && (
             <div className="p-4 bg-brand-50 rounded-2xl border border-brand-100 text-[11px] font-bold text-slate-700 relative shadow-inner animate-in fade-in slide-in-from-top-2">
               <div className="flex items-center gap-2 mb-2 text-brand-700">
@@ -375,6 +398,28 @@ const TaskModal: React.FC<TaskModalProps> = ({
                 </optgroup>
               ))}
             </select>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-[1fr_160px] gap-4">
+            <div className="space-y-2">
+              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">任务评价</label>
+              <textarea
+                placeholder="复盘提交后会自动回写任务评价..."
+                className="w-full h-24 p-4 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold outline-none resize-none disabled:opacity-50"
+                value={data.taskReview || ''}
+                disabled
+                readOnly
+              />
+            </div>
+            <div className="space-y-2">
+              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">任务评分</label>
+              <div className="h-24 px-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl flex items-center justify-center">
+                <div className="text-center">
+                  <div className="text-3xl font-black text-brand-600">{data.taskReviewScore ?? 0}</div>
+                  <div className="text-[11px] font-bold text-slate-400 mt-1">/ 100</div>
+                </div>
+              </div>
+            </div>
           </div>
 
           {isEditing && data.logs && data.logs.length > 0 && (

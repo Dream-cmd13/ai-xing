@@ -71,6 +71,16 @@ const collectManagedDepartments = (
   return matches;
 };
 
+const collectDepartmentIds = (department: Department): string[] => {
+  const ids = [department.id];
+
+  (department.subDepartments || []).forEach((subDepartment) => {
+    ids.push(...collectDepartmentIds(subDepartment));
+  });
+
+  return ids;
+};
+
 export const getManagedDepartments = (
   currentUser: User,
   departments: Department[] = []
@@ -79,7 +89,11 @@ export const getManagedDepartments = (
 export const getManagedDepartmentIds = (
   currentUser: User,
   departments: Department[] = []
-): string[] => getManagedDepartments(currentUser, departments).map((department) => department.id);
+): string[] => Array.from(
+  new Set(
+    getManagedDepartments(currentUser, departments).flatMap((department) => collectDepartmentIds(department))
+  )
+);
 
 export const getPrimaryManagedDepartmentId = (
   currentUser: User,
@@ -88,13 +102,7 @@ export const getPrimaryManagedDepartmentId = (
 
 const isManagedDepartment = (targetDepartmentId: string | undefined, currentUser: User, departments: Department[] = []): boolean => {
   if (!targetDepartmentId) return false;
-
-  const managedDepartment = findDepartmentById(departments, targetDepartmentId);
-  if (managedDepartment?.managerUserId) {
-    return managedDepartment.managerUserId === currentUser.id;
-  }
-
-  return currentUser.departmentId === targetDepartmentId;
+  return getManagedDepartmentIds(currentUser, departments).includes(targetDepartmentId);
 };
 
 export const canViewTask = (task: PADEntry, currentUser: User, users: User[], systemRoles: SystemRole[] = [], departments: Department[] = []): boolean => {
@@ -150,11 +158,12 @@ export const canPersistProcess = (
 export const canManageDepartment = (
   department: Department,
   currentUser: User,
-  systemRoles: SystemRole[] = []
+  systemRoles: SystemRole[] = [],
+  departments: Department[] = []
 ): boolean => {
   if (isAdminUser(currentUser, systemRoles)) return true;
   if (!isManagerUser(currentUser)) return false;
-  return department.managerUserId === currentUser.id;
+  return isManagedDepartment(department.id, currentUser, departments);
 };
 
 export const hasPermission = (

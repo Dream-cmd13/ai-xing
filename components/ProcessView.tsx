@@ -12,6 +12,8 @@ import {
   ArrowUpRight, CheckCircle2, Settings, History, Send, Info, User, Users, Target, RotateCcw, Layout,
   GitMerge, PlayCircle, StopCircle, Save, WifiOff, CheckCircle, Clock, AlertTriangle, Check, Lock, Loader2, Search
 } from 'lucide-react';
+import PageToast from './PageToast';
+import { usePageToast } from '../hooks/usePageToast';
 import { canPersistProcess, getManagedDepartmentIds } from '../utils/permissions';
 
 
@@ -138,6 +140,19 @@ const ProcessView: React.FC = () => {
   const [confirmDeleteAssetId, setConfirmDeleteAssetId] = useState<string | null>(null);
 
   const currentProcess = useMemo(() => processes.find(p => p.id === currentProcessId), [processes, currentProcessId]);
+  
+  const { toastState, showToast, clearToast } = usePageToast();
+
+  useEffect(() => {
+    clearToast();
+  }, [currentProcessId, clearToast]);
+
+  const onSaveProcesses = async () => {
+    const success = await handleSave(['processes']);
+    if (success) {
+      showToast('保存成功', 'success');
+    }
+  };
   const managedDepartmentIds = useMemo(() => {
     if (!currentUser) return [];
     return getManagedDepartmentIds(currentUser, departments);
@@ -362,12 +377,12 @@ const ProcessView: React.FC = () => {
             <p className="text-slate-400 mt-2 font-bold uppercase tracking-widest text-[10px]">Value Streams & Enterprise Assets</p>
           </div>
           <button 
-            onClick={() => handleSave(['processes'])} 
+            onClick={onSaveProcesses} 
             disabled={isSaving || !canSaveProcessChanges} 
-            className={`px-6 py-2.5 rounded-xl text-xs font-black uppercase flex items-center gap-2 transition-all shadow-md ${showSaveSuccess ? 'bg-emerald-50 text-emerald-600' : isDirty ? 'bg-brand-600 text-white hover:bg-brand-700 shadow-brand-100' : 'bg-slate-100 text-slate-400 cursor-default'}`}
+            className={`px-6 py-2.5 rounded-xl text-xs font-black uppercase flex items-center gap-2 transition-all shadow-md ${isDirty ? 'bg-brand-600 text-white hover:bg-brand-700 shadow-brand-100' : 'bg-slate-100 text-slate-400 cursor-default'}`}
           >
-            {isSaving ? <Loader2 className="animate-spin" size={16}/> : showSaveSuccess ? <CheckCircle size={16}/> : <Save size={16} />} 
-            {showSaveSuccess ? '已保存' : isDirty ? '立即保存' : '已是最新'}
+            {isSaving ? <Loader2 className="animate-spin" size={16}/> : <Save size={16} />} 
+            {isDirty ? '立即保存' : '已是最新'}
           </button>
         </header>
 
@@ -470,8 +485,8 @@ const ProcessView: React.FC = () => {
            <button onClick={() => setShowHistory(true)} className="p-2.5 text-slate-400 hover:text-brand-600 hover:bg-slate-50 rounded-xl transition-all" title="发布记录"><History size={18}/></button>
            <button onClick={() => setShowSettings(true)} className="p-2.5 text-slate-400 hover:text-brand-600 hover:bg-slate-50 rounded-xl transition-all" title="属性设置"><Settings size={18}/></button>
            <div className="hidden md:block w-px h-4 bg-slate-200 mx-2"></div>
-           <button onClick={() => handleSave(['processes'])} disabled={isSaving || backendError || !canEditCurrentProcess} className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase flex items-center gap-2 transition-all ${showSaveSuccess ? 'bg-emerald-50 text-emerald-600' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'} ${(backendError || !canEditCurrentProcess) ? 'opacity-50 cursor-not-allowed' : ''}`}>
-             {showSaveSuccess ? <CheckCircle size={14}/> : (backendError ? <WifiOff size={14}/> : <Save size={14} />)} 保存
+           <button onClick={onSaveProcesses} disabled={isSaving || backendError || !canEditCurrentProcess} className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase flex items-center gap-2 transition-all ${isDirty ? 'bg-brand-600 text-white hover:bg-brand-700' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'} ${(backendError || !canEditCurrentProcess) ? 'opacity-50 cursor-not-allowed' : ''}`}>
+             {isSaving ? <Loader2 className="animate-spin" size={14}/> : (backendError ? <WifiOff size={14}/> : <Save size={14} />)} {isDirty ? '立即保存' : '保存'}
            </button>
            <button disabled={!canEditCurrentProcess} onClick={() => setShowPublishModal(true)} className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest flex items-center gap-2 transition-all ${canEditCurrentProcess ? 'bg-slate-900 text-white hover:bg-brand-600' : 'bg-slate-200 text-slate-400 cursor-not-allowed'}`}><Send size={14}/> 发布生效</button>
         </div>
@@ -909,6 +924,13 @@ const ProcessView: React.FC = () => {
           </div>
         </div>
       )}
+
+      <PageToast
+        visible={!!toastState}
+        message={toastState?.message || ''}
+        type={toastState?.type}
+        onClose={clearToast}
+      />
     </div>
   );
 };

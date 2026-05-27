@@ -70,7 +70,7 @@ export interface KRReview {
   progress: number;
   status?: 'on-track' | 'at-risk' | 'behind';
   taskEvaluations?: Record<string, string>; // New: Map task ID -> evaluation comment
-  taskScores?: Record<string, number>; // New: Map task ID -> score (1-10)
+  taskScores?: Record<string, number>; // New: Map task ID -> score (0-100)
 }
 
 export interface ObjectiveReview {
@@ -103,7 +103,7 @@ export interface Department {
   attributes?: string; 
   subDepartments?: Department[];
   okrs?: Record<number, Record<string, OKR[]>>; 
-  reviews?: Record<string, ReviewEntry[]>; // Key: Cycle ID (e.g., '2025-W01' or '2025-M01')
+  reviews?: Record<string, ReviewEntry[]>; // Key: Cycle ID (e.g., '2025-W01', '2025-M01', or '2025-Q1')
   updatedAt?: number;
   rowVersion?: number;
 }
@@ -188,6 +188,8 @@ export interface PADEntry {
   plan?: string;
   action?: string;
   deliverable?: string;
+  taskReview?: string;
+  taskReviewScore?: number;
   updatedAt?: number;
   rowVersion?: number;
 }

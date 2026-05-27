@@ -34,10 +34,7 @@ const TaskCenterView: React.FC = () => {
     handleSetTasks: setTasks, handleSetStrategy: setStrategy,
     persistTaskEntries, persistTaskDeletion
   } = actions;
-  const setIsDirty = state.setIsDirty;
-  const backendError = state.backendError;
-  const currentProcessId = state.currentProcessId;
-  const setCurrentProcessId = state.setCurrentProcessId;
+  const setBackendError = state.setBackendError;
 
   const today = useMemo(() => new Date(), []);
   const currentWeekId = useMemo(() => {
@@ -171,6 +168,10 @@ const TaskCenterView: React.FC = () => {
             visibility: 'public',
             startDate: Date.now(),
             dueDate: Date.now() + 86400000,
+            action: '',
+            deliverable: '',
+            taskReview: '',
+            taskReviewScore: undefined,
             tags: [],
             participantIds: [],
             approverIds: []
@@ -181,6 +182,7 @@ const TaskCenterView: React.FC = () => {
       }
       showToast('任务已保存', 'success');
     } catch (error: any) {
+      setBackendError(null);
       showToast(getUserFacingError(error, '任务保存失败，请稍后重试'), 'error');
     }
   };
@@ -195,6 +197,7 @@ const TaskCenterView: React.FC = () => {
       setTaskModal({ isOpen: false, weekId: null, padId: null, mode: 'create', data: {} });
       showToast('任务已删除', 'info');
     } catch (error: any) {
+      setBackendError(null);
       showToast(getUserFacingError(error, '任务删除失败，请稍后重试'), 'error');
     }
   };
@@ -413,6 +416,10 @@ const TaskCenterView: React.FC = () => {
                     visibility: 'private',
                     startDate: Date.now(),
                     dueDate: Date.now() + 86400000,
+                    action: '',
+                    deliverable: '',
+                    taskReview: '',
+                    taskReviewScore: undefined,
                     tags: [],
                     participantIds: [],
                     approverIds: []

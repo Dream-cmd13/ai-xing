@@ -7,13 +7,15 @@ import { usePageToast } from '../hooks/usePageToast';
 import { usePermissions } from '../hooks/usePermissions';
 
 import { AppState, Department, ReviewEntry, ObjectiveReview, User, PADEntry, MenuPermission, OKR } from '../types';
-import { Calendar, Building2, ClipboardCheck, Save, CheckCircle, Loader2, Target, TrendingUp, MessageSquare, FileText, Lock, Download, RefreshCw } from 'lucide-react';
+import { Calendar, Building2, ClipboardCheck, Save, CheckCircle, Loader2, Target, TrendingUp, MessageSquare, FileText, Lock, Download, RefreshCw, ChevronRight } from 'lucide-react';
 import PageToast from './PageToast';
 import TaskModal from './TaskModal';
 import { getUserFacingError } from '../utils/userFacingError';
 import { canManageTask, getVisibleDepartments, canViewTask } from '../utils/permissions';
 import { isTaskInMonthlyPeriod, isTaskInWeeklyPeriod } from '../utils/taskPeriods.js';
 import { readTaskReviewState, updateTaskReviewState } from '../utils/reviewTaskState.js';
+import { createReviewDraftSnapshot, hasReviewDraftChanges, ReviewDraftSnapshot } from '../utils/reviewDraft';
+import { syncTaskReviewsToTasks } from '../utils/taskReviewSync';
 
 
 
@@ -45,7 +47,7 @@ const ReviewView: React.FC = () => {
   const navigate = useNavigate();
   const { initialTab, initialDeptId, initialPeriod } = (location.state as any) || {};
 
-  const [activeTab, setActiveTab] = useState<'weekly' | 'monthly'>(initialTab || 'monthly');
+  const [activeTab, setActiveTab] = useState<'weekly' | 'monthly' | 'quarterly'>(initialTab || 'monthly');
   const [selectedDeptId, setSelectedDeptId] = useState<string | null>(initialDeptId || null);
   
   // Weekly State
@@ -65,32 +67,52 @@ const ReviewView: React.FC = () => {
     const now = new Date();
     return `${now.getFullYear()}-M${(now.getMonth() + 1).toString().padStart(2, '0')}`;
   });
+  const [selectedQuarter, setSelectedQuarter] = useState<string>(() => {
+    if (initialTab === 'quarterly' && initialPeriod) return initialPeriod;
+    const now = new Date();
+    return `${now.getFullYear()}-Q${Math.floor(now.getMonth() / 3) + 1}`;
+  });
 
   const [reviewContent, setReviewContent] = useState('');
   const [reviewScore, setReviewScore] = useState(0);
   const [okrReviews, setOkrReviews] = useState<Record<string, ObjectiveReview>>({});
-  const [reviewSubTab, setReviewSubTab] = useState<'tasks' | 'okrs'>('tasks');
+  const [reviewSubTab, setReviewSubTab] = useState<'tasks' | 'weekly-records' | 'okrs'>(
+    initialTab === 'quarterly' ? 'okrs' : 'tasks'
+  );
+  const [loadedDraftSnapshot, setLoadedDraftSnapshot] = useState<ReviewDraftSnapshot>(() => createReviewDraftSnapshot());
+  const [pendingLeaveAction, setPendingLeaveAction] = useState<(() => void) | null>(null);
 
   const [taskModal, setTaskModal] = useState<{ isOpen: boolean, weekId: string | null, mode: 'create' | 'edit', data: Partial<PADEntry> }>({ isOpen: false, weekId: null, mode: 'edit', data: {} });
   const { toastState, showToast, clearToast } = usePageToast();
 
   useEffect(() => {
     clearToast();
-  }, [clearToast, activeTab, selectedDeptId, selectedWeek, selectedMonth, reviewSubTab]);
+  }, [clearToast, activeTab, selectedDeptId, selectedWeek, selectedMonth, selectedQuarter, reviewSubTab]);
+
+  useEffect(() => {
+    if (activeTab === 'quarterly') {
+      setReviewSubTab('okrs');
+      return;
+    }
+    if (activeTab === 'weekly') {
+      setReviewSubTab('tasks');
+      return;
+    }
+    if (reviewSubTab === 'okrs') {
+      setReviewSubTab('tasks');
+    }
+  }, [activeTab]);
 
   const updateReviewScore = (score: number) => {
     setReviewScore(score);
-    setIsDirty(true);
   };
 
   const updateReviewContent = (content: string) => {
     setReviewContent(content);
-    setIsDirty(true);
   };
 
   const updateOkrReviews = (reviews: Record<string, ObjectiveReview>) => {
     setOkrReviews(reviews);
-    setIsDirty(true);
   };
 
   const handleDeleteTask = async () => {
@@ -150,6 +172,11 @@ const ReviewView: React.FC = () => {
     return list;
   }, [visibleDepartments]);
 
+  const selectedDept = useMemo(
+    () => flatDepts.find(d => d.id === selectedDeptId) || null,
+    [flatDepts, selectedDeptId]
+  );
+
   const groupedAvailableKRs = useMemo(() => {
     const groups: { label: string, options: { id: string, name: string }[] }[] = [];
     const year = new Date().getFullYear();
@@ -180,28 +207,128 @@ const ReviewView: React.FC = () => {
     return groups;
   }, [state.strategy, flatDepts]);
 
+  const currentDraftSnapshot = useMemo(() => createReviewDraftSnapshot({
+    content: reviewContent,
+    score: reviewScore,
+    okrReviews
+  }), [reviewContent, reviewScore, okrReviews]);
+
+  const hasDraftChanges = useMemo(
+    () => hasReviewDraftChanges(loadedDraftSnapshot, currentDraftSnapshot),
+    [loadedDraftSnapshot, currentDraftSnapshot]
+  );
+
+  useEffect(() => {
+    setIsDirty(hasDraftChanges);
+  }, [hasDraftChanges, setIsDirty]);
+
+  useEffect(() => {
+    return () => {
+      setIsDirty(false);
+    };
+  }, [setIsDirty]);
+
   // Load existing review when selection changes
   useEffect(() => {
-    if (!selectedDeptId) return;
+    if (!selectedDeptId) {
+      const emptySnapshot = createReviewDraftSnapshot();
+      setReviewContent(emptySnapshot.content);
+      setReviewScore(emptySnapshot.score);
+      setOkrReviews(emptySnapshot.okrReviews);
+      setLoadedDraftSnapshot(emptySnapshot);
+      return;
+    }
     const dept = flatDepts.find(d => d.id === selectedDeptId);
-    if (!dept) return;
+    if (!dept) {
+      const emptySnapshot = createReviewDraftSnapshot();
+      setReviewContent(emptySnapshot.content);
+      setReviewScore(emptySnapshot.score);
+      setOkrReviews(emptySnapshot.okrReviews);
+      setLoadedDraftSnapshot(emptySnapshot);
+      return;
+    }
 
-    const periodKey = activeTab === 'weekly' ? selectedWeek : selectedMonth;
+    const periodKey = activeTab === 'weekly'
+      ? selectedWeek
+      : activeTab === 'monthly'
+        ? selectedMonth
+        : selectedQuarter;
     const reviews = dept.reviews?.[periodKey] || [];
     const latestReview = reviews.length > 0 ? reviews[reviews.length - 1] : null;
 
-    if (latestReview) {
-      setReviewContent(latestReview.content || '');
-      setReviewScore(latestReview.score || 0);
-      setOkrReviews(latestReview.okrDetails || {});
-    } else {
-      setReviewContent('');
-      setReviewScore(0);
-      setOkrReviews({});
-    }
+    const nextSnapshot = createReviewDraftSnapshot(latestReview ? {
+      content: latestReview.content || '',
+      score: latestReview.score || 0,
+      okrReviews: latestReview.okrDetails || {}
+    } : undefined);
+
+    setReviewContent(nextSnapshot.content);
+    setReviewScore(nextSnapshot.score);
+    setOkrReviews(nextSnapshot.okrReviews);
+    setLoadedDraftSnapshot(nextSnapshot);
   }, [selectedDeptId, activeTab, selectedWeek, selectedMonth, flatDepts]);
 
-  const submitReview = () => {
+  const attemptLeave = (action: () => void) => {
+    if (!hasDraftChanges) {
+      action();
+      return;
+    }
+
+    setPendingLeaveAction(() => action);
+  };
+
+  const confirmLeave = () => {
+    const action = pendingLeaveAction;
+    setPendingLeaveAction(null);
+    clearToast();
+    setIsDirty(false);
+    action?.();
+  };
+
+  const cancelLeave = () => {
+    setPendingLeaveAction(null);
+  };
+
+  const changeReviewTab = (nextTab: 'weekly' | 'monthly' | 'quarterly') => {
+    if (nextTab === activeTab) return;
+    attemptLeave(() => setActiveTab(nextTab));
+  };
+
+  const changeSelectedDepartment = (nextDeptId: string) => {
+    if ((selectedDeptId || '') === nextDeptId) return;
+    attemptLeave(() => setSelectedDeptId(nextDeptId || null));
+  };
+
+  const changeSelectedMonthValue = (nextMonth: string) => {
+    if (selectedMonth === nextMonth) return;
+    attemptLeave(() => setSelectedMonth(nextMonth));
+  };
+
+  const changeSelectedQuarterValue = (nextQuarter: string) => {
+    if (selectedQuarter === nextQuarter) return;
+    attemptLeave(() => setSelectedQuarter(nextQuarter));
+  };
+
+  const changeSelectedWeekValue = (nextWeek: string) => {
+    if (selectedWeek === nextWeek) return;
+    attemptLeave(() => setSelectedWeek(nextWeek));
+  };
+
+  useEffect(() => {
+    const handleAppNavigationAttempt = (nativeEvent: Event) => {
+      const event = nativeEvent as CustomEvent<{ path?: string; retry?: () => void }>;
+      if (!hasDraftChanges || !event.detail?.retry) return;
+      event.preventDefault();
+      setPendingLeaveAction(() => event.detail.retry!);
+    };
+
+    window.addEventListener('app:navigation-attempt', handleAppNavigationAttempt as EventListener);
+    return () => {
+      window.removeEventListener('app:navigation-attempt', handleAppNavigationAttempt as EventListener);
+    };
+  }, [hasDraftChanges]);
+
+  const submitReview = async () => {
     if (!selectedDeptId) return;
     
     const newEntry: ReviewEntry = {
@@ -209,15 +336,20 @@ const ReviewView: React.FC = () => {
         date: Date.now(),
         content: reviewContent,
         score: reviewScore,
-        reviewer: 'Admin', // Should be current user name ideally
+        reviewer: currentUser?.name || 'Admin', 
         okrDetails: okrReviews
     };
+
+    const periodKey = activeTab === 'weekly'
+      ? selectedWeek
+      : activeTab === 'monthly'
+        ? selectedMonth
+        : selectedQuarter;
 
     const updateDeptRecursive = (depts: Department[]): Department[] => {
       return depts.map(d => {
         if (d.id === selectedDeptId) {
           const currentReviews = d.reviews || {};
-          const periodKey = activeTab === 'weekly' ? selectedWeek : selectedMonth;
           return { ...d, reviews: { ...currentReviews, [periodKey]: [newEntry] } };
         }
         if (d.subDepartments) {
@@ -227,9 +359,40 @@ const ReviewView: React.FC = () => {
       });
     };
 
+    const syncedDeptTasks = syncTaskReviewsToTasks(deptTasks, okrReviews);
+    const changedTaskMap = new Map(
+      syncedDeptTasks
+        .filter((task) => {
+          const currentTask = state.tasks.find((entry) => entry.id === task.id);
+          if (!currentTask) return false;
+          return (currentTask.taskReview || '') !== (task.taskReview || '')
+            || (currentTask.taskReviewScore ?? 0) !== (task.taskReviewScore ?? 0);
+        })
+        .map((task) => [task.id, task])
+    );
+
+    const nextAllTasks = changedTaskMap.size > 0
+      ? state.tasks.map((task) => changedTaskMap.get(task.id) ?? task)
+      : state.tasks;
+
+    try {
+      if (changedTaskMap.size > 0) {
+        await persistTaskEntries(nextAllTasks, Array.from(changedTaskMap.values()), 'update');
+      }
+    } catch (error: any) {
+      showToast(getUserFacingError(error, '任务复盘保存失败，请稍后重试'), 'error');
+      return;
+    }
+
     const updatedDepts = updateDeptRecursive(state.departments);
     setDepartments(updatedDepts);
-    setIsDirty(true);
+
+    const success = await handleSave(['departments']);
+    if (success) {
+      setLoadedDraftSnapshot(currentDraftSnapshot);
+      setIsDirty(false);
+      showToast('复盘报告已提交并保存成功', 'success');
+    }
   };
 
   const handleNumberInput = (val: string, setter: (n: number) => void, max: number = 100) => {
@@ -244,11 +407,49 @@ const ReviewView: React.FC = () => {
   // Load tasks automatically when selection changes
   useEffect(() => {
     loadDeptTasks();
-  }, [selectedDeptId, selectedWeek, selectedMonth, activeTab]);
+  }, [selectedDeptId, selectedWeek, selectedMonth, selectedQuarter, activeTab, state.tasks, state.users, state.systemRoles, currentUser]);
 
-  const currentPeriodLabel = activeTab === 'weekly' ? selectedWeek : selectedMonth;
+  const currentPeriodLabel = activeTab === 'weekly'
+    ? selectedWeek
+    : activeTab === 'monthly'
+      ? selectedMonth
+      : selectedQuarter;
 
   const [deptTasks, setDeptTasks] = useState<PADEntry[]>([]);
+
+  const getWeeksForMonth = (monthKey: string) => {
+    const [yearPart, monthPart] = monthKey.split('-M');
+    const year = Number(yearPart);
+    const month = Number(monthPart);
+    if (!year || !month) return [];
+
+    const startDate = new Date(Date.UTC(year, month - 1, 1));
+    const endDate = new Date(Date.UTC(year, month, 0));
+    const periods: string[] = [];
+    const cursor = new Date(startDate);
+
+    while (cursor <= endDate) {
+      const d = new Date(Date.UTC(cursor.getUTCFullYear(), cursor.getUTCMonth(), cursor.getUTCDate()));
+      d.setUTCDate(d.getUTCDate() + 4 - (d.getUTCDay() || 7));
+      const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+      const week = Math.ceil((((d.getTime() - yearStart.getTime()) / 86400000) + 1) / 7);
+      const weekKey = `${d.getUTCFullYear()}-W${week.toString().padStart(2, '0')}`;
+      if (!periods.includes(weekKey)) {
+        periods.push(weekKey);
+      }
+      cursor.setUTCDate(cursor.getUTCDate() + 7);
+    }
+
+    return periods;
+  };
+
+  const monthlyWeekReviews = useMemo(() => {
+    if (!selectedDept || activeTab !== 'monthly') return [];
+    return getWeeksForMonth(selectedMonth).map((weekKey) => ({
+      period: weekKey,
+      review: selectedDept.reviews?.[weekKey]?.[0] || null
+    }));
+  }, [activeTab, selectedDept, selectedMonth]);
 
   const loadDeptTasks = () => {
     if (!selectedDeptId) {
@@ -261,7 +462,9 @@ const ReviewView: React.FC = () => {
     (state.tasks || []).forEach(task => {
       const inPeriod = activeTab === 'weekly'
         ? isTaskInWeeklyPeriod(task.targetWeeks, selectedWeek)
-        : isTaskInMonthlyPeriod(task.targetWeeks, selectedMonth);
+        : activeTab === 'monthly'
+          ? isTaskInMonthlyPeriod(task.targetWeeks, selectedMonth)
+          : false;
       
       if (!inPeriod) return;
       if (!canViewTask(task, currentUser, state.users, state.systemRoles || [])) return;
@@ -283,7 +486,9 @@ const ReviewView: React.FC = () => {
     const year = parseInt(currentPeriodLabel.split('-')[0]);
     
     let quarter = 'Q1';
-    if (activeTab === 'monthly') {
+    if (activeTab === 'quarterly') {
+      quarter = currentPeriodLabel.split('-Q')[1] ? `Q${currentPeriodLabel.split('-Q')[1]}` : 'Q1';
+    } else if (activeTab === 'monthly') {
       const month = parseInt(currentPeriodLabel.split('-M')[1]);
       if (month >= 4 && month <= 6) quarter = 'Q2';
       else if (month >= 7 && month <= 9) quarter = 'Q3';
@@ -312,7 +517,7 @@ const ReviewView: React.FC = () => {
         <div className="flex items-center gap-4">
           {location.state?.from && (
             <button 
-              onClick={() => navigate(-1)}
+              onClick={() => attemptLeave(() => navigate(location.state?.from || '/okr-review'))}
               className="p-3 bg-slate-50 text-slate-500 hover:text-slate-700 hover:bg-slate-100 rounded-2xl transition-colors"
             >
               <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m15 18-6-6 6-6"/></svg>
@@ -328,28 +533,32 @@ const ReviewView: React.FC = () => {
         <div className="flex items-center gap-4">
           <div className="flex bg-slate-100 p-1 rounded-2xl">
              <button 
-               onClick={() => setActiveTab('weekly')}
+               onClick={() => changeReviewTab('weekly')}
                className={`px-6 py-2 rounded-xl text-xs font-black uppercase transition-all ${activeTab === 'weekly' ? 'bg-white text-brand-600 shadow-sm' : 'text-slate-500'}`}
              >
                周度复盘
              </button>
              <button 
-               onClick={() => setActiveTab('monthly')}
+               onClick={() => changeReviewTab('monthly')}
                className={`px-6 py-2 rounded-xl text-xs font-black uppercase transition-all ${activeTab === 'monthly' ? 'bg-white text-brand-600 shadow-sm' : 'text-slate-500'}`}
              >
                月度复盘
              </button>
+             <button 
+               onClick={() => changeReviewTab('quarterly')}
+               className={`px-6 py-2 rounded-xl text-xs font-black uppercase transition-all ${activeTab === 'quarterly' ? 'bg-white text-brand-600 shadow-sm' : 'text-slate-500'}`}
+             >
+               季度复盘
+             </button>
           </div>
-          {permissions.create && (
             <button 
               onClick={submitReview} 
-              disabled={isSaving} 
-              className={`px-6 py-2.5 rounded-xl text-xs font-black uppercase flex items-center gap-2 transition-all shadow-md ${showSaveSuccess ? 'bg-emerald-50 text-emerald-600' : isDirty ? 'bg-brand-600 text-white hover:bg-brand-700 shadow-brand-100' : 'bg-slate-100 text-slate-400 cursor-default'}`}
+              disabled={isSaving || !hasDraftChanges} 
+              className={`px-6 py-2.5 rounded-xl text-xs font-black uppercase flex items-center gap-2 transition-all shadow-md ${hasDraftChanges ? 'bg-brand-600 text-white hover:bg-brand-700 shadow-brand-100' : 'bg-slate-100 text-slate-400 cursor-default'}`}
             >
-              {isSaving ? <Loader2 className="animate-spin" size={16}/> : showSaveSuccess ? <CheckCircle size={16}/> : <Save size={16} />} 
-              {showSaveSuccess ? '已存档' : isDirty ? '提交复盘' : '已是最新'}
+              {isSaving ? <Loader2 className="animate-spin" size={16}/> : <Save size={16} />} 
+              {isDirty ? '提交复盘' : '已是最新'}
             </button>
-          )}
         </div>
       </div>
 
@@ -360,7 +569,7 @@ const ReviewView: React.FC = () => {
                <div className="flex gap-3">
                   <div className="flex items-center bg-slate-50 border rounded-xl px-4 py-2 gap-2">
                     <Building2 size={14} className="text-slate-400"/>
-                    <select className="bg-transparent text-xs font-bold outline-none text-slate-600" value={selectedDeptId || ''} onChange={e => setSelectedDeptId(e.target.value)}>
+                    <select className="bg-transparent text-xs font-bold outline-none text-slate-600" value={selectedDeptId || ''} onChange={e => changeSelectedDepartment(e.target.value)}>
                       <option value="">选择复盘部门...</option>
                       {flatDepts.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
                     </select>
@@ -372,7 +581,7 @@ const ReviewView: React.FC = () => {
                       <select 
                         className="bg-transparent text-xs font-bold outline-none text-slate-600"
                         value={selectedMonth.split('-')[0]}
-                        onChange={e => setSelectedMonth(`${e.target.value}-M${selectedMonth.split('-M')[1]}`)}
+                        onChange={e => changeSelectedMonthValue(`${e.target.value}-M${selectedMonth.split('-M')[1]}`)}
                       >
                         {[2024, 2025, 2026].map(y => <option key={y} value={y}>{y}年</option>)}
                       </select>
@@ -380,10 +589,31 @@ const ReviewView: React.FC = () => {
                       <select 
                         className="bg-transparent text-xs font-bold outline-none text-slate-600"
                         value={parseInt(selectedMonth.split('-M')[1])}
-                        onChange={e => setSelectedMonth(`${selectedMonth.split('-')[0]}-M${e.target.value.toString().padStart(2, '0')}`)}
+                        onChange={e => changeSelectedMonthValue(`${selectedMonth.split('-')[0]}-M${e.target.value.toString().padStart(2, '0')}`)}
                       >
                         {Array.from({length: 12}, (_, i) => i + 1).map(m => (
                           <option key={m} value={m}>{m}月</option>
+                        ))}
+                      </select>
+                    </div>
+                  ) : activeTab === 'quarterly' ? (
+                    <div className="flex items-center bg-slate-50 border rounded-xl px-4 py-2 gap-2">
+                      <Calendar size={14} className="text-slate-400"/>
+                      <select
+                        className="bg-transparent text-xs font-bold outline-none text-slate-600"
+                        value={selectedQuarter.split('-')[0]}
+                        onChange={e => changeSelectedQuarterValue(`${e.target.value}-Q${selectedQuarter.split('-Q')[1]}`)}
+                      >
+                        {[2024, 2025, 2026].map(y => <option key={y} value={y}>{y}年</option>)}
+                      </select>
+                      <span className="text-slate-300">/</span>
+                      <select
+                        className="bg-transparent text-xs font-bold outline-none text-slate-600"
+                        value={parseInt(selectedQuarter.split('-Q')[1])}
+                        onChange={e => changeSelectedQuarterValue(`${selectedQuarter.split('-')[0]}-Q${e.target.value}`)}
+                      >
+                        {[1, 2, 3, 4].map(q => (
+                          <option key={q} value={q}>Q{q}</option>
                         ))}
                       </select>
                     </div>
@@ -394,7 +624,7 @@ const ReviewView: React.FC = () => {
                         type="week"
                         className="bg-transparent text-xs font-bold outline-none text-slate-600"
                         value={selectedWeek}
-                        onChange={e => setSelectedWeek(e.target.value)}
+                        onChange={e => changeSelectedWeekValue(e.target.value)}
                       />
                     </div>
                   )}
@@ -430,26 +660,28 @@ const ReviewView: React.FC = () => {
                     />
                  </div>
 
-                 {/* OKR & Task Specific Review */}
+                 {/* Review Detail */}
                  <div className="space-y-6">
-                    <div className="flex items-center justify-between border-b border-slate-200">
-                      <div className="flex items-center gap-4">
-                        <button
-                          className={`pb-2 text-sm font-black uppercase tracking-widest transition-colors ${reviewSubTab === 'tasks' ? 'text-brand-600 border-b-2 border-brand-600' : 'text-slate-400 hover:text-slate-600'}`}
-                          onClick={() => setReviewSubTab('tasks')}
-                        >
-                          任务复盘
-                        </button>
-                        <button
-                          className={`pb-2 text-sm font-black uppercase tracking-widest transition-colors ${reviewSubTab === 'okrs' ? 'text-brand-600 border-b-2 border-brand-600' : 'text-slate-400 hover:text-slate-600'}`}
-                          onClick={() => setReviewSubTab('okrs')}
-                        >
-                          季度OKR复盘
-                        </button>
+                    {activeTab === 'monthly' && (
+                      <div className="flex items-center justify-between border-b border-slate-200">
+                        <div className="flex items-center gap-4">
+                          <button
+                            className={`pb-2 text-sm font-black uppercase tracking-widest transition-colors ${reviewSubTab === 'tasks' ? 'text-brand-600 border-b-2 border-brand-600' : 'text-slate-400 hover:text-slate-600'}`}
+                            onClick={() => setReviewSubTab('tasks')}
+                          >
+                            任务复盘
+                          </button>
+                          <button
+                            className={`pb-2 text-sm font-black uppercase tracking-widest transition-colors ${reviewSubTab === 'weekly-records' ? 'text-brand-600 border-b-2 border-brand-600' : 'text-slate-400 hover:text-slate-600'}`}
+                            onClick={() => setReviewSubTab('weekly-records')}
+                          >
+                            周复盘记录
+                          </button>
+                        </div>
                       </div>
-                    </div>
+                    )}
 
-                    {reviewSubTab === 'tasks' && (
+                    {(activeTab === 'weekly' || reviewSubTab === 'tasks') && activeTab !== 'quarterly' && (
                       <div className="space-y-4">
                         <div className="flex justify-end gap-2 mb-2">
                           <button
@@ -572,7 +804,52 @@ const ReviewView: React.FC = () => {
                       </div>
                     )}
 
-                    {reviewSubTab === 'okrs' && (
+                    {activeTab === 'monthly' && reviewSubTab === 'weekly-records' && (
+                      <div className="space-y-4">
+                        {monthlyWeekReviews.length === 0 ? (
+                          <div className="text-center py-8 text-slate-400 text-sm italic font-medium">本月暂无周复盘记录</div>
+                        ) : (
+                          monthlyWeekReviews.map(({ period, review }) => (
+                            <div
+                              key={period}
+                              onClick={() => attemptLeave(() => {
+                                setActiveTab('weekly');
+                                setSelectedWeek(period);
+                              })}
+                              className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm hover:border-brand-300 hover:shadow-md transition-all cursor-pointer group"
+                            >
+                              <div className="flex items-center justify-between mb-3">
+                                <span className="text-sm font-black text-slate-700">{period}</span>
+                                {review ? (
+                                  <span className="text-[10px] font-bold px-2 py-1 rounded-md bg-emerald-50 text-emerald-600">已复盘</span>
+                                ) : (
+                                  <span className="text-[10px] font-bold px-2 py-1 rounded-md bg-slate-100 text-slate-500">未复盘</span>
+                                )}
+                              </div>
+                              {review ? (
+                                <>
+                                  <div className="flex items-center gap-2 mb-2">
+                                    <span className="text-2xl font-black text-brand-600">{review.score}</span>
+                                    <span className="text-xs text-slate-400 font-bold">/ 100 分</span>
+                                  </div>
+                                  <p className="text-xs text-slate-500 line-clamp-2">{review.content}</p>
+                                </>
+                              ) : (
+                                <div className="h-12 flex items-center text-slate-300">
+                                  <span className="text-xs font-bold">点击发起该周复盘</span>
+                                </div>
+                              )}
+                              <div className="mt-4 flex items-center justify-end text-brand-600 opacity-0 group-hover:opacity-100 transition-opacity">
+                                <span className="text-xs font-bold mr-1">{review ? '查看周复盘' : '去复盘'}</span>
+                                <ChevronRight size={14} />
+                              </div>
+                            </div>
+                          ))
+                        )}
+                      </div>
+                    )}
+
+                    {activeTab === 'quarterly' && (
                       <div className="space-y-6">
                         {currentOkrs.map((okr: any) => {
                       const currentReview = okrReviews[okr.id] || { progress: 0, krReviews: [], lessonsLearned: '', methodology: '', nextSteps: '' };
@@ -702,12 +979,6 @@ const ReviewView: React.FC = () => {
                  </div>
 
                  <div className="flex items-center gap-4 pt-6 border-t border-slate-100">
-                    {showSaveSuccess && (
-                      <div className="flex-1 flex items-center gap-2 text-emerald-600 font-bold text-xs animate-in fade-in slide-in-from-left-2">
-                        <CheckCircle size={16}/>
-                        复盘报告已提交并保存成功
-                      </div>
-                    )}
                  </div>
               </div>
             ) : (
@@ -726,6 +997,33 @@ const ReviewView: React.FC = () => {
         type={toastState?.type}
         onClose={clearToast}
       />
+
+      {pendingLeaveAction && (
+        <div className="fixed inset-0 z-[1200] flex items-start justify-center bg-slate-900/35 p-6 pt-32 backdrop-blur-sm">
+          <div className="w-full max-w-xl rounded-[2rem] border border-slate-100 bg-white p-8 shadow-2xl">
+            <div className="mb-6">
+              <h3 className="text-xl font-black text-slate-800">当前页面有未保存的修改，确定要离开吗？</h3>
+              <p className="mt-3 text-sm font-medium leading-relaxed text-slate-500">
+                确认离开后，本次未提交的复盘修改会直接放弃。
+              </p>
+            </div>
+            <div className="flex justify-end gap-3">
+              <button
+                onClick={cancelLeave}
+                className="rounded-xl bg-slate-100 px-6 py-3 text-xs font-black uppercase text-slate-600 transition-colors hover:bg-slate-200"
+              >
+                取消
+              </button>
+              <button
+                onClick={confirmLeave}
+                className="rounded-xl bg-brand-600 px-6 py-3 text-xs font-black uppercase text-white shadow-lg shadow-brand-100 transition-colors hover:bg-brand-700"
+              >
+                确认离开
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Task Modal (Read Only) */}
       <TaskModal

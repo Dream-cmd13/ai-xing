@@ -1,6 +1,7 @@
 
 import { AppState, User, Department, ProcessDefinition, CompanyStrategy, BusinessDefinition, SystemRole, PADEntry, AISettings, UserRole } from "./types";
 import { isSupabaseConfigured, supabase } from "./supabase";
+import { isMissingTaskReviewColumnError, omitTaskReviewColumns, stripTaskReviewFieldsFromSelect } from "./utils/taskSchemaCompat";
 
 /**
  * StratFlow AI 数据持久化层 (Data Access Layer) - Supabase Relational Version (Single Tenant)
@@ -172,6 +173,8 @@ const mapTaskRow = (t: any): PADEntry => ({
   plan: t.plan,
   action: t.action,
   deliverable: t.deliverable,
+  taskReview: t.task_review,
+  taskReviewScore: t.task_review_score,
   updatedAt: t.updated_at,
   rowVersion: normalizeRowVersion(t.row_version)
 });
@@ -182,7 +185,8 @@ const PROCESSES_SELECT_FIELDS = 'id,department_id,created_by,name,category,level
 const STRATEGY_SELECT_FIELDS = 'id,mission,vision,customer_issues,employee_issues,company_okrs,updated_at,row_version';
 const BUSINESSES_SELECT_FIELDS = 'id,name,business_format,customer_persona,customer_needs,surface_product_power,core_product_power,updated_at,row_version';
 const SYSTEM_ROLES_SELECT_FIELDS = 'id,name,description,permissions,updated_at,row_version';
-const TASKS_SELECT_FIELDS = 'id,created_by,title,status,priority,owner_id,department_id,visibility,aligned_kr_id,target_weeks,start_date,due_date,tags,participant_ids,approver_ids,logs,plan,action,deliverable,updated_at,row_version';
+const TASKS_SELECT_FIELDS = 'id,created_by,title,status,priority,owner_id,department_id,visibility,aligned_kr_id,target_weeks,start_date,due_date,tags,participant_ids,approver_ids,logs,plan,action,deliverable,task_review,task_review_score,updated_at,row_version';
+const TASKS_SELECT_FIELDS_LEGACY = stripTaskReviewFieldsFromSelect(TASKS_SELECT_FIELDS);
 
 const isIgnoredNoRowsError = (error: any) => error?.code === 'PGRST116';
 const isIgnoredMissingTableError = (error: any) => error?.code === '42P01';
@@ -323,7 +327,15 @@ export const getSystemRoles = async (): Promise<SystemRole[]> => {
 export const getTasks = async (): Promise<PADEntry[]> => {
   if (!isSupabaseConfigured()) throw new Error("Supabase not configured");
   try {
-    const { data, error } = await supabase.from('tasks').select(TASKS_SELECT_FIELDS);
+    let data: any[] | null = null;
+    let error: any = null;
+
+    ({ data, error } = await supabase.from('tasks').select(TASKS_SELECT_FIELDS));
+
+    if (isMissingTaskReviewColumnError(error)) {
+      ({ data, error } = await supabase.from('tasks').select(TASKS_SELECT_FIELDS_LEGACY));
+    }
+
     if (error && !isIgnoredMissingTableError(error)) throw error;
     return (data || []).map(mapTaskRow);
   } catch (e) {
@@ -336,10 +348,21 @@ export const getWorkbenchTasks = async (userId: string): Promise<PADEntry[]> => 
   if (!isSupabaseConfigured()) throw new Error("Supabase not configured");
   try {
     const memberJson = JSON.stringify([userId]);
-    const { data, error } = await supabase
+    let data: any[] | null = null;
+    let error: any = null;
+
+    ({ data, error } = await supabase
       .from('tasks')
       .select(TASKS_SELECT_FIELDS)
-      .or(`owner_id.eq.${userId},participant_ids.cs.${memberJson},approver_ids.cs.${memberJson}`);
+      .or(`owner_id.eq.${userId},participant_ids.cs.${memberJson},approver_ids.cs.${memberJson}`));
+
+    if (isMissingTaskReviewColumnError(error)) {
+      ({ data, error } = await supabase
+        .from('tasks')
+        .select(TASKS_SELECT_FIELDS_LEGACY)
+        .or(`owner_id.eq.${userId},participant_ids.cs.${memberJson},approver_ids.cs.${memberJson}`));
+    }
+
     if (error && !isIgnoredMissingTableError(error)) throw error;
     return (data || []).map(mapTaskRow);
   } catch (e) {
@@ -1068,13 +1091,27 @@ export const addTask = async (task: PADEntry): Promise<PADEntry> => {
       plan: task.plan || null,
       action: task.action || null,
       deliverable: task.deliverable || null,
+      task_review: task.taskReview || null,
+      task_review_score: task.taskReviewScore ?? null,
       updated_at: Date.now(),
       row_version: 0
     };
-    const { data, error } = await supabase.from('tasks').insert(taskData).select('*').single();
+    let data: any = null;
+    let error: any = null;
+
+    ({ data, error } = await supabase.from('tasks').insert(taskData).select('*').single());
+
+    if (isMissingTaskReviewColumnError(error)) {
+      ({ data, error } = await supabase.from('tasks').insert(omitTaskReviewColumns(taskData)).select('*').single());
+    }
+
     if (error) throw error;
     if (!data) throw buildDuplicateCreateError('任务');
-    return mapTaskRow(data);
+    return {
+      ...mapTaskRow(data),
+      taskReview: task.taskReview || '',
+      taskReviewScore: task.taskReviewScore ?? 0
+    };
   } catch (e) {
     handleSupabaseError(e);
     throw e;
@@ -1103,19 +1140,39 @@ export const updateTask = async (taskId: string, task: Partial<PADEntry>): Promi
     if (task.plan !== undefined) taskData.plan = task.plan;
     if (task.action !== undefined) taskData.action = task.action;
     if (task.deliverable !== undefined) taskData.deliverable = task.deliverable;
+    if (task.taskReview !== undefined) taskData.task_review = task.taskReview;
+    if (task.taskReviewScore !== undefined) taskData.task_review_score = task.taskReviewScore;
     taskData.updated_at = Date.now();
     taskData.row_version = currentRowVersion + 1;
 
-    const { data, error } = await supabase
+    let data: any = null;
+    let error: any = null;
+
+    ({ data, error } = await supabase
       .from('tasks')
       .update(taskData)
       .eq('id', taskId)
       .eq('row_version', currentRowVersion)
       .select('*')
-      .maybeSingle();
+      .maybeSingle());
+
+    if (isMissingTaskReviewColumnError(error)) {
+      ({ data, error } = await supabase
+        .from('tasks')
+        .update(omitTaskReviewColumns(taskData))
+        .eq('id', taskId)
+        .eq('row_version', currentRowVersion)
+        .select('*')
+        .maybeSingle());
+    }
+
     if (error) throw error;
     if (!data) throw buildConflictError('任务');
-    return mapTaskRow(data);
+    return {
+      ...mapTaskRow(data),
+      taskReview: task.taskReview ?? data?.task_review ?? '',
+      taskReviewScore: task.taskReviewScore ?? data?.task_review_score ?? 0
+    };
   } catch (e) {
     handleSupabaseError(e);
     throw e;

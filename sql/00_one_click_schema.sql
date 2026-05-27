@@ -103,6 +103,8 @@ CREATE TABLE IF NOT EXISTS public.tasks (
   plan TEXT,
   action TEXT,
   deliverable TEXT,
+  task_review TEXT,
+  task_review_score INTEGER,
   pad_id TEXT,
   version TEXT,
   updated_at BIGINT NOT NULL DEFAULT 0,
@@ -172,6 +174,8 @@ ALTER TABLE public.tasks DROP COLUMN IF EXISTS ent_name;
 ALTER TABLE public.tasks ADD COLUMN IF NOT EXISTS pad_id TEXT;
 ALTER TABLE public.tasks ADD COLUMN IF NOT EXISTS version TEXT;
 ALTER TABLE public.tasks ADD COLUMN IF NOT EXISTS created_by TEXT;
+ALTER TABLE public.tasks ADD COLUMN IF NOT EXISTS task_review TEXT;
+ALTER TABLE public.tasks ADD COLUMN IF NOT EXISTS task_review_score INTEGER;
 ALTER TABLE public.tasks ADD COLUMN IF NOT EXISTS updated_at BIGINT NOT NULL DEFAULT 0;
 ALTER TABLE public.tasks ADD COLUMN IF NOT EXISTS row_version BIGINT NOT NULL DEFAULT 0;
 
@@ -754,29 +758,32 @@ BEGIN
         0
       );
     ELSE
-      IF NOT public.is_admin() THEN
-        IF COALESCE(previous_item->>'managerUserId', '') <> current_id
-           AND NOT public.department_tree_has_manager(
-             COALESCE(previous_item->'subDepartments', '[]'::jsonb),
-             current_id
-           ) THEN
-          RAISE EXCEPTION '仅允许修改自己负责的部门';
-        END IF;
-
-        next_item := public.merge_department_subtree_for_manager(
-          previous_item,
-          next_item,
-          current_id
-        );
-      END IF;
-
       previous_snapshot := jsonb_strip_nulls(previous_item - 'rowVersion' - 'updatedAt');
       next_snapshot := jsonb_strip_nulls(next_item - 'rowVersion' - 'updatedAt');
 
       IF previous_snapshot IS DISTINCT FROM next_snapshot THEN
-        expected_row_version := COALESCE((previous_item->>'rowVersion')::BIGINT, 0);
+        IF NOT public.is_admin() THEN
+          IF COALESCE(previous_item->>'managerUserId', '') <> current_id
+             AND NOT public.department_tree_has_manager(
+               COALESCE(previous_item->'subDepartments', '[]'::jsonb),
+               current_id
+             ) THEN
+            RAISE EXCEPTION '仅允许修改自己负责的部门';
+          END IF;
 
-        UPDATE public.departments
+          next_item := public.merge_department_subtree_for_manager(
+            previous_item,
+            next_item,
+            current_id
+          );
+          
+          next_snapshot := jsonb_strip_nulls(next_item - 'rowVersion' - 'updatedAt');
+        END IF;
+
+        IF previous_snapshot IS DISTINCT FROM next_snapshot THEN
+          expected_row_version := COALESCE((previous_item->>'rowVersion')::BIGINT, 0);
+
+          UPDATE public.departments
         SET
           name = COALESCE(next_item->>'name', ''),
           manager_name = CASE
@@ -802,6 +809,7 @@ BEGIN
         IF NOT FOUND THEN
           RAISE EXCEPTION '部门已被其他人修改，请刷新最新数据后再重试。';
         END IF;
+      END IF;
       END IF;
     END IF;
 

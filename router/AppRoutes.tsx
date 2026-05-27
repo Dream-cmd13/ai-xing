@@ -1,5 +1,5 @@
-import React, { Suspense, lazy } from 'react';
-import { Routes, Route, Navigate } from 'react-router-dom';
+import React, { Suspense, lazy, useEffect } from 'react';
+import { Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { motion, AnimatePresence } from 'motion/react';
 import { useAuthStore } from '../store/useAuthStore';
 import { useAppStore } from '../store/useAppStore';
@@ -28,16 +28,21 @@ const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
   return <>{children}</>;
 };
 
-const RouteLoadingFallback: React.FC = () => (
-  <div className="h-full w-full flex flex-col items-center justify-center bg-slate-50 gap-4">
+const LoginRouteLoadingFallback: React.FC = () => (
+  <div className="h-screen w-screen flex flex-col items-center justify-center bg-slate-50 gap-4">
     <div className="w-10 h-10 border-4 border-brand-100 border-t-brand-600 rounded-full animate-spin" />
     <p className="text-slate-500 font-black text-xs uppercase tracking-widest animate-pulse">页面加载中...</p>
   </div>
 );
 
 export const AppRoutes: React.FC = () => {
-  const { isInitialLoadComplete } = useAppStore();
+  const { isInitialLoadComplete, setShowSaveSuccess } = useAppStore();
   const { isAuthenticated } = useAuthStore();
+  const location = useLocation();
+
+  useEffect(() => {
+    setShowSaveSuccess(false);
+  }, [location.pathname, setShowSaveSuccess]);
 
   return (
     <AnimatePresence mode="wait">
@@ -61,31 +66,37 @@ export const AppRoutes: React.FC = () => {
           transition={{ duration: 0.4 }}
           className="h-full w-full"
         >
-          <Suspense fallback={<RouteLoadingFallback />}>
-            <Routes>
-              <Route 
-                path="/login" 
-                element={isAuthenticated ? <Navigate to="/workbench" replace /> : <LoginView />} 
-              />
-              <Route path="/" element={<ProtectedRoute><RouteDataLayout /></ProtectedRoute>}>
-                <Route index element={<Navigate to="/workbench" replace />} />
-                <Route path="workbench" element={<WorkbenchView />} />
-                <Route path="process" element={<ProcessView />} />
-                <Route path="org" element={<OrgView />} />
-                <Route path="okr" element={<StrategyView />} />
-                <Route path="business-definition" element={<BusinessDefinitionView />} />
-                <Route path="weekly" element={<WeeklyView />} />
-                <Route path="user" element={<UserView />} />
-                <Route path="roles" element={<RoleQueryView />} />
-                <Route path="task-center" element={<TaskCenterView />} />
-                <Route path="execution" element={<ExecutionView />} />
-                <Route path="review" element={<ReviewView />} />
-                <Route path="okr-review" element={<OkrReviewDashboard />} />
-                <Route path="menu-permissions" element={<MenuPermissionView />} />
-              </Route>
-              <Route path="*" element={<Navigate to="/" replace />} />
-            </Routes>
-          </Suspense>
+          <Routes>
+            <Route 
+              path="/login" 
+              element={
+                isAuthenticated ? (
+                  <Navigate to="/workbench" replace />
+                ) : (
+                  <Suspense fallback={<LoginRouteLoadingFallback />}>
+                    <LoginView />
+                  </Suspense>
+                )
+              } 
+            />
+            <Route path="/" element={<ProtectedRoute><RouteDataLayout /></ProtectedRoute>}>
+              <Route index element={<Navigate to="/workbench" replace />} />
+              <Route path="workbench" element={<WorkbenchView />} />
+              <Route path="process" element={<ProcessView />} />
+              <Route path="org" element={<OrgView />} />
+              <Route path="okr" element={<StrategyView />} />
+              <Route path="business-definition" element={<BusinessDefinitionView />} />
+              <Route path="weekly" element={<WeeklyView />} />
+              <Route path="user" element={<UserView />} />
+              <Route path="roles" element={<RoleQueryView />} />
+              <Route path="task-center" element={<TaskCenterView />} />
+              <Route path="execution" element={<ExecutionView />} />
+              <Route path="review" element={<ReviewView />} />
+              <Route path="okr-review" element={<OkrReviewDashboard />} />
+              <Route path="menu-permissions" element={<MenuPermissionView />} />
+            </Route>
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Routes>
         </motion.div>
       )}
     </AnimatePresence>

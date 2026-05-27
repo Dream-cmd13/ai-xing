@@ -13,14 +13,14 @@ import {
 import { getRequiredDomains } from '../utils/routeDomains';
 
 const RouteLoadingFallback: React.FC = () => (
-  <div className="h-screen w-screen flex flex-col items-center justify-center bg-slate-50 gap-4">
-    <div className="w-12 h-12 border-4 border-brand-200 border-t-brand-600 rounded-full animate-spin" />
-    <p className="text-slate-500 font-black text-xs uppercase tracking-widest animate-pulse">页面数据加载中...</p>
+  <div className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-slate-50/96 gap-5">
+    <div className="w-14 h-14 border-4 border-brand-100 border-t-brand-600 rounded-full animate-spin" />
+    <p className="text-slate-500 font-black text-sm tracking-wide animate-pulse">页面数据加载中...</p>
   </div>
 );
 
 const RouteLoadError: React.FC<{ message: string; onRetry: () => void }> = ({ message, onRetry }) => (
-  <div className="h-screen w-screen flex items-center justify-center bg-slate-50 p-6">
+  <div className="absolute inset-0 z-20 flex items-center justify-center bg-slate-50/96 p-6">
     <div className="max-w-md w-full bg-white rounded-[2.5rem] border border-slate-200 shadow-sm p-10 text-center">
       <h2 className="text-xl font-black text-slate-800">页面数据加载失败</h2>
       <p className="text-sm text-slate-500 mt-3 leading-relaxed">{message}</p>
@@ -177,13 +177,15 @@ export const RouteDataLayout: React.FC = () => {
     return !status.loaded || status.loading;
   });
 
-  if (routeError && isRouteLoading) {
-    return <RouteLoadError message={routeError} onRetry={() => setRetryToken((value) => value + 1)} />;
-  }
-
-  if (isRouteLoading) {
-    return <RouteLoadingFallback />;
-  }
-
-  return <MainLayout />;
+  return (
+    <MainLayout
+      content={
+        routeError && isRouteLoading ? (
+          <RouteLoadError message={routeError} onRetry={() => setRetryToken((value) => value + 1)} />
+        ) : isRouteLoading ? (
+          <RouteLoadingFallback />
+        ) : undefined
+      }
+    />
+  );
 };

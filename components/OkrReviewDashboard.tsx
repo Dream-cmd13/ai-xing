@@ -20,7 +20,7 @@ const OkrReviewDashboard: React.FC = () => {
   const permissions = usePermissions('okr-review');
   const navigate = useNavigate();
 
-  const navigateToReview = (tab: 'weekly' | 'monthly', deptId: string, period?: string) => {
+  const navigateToReview = (tab: 'weekly' | 'monthly' | 'quarterly', deptId: string, period?: string) => {
     navigate('/review', {
       state: {
         initialTab: tab,
@@ -49,6 +49,7 @@ const OkrReviewDashboard: React.FC = () => {
   const [selectedDeptId, setSelectedDeptId] = useState<string | null>(null);
   const [visibleWeeksCount, setVisibleWeeksCount] = useState(6);
   const [visibleMonthsCount, setVisibleMonthsCount] = useState(6);
+  const [visibleQuartersCount, setVisibleQuartersCount] = useState(6);
 
   const visibleDepartments = useMemo(() => getVisibleDepartments(currentUser, state.departments, state.systemRoles || []), [currentUser, state.departments, state.systemRoles]);
 
@@ -84,8 +85,8 @@ const OkrReviewDashboard: React.FC = () => {
     ));
   };
 
-  const getRecentPeriods = (type: 'weekly' | 'monthly', count = 6) => {
-    const periods = [];
+  const getRecentPeriods = (type: 'weekly' | 'monthly' | 'quarterly', count = 6) => {
+    const periods: string[] = [];
     const now = new Date();
     if (type === 'weekly') {
       let year = now.getFullYear();
@@ -98,7 +99,7 @@ const OkrReviewDashboard: React.FC = () => {
           week = 52;
         }
       }
-    } else {
+    } else if (type === 'monthly') {
       let year = now.getFullYear();
       let month = now.getMonth() + 1;
       for (let i = 0; i < count; i++) {
@@ -109,12 +110,24 @@ const OkrReviewDashboard: React.FC = () => {
           year--;
         }
       }
+    } else {
+      let year = now.getFullYear();
+      let quarter = Math.floor(now.getMonth() / 3) + 1;
+      for (let i = 0; i < count; i++) {
+        periods.push(`${year}-Q${quarter}`);
+        quarter--;
+        if (quarter <= 0) {
+          quarter = 4;
+          year--;
+        }
+      }
     }
     return periods;
   };
 
   const recentWeeks = getRecentPeriods('weekly', visibleWeeksCount);
   const recentMonths = getRecentPeriods('monthly', visibleMonthsCount);
+  const recentQuarters = getRecentPeriods('quarterly', visibleQuartersCount);
 
   return (
     <div className="h-full flex flex-col bg-slate-50">
@@ -124,7 +137,7 @@ const OkrReviewDashboard: React.FC = () => {
             <Target className="text-brand-600" />
             OKR 复盘
           </h2>
-          <p className="text-sm text-slate-500 mt-1">查看和管理各部门的周复盘和月度复盘记录</p>
+          <p className="text-sm text-slate-500 mt-1">查看和管理各部门的周复盘、月度复盘和季度复盘记录</p>
         </div>
       </div>
 
@@ -263,6 +276,69 @@ const OkrReviewDashboard: React.FC = () => {
                   <button 
                     onClick={() => setVisibleMonthsCount(prev => prev + 6)}
                     className="text-xs font-bold text-slate-400 hover:text-indigo-600 transition-colors bg-white border border-slate-200 px-4 py-2 rounded-full hover:border-indigo-300 hover:shadow-sm"
+                  >
+                    查看更多
+                  </button>
+                </div>
+              </section>
+
+              {/* Quarterly Reviews */}
+              <section>
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-lg font-black text-slate-800 flex items-center gap-2">
+                    <Target className="text-violet-500" size={20} />
+                    季度复盘记录
+                  </h3>
+                  <button 
+                    onClick={() => navigateToReview('quarterly', selectedDept.id)}
+                    className="flex items-center gap-1 text-sm font-bold text-violet-600 hover:text-violet-700 bg-violet-50 px-3 py-1.5 rounded-lg transition-colors"
+                  >
+                    <Plus size={16} />
+                    发起季度复盘
+                  </button>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {recentQuarters.map(quarter => {
+                    const review = selectedDept.reviews?.[quarter]?.[0];
+                    return (
+                      <div 
+                        key={quarter} 
+                        onClick={() => navigateToReview('quarterly', selectedDept.id, quarter)}
+                        className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm hover:shadow-md hover:border-violet-300 transition-all cursor-pointer group"
+                      >
+                        <div className="flex justify-between items-start mb-3">
+                          <span className="text-sm font-black text-slate-700">{quarter}</span>
+                          {review ? (
+                            <span className="text-[10px] font-bold px-2 py-1 rounded-md bg-emerald-50 text-emerald-600">已复盘</span>
+                          ) : (
+                            <span className="text-[10px] font-bold px-2 py-1 rounded-md bg-slate-100 text-slate-500">未复盘</span>
+                          )}
+                        </div>
+                        {review ? (
+                          <>
+                            <div className="flex items-center gap-2 mb-2">
+                              <span className="text-2xl font-black text-violet-600">{review.score}</span>
+                              <span className="text-xs text-slate-400 font-bold">/ 100 分</span>
+                            </div>
+                            <p className="text-xs text-slate-500 line-clamp-2">{review.content}</p>
+                          </>
+                        ) : (
+                          <div className="h-16 flex items-center justify-center text-slate-300">
+                            <FileText size={24} className="opacity-20" />
+                          </div>
+                        )}
+                        <div className="mt-4 flex items-center justify-end text-violet-600 opacity-0 group-hover:opacity-100 transition-opacity">
+                          <span className="text-xs font-bold mr-1">{review ? '查看详情' : '去复盘'}</span>
+                          <ChevronRight size={14} />
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+                <div className="mt-4 flex justify-center">
+                  <button 
+                    onClick={() => setVisibleQuartersCount(prev => prev + 6)}
+                    className="text-xs font-bold text-slate-400 hover:text-violet-600 transition-colors bg-white border border-slate-200 px-4 py-2 rounded-full hover:border-violet-300 hover:shadow-sm"
                   >
                     查看更多
                   </button>

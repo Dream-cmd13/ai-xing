@@ -1,4 +1,3 @@
-
 import React, { useMemo, useState } from 'react';
 import { useAppStore } from '../store/useAppStore';
 import { useAuthStore } from '../store/useAuthStore';
@@ -12,6 +11,8 @@ import {
   Plus, Trash2, Building2, ChevronRight, X, Briefcase, ChevronDown, 
   ExternalLink, Search, User as UserIcon, Check, Minus, Save, WifiOff, CheckCircle, Info, Shield, Users, AlertCircle, Lock, Loader2
 } from 'lucide-react';
+import PageToast from './PageToast';
+import { usePageToast } from '../hooks/usePageToast';
 
 
 
@@ -36,7 +37,7 @@ const OrgView: React.FC = () => {
   const setIsDirty = state.setIsDirty;
   const backendError = state.backendError;
   const currentProcessId = state.currentProcessId;
-  const setCurrentProcessId = state.setCurrentProcessId;
+  const setCurrentProcessId = state.currentProcessId;
 
   const [selectedDeptId, setSelectedDeptId] = useState<string | null>(null);
   const [addingToId, setAddingToId] = useState<string | null>(null);
@@ -54,6 +55,15 @@ const OrgView: React.FC = () => {
   const [roleUserSearch, setRoleUserSearch] = useState('');
   const [editingRole, setEditingRole] = useState<{deptId: string, roleName: string} | null>(null);
   const [editingRoleName, setEditingRoleName] = useState('');
+
+  const { toastState, showToast, clearToast } = usePageToast();
+
+  const onSaveDepartments = async () => {
+    const success = await handleSave(['departments']);
+    if (success) {
+      showToast('保存成功', 'success');
+    }
+  };
 
   // Helper to set dirty when modifying data
   const updateDepartments = (newDepts: Department[]) => {
@@ -100,7 +110,7 @@ const OrgView: React.FC = () => {
   }, [departments]);
 
   const canEditDepartment = (department: Department) =>
-    !!currentUser && permissions.update && canManageDepartment(department, currentUser, state.systemRoles || []);
+    !!currentUser && permissions.update && canManageDepartment(department, currentUser, state.systemRoles || [], state.departments);
 
   const isAdmin = !!currentUser && isAdminUser(currentUser, state.systemRoles || []);
   const canEditDepartmentManager = (department: Department) => isAdmin && canEditDepartment(department);
@@ -302,7 +312,7 @@ const OrgView: React.FC = () => {
                     className={`px-6 py-2 rounded-xl font-black text-xs uppercase shadow-md transition-all flex items-center gap-2 disabled:opacity-50 ${isDirty ? 'bg-brand-600 text-white hover:bg-brand-700' : 'bg-slate-100 text-slate-400'}`}
                   >
                     {isSaving ? <Loader2 className="animate-spin" size={14}/> : <Save size={14}/>}
-                    {isDirty ? '保存设置' : '已保存'}
+                    {isDirty ? '保存设置' : '收起'}
                   </button>
                 </div>
               )}
@@ -413,12 +423,12 @@ const OrgView: React.FC = () => {
              <button disabled={!isAdmin} onClick={() => setShowAddRootModal(true)} className={`flex-1 md:flex-none justify-center px-6 py-2.5 rounded-xl text-xs font-black uppercase transition-all flex items-center gap-2 border ${isAdmin ? 'bg-slate-100 text-slate-600 hover:bg-slate-200 border-slate-200' : 'bg-slate-100 text-slate-300 border-slate-100 cursor-not-allowed'}`}><Plus size={16}/> 创建根部门</button>
              {(permissions.update || isAdmin) && (
                <button 
-                 onClick={() => handleSave(['departments'])} 
+                 onClick={onSaveDepartments} 
                  disabled={isSaving || (!isAdmin && !currentUser)} 
-                 className={`flex-1 md:flex-none justify-center px-6 py-2.5 rounded-xl text-xs font-black uppercase flex items-center gap-2 transition-all shadow-md ${showSaveSuccess ? 'bg-emerald-50 text-emerald-600' : isDirty ? 'bg-brand-600 text-white hover:bg-brand-700 shadow-brand-100' : 'bg-slate-100 text-slate-400 cursor-default'} ${(!isAdmin && !currentUser) ? 'opacity-50 cursor-not-allowed' : ''}`}
+                 className={`flex-1 md:flex-none justify-center px-6 py-2.5 rounded-xl text-xs font-black uppercase flex items-center gap-2 transition-all shadow-md ${isDirty ? 'bg-brand-600 text-white hover:bg-brand-700 shadow-brand-100' : 'bg-slate-100 text-slate-400 cursor-default'} ${(!isAdmin && !currentUser) ? 'opacity-50 cursor-not-allowed' : ''}`}
                >
-                 {isSaving ? <Loader2 className="animate-spin" size={16}/> : showSaveSuccess ? <CheckCircle size={16}/> : <Save size={16} />} 
-                 {showSaveSuccess ? '已保存' : isDirty ? '立即保存' : '已是最新'}
+                 {isSaving ? <Loader2 className="animate-spin" size={16}/> : <Save size={16} />} 
+                 {isDirty ? '立即保存' : '已是最新'}
                </button>
              )}
            </div>
@@ -563,6 +573,13 @@ const OrgView: React.FC = () => {
           </div>
         </div>
       )}
+
+      <PageToast
+        visible={!!toastState}
+        message={toastState?.message || ''}
+        type={toastState?.type}
+        onClose={clearToast}
+      />
     </div>
   );
 };
