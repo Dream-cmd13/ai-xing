@@ -249,8 +249,19 @@ CREATE OR REPLACE FUNCTION public.is_admin()
 RETURNS BOOLEAN AS $$
 BEGIN
   RETURN EXISTS (
-    SELECT 1 FROM public.users
-    WHERE auth_id = auth.uid() AND role = 'Admin'
+    SELECT 1 FROM public.users u
+    WHERE u.auth_id = auth.uid() AND (
+      u.role = 'Admin'
+      OR (
+        u.system_role_ids IS NOT NULL 
+        AND jsonb_typeof(u.system_role_ids) = 'array'
+        AND EXISTS (
+          SELECT 1 FROM jsonb_array_elements_text(u.system_role_ids) AS rid
+          JOIN public.system_roles sr ON sr.id = rid
+          WHERE sr.name ILIKE 'admin' OR sr.id = 'admin'
+        )
+      )
+    )
   );
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER STABLE;
