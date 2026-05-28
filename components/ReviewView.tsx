@@ -7,11 +7,11 @@ import { usePageToast } from '../hooks/usePageToast';
 import { usePermissions } from '../hooks/usePermissions';
 
 import { AppState, Department, ReviewEntry, ObjectiveReview, User, PADEntry, MenuPermission, OKR } from '../types';
-import { Calendar, Building2, ClipboardCheck, Save, CheckCircle, Loader2, Target, TrendingUp, MessageSquare, FileText, Lock, Download, RefreshCw, ChevronRight } from 'lucide-react';
+import { Calendar, Building2, ClipboardCheck, Save, CheckCircle, Loader2, Target, TrendingUp, MessageSquare, FileText, Lock, Download, RefreshCw, ChevronLeft, ChevronRight } from 'lucide-react';
 import PageToast from './PageToast';
 import TaskModal from './TaskModal';
 import { getUserFacingError } from '../utils/userFacingError';
-import { canManageTask, getVisibleDepartments, canViewTask } from '../utils/permissions';
+import { canManageReview, canManageTask, getVisibleDepartments, canViewTask } from '../utils/permissions';
 import { isTaskInMonthlyPeriod, isTaskInWeeklyPeriod } from '../utils/taskPeriods.js';
 import { readTaskReviewState, updateTaskReviewState } from '../utils/reviewTaskState.js';
 import { createReviewDraftSnapshot, hasReviewDraftChanges, ReviewDraftSnapshot } from '../utils/reviewDraft';
@@ -76,6 +76,7 @@ const ReviewView: React.FC = () => {
   const [reviewContent, setReviewContent] = useState('');
   const [reviewScore, setReviewScore] = useState(0);
   const [okrReviews, setOkrReviews] = useState<Record<string, ObjectiveReview>>({});
+  const [currentQuarterlyOkrIndex, setCurrentQuarterlyOkrIndex] = useState(0);
   const [reviewSubTab, setReviewSubTab] = useState<'tasks' | 'weekly-records' | 'okrs'>(
     initialTab === 'quarterly' ? 'okrs' : 'tasks'
   );
@@ -176,6 +177,10 @@ const ReviewView: React.FC = () => {
     () => flatDepts.find(d => d.id === selectedDeptId) || null,
     [flatDepts, selectedDeptId]
   );
+  const canEditReview = useMemo(() => {
+    if (!currentUser || !selectedDept || !permissions.update) return false;
+    return canManageReview(selectedDept, currentUser, state.systemRoles || [], state.departments);
+  }, [currentUser, selectedDept, permissions.update, state.systemRoles, state.departments]);
 
   const groupedAvailableKRs = useMemo(() => {
     const groups: { label: string, options: { id: string, name: string }[] }[] = [];
@@ -330,6 +335,10 @@ const ReviewView: React.FC = () => {
 
   const submitReview = async () => {
     if (!selectedDeptId) return;
+    if (!canEditReview) {
+      showToast('当前部门复盘仅可查看，不能修改。', 'info');
+      return;
+    }
     
     const newEntry: ReviewEntry = {
         id: `rev-${Date.now()}`,
@@ -511,6 +520,22 @@ const ReviewView: React.FC = () => {
     return okrs;
   }, [selectedDeptId, currentPeriodLabel, flatDepts, activeTab]);
 
+  useEffect(() => {
+    setCurrentQuarterlyOkrIndex(0);
+  }, [activeTab, selectedDeptId, selectedWeek, selectedMonth, selectedQuarter]);
+
+  useEffect(() => {
+    if (currentOkrs.length === 0) {
+      setCurrentQuarterlyOkrIndex(0);
+      return;
+    }
+    if (currentQuarterlyOkrIndex > currentOkrs.length - 1) {
+      setCurrentQuarterlyOkrIndex(currentOkrs.length - 1);
+    }
+  }, [currentOkrs, currentQuarterlyOkrIndex]);
+
+  const currentQuarterlyOkr = currentOkrs[currentQuarterlyOkrIndex] || null;
+
   return (
     <div className="h-full flex flex-col gap-6 overflow-hidden">
       <div className="bg-white p-6 rounded-[2.5rem] border shadow-sm flex flex-col md:flex-row justify-between items-center shrink-0">
@@ -553,7 +578,7 @@ const ReviewView: React.FC = () => {
           </div>
             <button 
               onClick={submitReview} 
-              disabled={isSaving || !hasDraftChanges} 
+              disabled={isSaving || !hasDraftChanges || !canEditReview} 
               className={`px-6 py-2.5 rounded-xl text-xs font-black uppercase flex items-center gap-2 transition-all shadow-md ${hasDraftChanges ? 'bg-brand-600 text-white hover:bg-brand-700 shadow-brand-100' : 'bg-slate-100 text-slate-400 cursor-default'}`}
             >
               {isSaving ? <Loader2 className="animate-spin" size={16}/> : <Save size={16} />} 
@@ -646,6 +671,7 @@ const ReviewView: React.FC = () => {
                             min="0" max="100" 
                             className="w-12 bg-transparent text-sm font-black text-brand-600 outline-none text-right"
                             value={reviewScore}
+                            disabled={!canEditReview}
                             onChange={e => handleNumberInput(e.target.value, updateReviewScore, 100)}
                             onFocus={e => e.target.select()}
                           />
@@ -656,12 +682,47 @@ const ReviewView: React.FC = () => {
                       className="w-full h-40 p-6 bg-slate-50 border border-slate-100 rounded-[2rem] text-sm font-bold text-slate-700 outline-none focus:border-brand-300 focus:bg-white transition-all resize-none leading-relaxed"
                       placeholder="输入本周期整体复盘总结..."
                       value={reviewContent}
+                      disabled={!canEditReview}
                       onChange={e => updateReviewContent(e.target.value)}
                     />
                  </div>
 
                  {/* Review Detail */}
                  <div className="space-y-6">
+                    {activeTab === 'quarterly' && currentOkrs.length > 1 && (
+                      <div className="rounded-[2rem] border border-slate-200 bg-white px-4 py-3 shadow-sm">
+                        <div className="flex items-center gap-3">
+                          <button
+                            type="button"
+                            onClick={() => setCurrentQuarterlyOkrIndex((prev) => Math.max(0, prev - 1))}
+                            disabled={currentQuarterlyOkrIndex === 0}
+                            className="flex h-10 w-10 items-center justify-center rounded-2xl border border-slate-200 bg-slate-50 text-slate-500 transition-colors enabled:hover:border-brand-200 enabled:hover:bg-brand-50 enabled:hover:text-brand-600 disabled:cursor-not-allowed disabled:opacity-40"
+                            aria-label="上一条季度OKR"
+                          >
+                            <ChevronLeft size={18} />
+                          </button>
+                          <div className="min-w-0 flex-1">
+                            <div className="text-[10px] font-black uppercase tracking-[0.24em] text-slate-400">季度 OKR 切换</div>
+                            <div className="mt-1 truncate text-sm font-black text-slate-700">
+                              {currentQuarterlyOkr?.objective || '暂无季度 OKR'}
+                            </div>
+                          </div>
+                          <div className="rounded-full bg-brand-50 px-3 py-1 text-xs font-black text-brand-600">
+                            {currentQuarterlyOkrIndex + 1} / {currentOkrs.length}
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => setCurrentQuarterlyOkrIndex((prev) => Math.min(currentOkrs.length - 1, prev + 1))}
+                            disabled={currentQuarterlyOkrIndex === currentOkrs.length - 1}
+                            className="flex h-10 w-10 items-center justify-center rounded-2xl border border-slate-200 bg-slate-50 text-slate-500 transition-colors enabled:hover:border-brand-200 enabled:hover:bg-brand-50 enabled:hover:text-brand-600 disabled:cursor-not-allowed disabled:opacity-40"
+                            aria-label="下一条季度OKR"
+                          >
+                            <ChevronRight size={18} />
+                          </button>
+                        </div>
+                      </div>
+                    )}
+
                     {activeTab === 'monthly' && (
                       <div className="flex items-center justify-between border-b border-slate-200">
                         <div className="flex items-center gap-4">
@@ -692,7 +753,9 @@ const ReviewView: React.FC = () => {
                             读取任务
                           </button>
                           <button
+                            disabled={!canEditReview}
                             onClick={() => {
+                              if (!canEditReview) return;
                               const statusMap: Record<string, string> = {
                                 'draft': '草稿',
                                 'submitted': '已提交',
@@ -769,6 +832,7 @@ const ReviewView: React.FC = () => {
                                       placeholder="输入对该任务的评价..."
                                       className="w-full bg-slate-50 border border-slate-100 rounded-xl px-4 py-2.5 text-xs font-medium text-slate-700 outline-none focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500 transition-all"
                                       value={evaluation}
+                                      disabled={!canEditReview}
                                       onChange={e => {
                                         updateOkrReviews(
                                           updateTaskReviewState(okrReviews, task, {
@@ -785,6 +849,7 @@ const ReviewView: React.FC = () => {
                                       min="0" max="100"
                                       className="w-full bg-transparent text-sm font-black text-brand-600 outline-none text-right"
                                       value={score}
+                                      disabled={!canEditReview}
                                       onChange={e => handleNumberInput(e.target.value, (val) => {
                                         updateOkrReviews(
                                           updateTaskReviewState(okrReviews, task, {
@@ -851,11 +916,12 @@ const ReviewView: React.FC = () => {
 
                     {activeTab === 'quarterly' && (
                       <div className="space-y-6">
-                        {currentOkrs.map((okr: any) => {
-                      const currentReview = okrReviews[okr.id] || { progress: 0, krReviews: [], lessonsLearned: '', methodology: '', nextSteps: '' };
-                      
-                      return (
-                      <div key={okr.id} className="bg-slate-50/50 rounded-[2.5rem] p-8 border border-slate-100">
+                        {currentQuarterlyOkr ? (() => {
+                          const okr = currentQuarterlyOkr;
+                          const currentReview = okrReviews[okr.id] || { progress: 0, krReviews: [], lessonsLearned: '', methodology: '', nextSteps: '' };
+
+                          return (
+                            <div key={okr.id} className="bg-slate-50/50 rounded-[2.5rem] p-8 border border-slate-100">
                          <div className="flex items-center gap-3 mb-6">
                             <span className="bg-white border text-slate-500 text-[10px] font-black px-2 py-1 rounded uppercase">{okr.period}</span>
                             <h5 className="font-bold text-slate-800 flex-1">{okr.objective}</h5>
@@ -866,6 +932,7 @@ const ReviewView: React.FC = () => {
                                  min="0" max="100" 
                                  className="w-12 bg-transparent text-sm font-black text-brand-600 outline-none text-right"
                                  value={currentReview.progress || 0}
+                                 disabled={!canEditReview}
                                  onChange={e => handleNumberInput(e.target.value, (val) => updateOkrReviews({ 
                                    ...okrReviews, 
                                    [okr.id]: { ...currentReview, progress: val } 
@@ -878,9 +945,8 @@ const ReviewView: React.FC = () => {
 
                          {/* KR Reviews */}
                          <div className="space-y-4 mb-6">
-                           {okr.keyResults.map((kr: string, idx: number) => {
+                            {okr.keyResults.map((kr: string, idx: number) => {
                              const krReview = currentReview.krReviews?.[idx] || { comment: '', progress: 0, status: 'on-track' };
-                             const krId = `${okr.id}-kr-${idx}`;
                              return (
                                <div key={idx} className="bg-white p-4 rounded-xl border border-slate-100">
                                  <div className="flex justify-between items-start mb-2">
@@ -892,6 +958,7 @@ const ReviewView: React.FC = () => {
                                        'bg-emerald-50 text-emerald-600 border-emerald-100'
                                      }`}
                                      value={krReview.status || 'on-track'}
+                                     disabled={!canEditReview}
                                      onChange={e => {
                                        const newKrReviews = [...(currentReview.krReviews || [])];
                                        while(newKrReviews.length <= idx) newKrReviews.push({ comment: '', progress: 0, status: 'on-track' });
@@ -911,6 +978,7 @@ const ReviewView: React.FC = () => {
                                         placeholder="输入 KR 执行情况..."
                                         className="w-full bg-slate-50 border-none rounded-lg px-3 py-2 text-xs font-medium text-slate-600 outline-none focus:ring-1 focus:ring-brand-200"
                                         value={krReview.comment || ''}
+                                        disabled={!canEditReview}
                                         onChange={e => {
                                           const newKrReviews = [...(currentReview.krReviews || [])];
                                           while(newKrReviews.length <= idx) newKrReviews.push({ comment: '', progress: 0, status: 'on-track' });
@@ -926,6 +994,7 @@ const ReviewView: React.FC = () => {
                                         min="0" max="100"
                                         className="w-full bg-transparent text-xs font-bold text-slate-600 outline-none text-right"
                                         value={krReview.progress || 0}
+                                        disabled={!canEditReview}
                                         onChange={e => handleNumberInput(e.target.value, (val) => {
                                           const newKrReviews = [...(currentReview.krReviews || [])];
                                           while(newKrReviews.length <= idx) newKrReviews.push({ comment: '', progress: 0, status: 'on-track' });
@@ -948,6 +1017,7 @@ const ReviewView: React.FC = () => {
                                <textarea 
                                  className="w-full h-24 p-4 bg-white border border-slate-200 rounded-2xl text-xs font-bold outline-none focus:border-brand-300 resize-none"
                                  value={currentReview.lessonsLearned || ''}
+                                 disabled={!canEditReview}
                                  onChange={e => updateOkrReviews({ ...okrReviews, [okr.id]: { ...currentReview, lessonsLearned: e.target.value } })}
                                />
                             </div>
@@ -956,6 +1026,7 @@ const ReviewView: React.FC = () => {
                                <textarea 
                                  className="w-full h-24 p-4 bg-white border border-slate-200 rounded-2xl text-xs font-bold outline-none focus:border-brand-300 resize-none"
                                  value={currentReview.methodology || ''}
+                                 disabled={!canEditReview}
                                  onChange={e => updateOkrReviews({ ...okrReviews, [okr.id]: { ...currentReview, methodology: e.target.value } })}
                                />
                             </div>
@@ -964,14 +1035,14 @@ const ReviewView: React.FC = () => {
                                <textarea 
                                  className="w-full h-24 p-4 bg-white border border-slate-200 rounded-2xl text-xs font-bold outline-none focus:border-brand-300 resize-none"
                                  value={currentReview.nextSteps || ''}
+                                 disabled={!canEditReview}
                                  onChange={e => updateOkrReviews({ ...okrReviews, [okr.id]: { ...currentReview, nextSteps: e.target.value } })}
                                />
                             </div>
                          </div>
                       </div>
                       );
-                    })}
-                    {currentOkrs.length === 0 && (
+                    })() : (
                       <div className="text-center py-10 text-slate-400 italic">该部门在所选周期内暂无 OKR 数据</div>
                     )}
                  </div>

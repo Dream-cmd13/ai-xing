@@ -79,6 +79,7 @@ export const MainLayout: React.FC<MainLayoutProps> = ({ content }) => {
 
   const handleNavigation = (path: string) => {
     const proceed = () => {
+      useAppStore.getState().setBackendError(null);
       navigate(path);
       setIsSidebarCollapsed(true);
     };

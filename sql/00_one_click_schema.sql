@@ -298,6 +298,67 @@ RETURNS JSONB AS $$
   LIMIT 1;
 $$ LANGUAGE sql SECURITY DEFINER STABLE;
 
+CREATE OR REPLACE FUNCTION public.has_menu_permission(
+  p_menu_id TEXT,
+  p_action TEXT
+)
+RETURNS BOOLEAN AS $$
+DECLARE
+  user_record RECORD;
+  custom_perm JSONB;
+  role_id TEXT;
+  role_record RECORD;
+  role_perm JSONB;
+BEGIN
+  -- Admin always has permission
+  IF public.is_admin() THEN
+    RETURN true;
+  END IF;
+
+  -- Get current user's custom_permissions and system_role_ids
+  SELECT custom_permissions, system_role_ids
+  INTO user_record
+  FROM public.users
+  WHERE auth_id = auth.uid()
+  LIMIT 1;
+
+  IF user_record IS NULL THEN
+    RETURN false;
+  END IF;
+
+  -- Check custom permissions first (override)
+  IF user_record.custom_permissions IS NOT NULL
+     AND user_record.custom_permissions ? p_menu_id THEN
+    custom_perm := user_record.custom_permissions -> p_menu_id;
+    RETURN COALESCE((custom_perm ->> p_action)::BOOLEAN, false);
+  END IF;
+
+  -- Check system role permissions
+  IF user_record.system_role_ids IS NOT NULL
+     AND jsonb_array_length(user_record.system_role_ids) > 0 THEN
+    FOR role_id IN
+      SELECT value::TEXT
+      FROM jsonb_array_elements_text(user_record.system_role_ids)
+    LOOP
+      SELECT permissions INTO role_record
+      FROM public.system_roles
+      WHERE id = role_id;
+
+      IF role_record IS NOT NULL
+         AND role_record.permissions IS NOT NULL
+         AND role_record.permissions ? p_menu_id THEN
+        role_perm := role_record.permissions -> p_menu_id;
+        IF COALESCE((role_perm ->> p_action)::BOOLEAN, false) THEN
+          RETURN true;
+        END IF;
+      END IF;
+    END LOOP;
+  END IF;
+
+  RETURN false;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER STABLE;
+
 CREATE OR REPLACE FUNCTION public.current_user_has_department_visibility(target_department_id TEXT)
 RETURNS BOOLEAN AS $$
 DECLARE
@@ -1306,7 +1367,7 @@ DECLARE
   previous_snapshot JSONB;
   next_snapshot JSONB;
 BEGIN
-  IF NOT public.is_admin() THEN
+  IF NOT public.is_admin() AND NOT public.has_menu_permission('business-definition', 'update') THEN
     RAISE EXCEPTION '无权限保存业务定义';
   END IF;
 
@@ -1495,14 +1556,14 @@ CREATE POLICY processes_delete ON public.processes FOR DELETE TO authenticated
   );
 
 CREATE POLICY strategy_select ON public.strategy FOR SELECT TO authenticated USING (true);
-CREATE POLICY strategy_insert ON public.strategy FOR INSERT TO authenticated WITH CHECK (public.is_admin());
-CREATE POLICY strategy_update ON public.strategy FOR UPDATE TO authenticated USING (public.is_admin()) WITH CHECK (public.is_admin());
+CREATE POLICY strategy_insert ON public.strategy FOR INSERT TO authenticated WITH CHECK (public.is_admin() OR public.has_menu_permission('business-definition', 'create'));
+CREATE POLICY strategy_update ON public.strategy FOR UPDATE TO authenticated USING (public.is_admin() OR public.has_menu_permission('business-definition', 'update')) WITH CHECK (public.is_admin() OR public.has_menu_permission('business-definition', 'update'));
 CREATE POLICY strategy_delete ON public.strategy FOR DELETE TO authenticated USING (public.is_admin());
 
 CREATE POLICY businesses_select ON public.businesses FOR SELECT TO authenticated USING (true);
-CREATE POLICY businesses_insert ON public.businesses FOR INSERT TO authenticated WITH CHECK (public.is_admin());
-CREATE POLICY businesses_update ON public.businesses FOR UPDATE TO authenticated USING (public.is_admin()) WITH CHECK (public.is_admin());
-CREATE POLICY businesses_delete ON public.businesses FOR DELETE TO authenticated USING (public.is_admin());
+CREATE POLICY businesses_insert ON public.businesses FOR INSERT TO authenticated WITH CHECK (public.is_admin() OR public.has_menu_permission('business-definition', 'create'));
+CREATE POLICY businesses_update ON public.businesses FOR UPDATE TO authenticated USING (public.is_admin() OR public.has_menu_permission('business-definition', 'update')) WITH CHECK (public.is_admin() OR public.has_menu_permission('business-definition', 'update'));
+CREATE POLICY businesses_delete ON public.businesses FOR DELETE TO authenticated USING (public.is_admin() OR public.has_menu_permission('business-definition', 'update'));
 
 CREATE POLICY tasks_select ON public.tasks FOR SELECT TO authenticated
   USING (

@@ -654,13 +654,13 @@ const ProcessView: React.FC = () => {
                   <div className="space-y-4 relative">
                     <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest">辅助岗位 (多选)</label>
                     <div 
-                      className="w-full p-3 bg-slate-50 border rounded-xl min-h-[42px] cursor-pointer hover:border-brand-300 transition-all flex flex-wrap gap-1"
-                      onClick={() => setShowAssistantRoleDropdown(!showAssistantRoleDropdown)}
+                      className={`w-full p-3 bg-slate-50 border rounded-xl min-h-[42px] transition-all flex flex-wrap gap-1 ${canEditCurrentProcess ? 'cursor-pointer hover:border-brand-300' : 'opacity-50 cursor-not-allowed'}`}
+                      onClick={() => canEditCurrentProcess && setShowAssistantRoleDropdown(!showAssistantRoleDropdown)}
                     >
                       {(selectedNode.sipoc.assistantRoles && selectedNode.sipoc.assistantRoles.length > 0) ? (
                         selectedNode.sipoc.assistantRoles.map(r => (
                           <span key={r} className="text-[9px] font-bold bg-white border border-slate-200 px-1.5 py-0.5 rounded text-slate-600 flex items-center gap-1">
-                            {r} <X size={10} className="hover:text-red-500" onClick={(e) => { e.stopPropagation(); toggleAssistantRole(r); }}/>
+                            {r} {canEditCurrentProcess && <X size={10} className="hover:text-red-500" onClick={(e) => { e.stopPropagation(); toggleAssistantRole(r); }}/>}
                           </span>
                         ))
                       ) : (

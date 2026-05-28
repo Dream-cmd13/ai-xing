@@ -166,6 +166,13 @@ export const canManageDepartment = (
   return isManagedDepartment(department.id, currentUser, departments);
 };
 
+export const canManageReview = (
+  department: Department,
+  currentUser: User,
+  systemRoles: SystemRole[] = [],
+  departments: Department[] = []
+): boolean => canManageDepartment(department, currentUser, systemRoles, departments);
+
 export const hasPermission = (
   user: User,
   systemRoles: SystemRole[],
