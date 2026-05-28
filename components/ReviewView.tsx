@@ -535,6 +535,152 @@ const ReviewView: React.FC = () => {
   }, [currentOkrs, currentQuarterlyOkrIndex]);
 
   const currentQuarterlyOkr = currentOkrs[currentQuarterlyOkrIndex] || null;
+  const taskReviewStats = useMemo(() => {
+    const reviewedCount = deptTasks.filter((task) => {
+      const { evaluation, score } = readTaskReviewState(okrReviews, task);
+      return evaluation.trim().length > 0 || Number(score) > 0;
+    }).length;
+
+    return {
+      total: deptTasks.length,
+      reviewed: reviewedCount,
+      pending: Math.max(deptTasks.length - reviewedCount, 0)
+    };
+  }, [deptTasks, okrReviews]);
+  const monthlyWeekReviewStats = useMemo(() => {
+    const reviewedCount = monthlyWeekReviews.filter(({ review }) => Boolean(review)).length;
+    return {
+      total: monthlyWeekReviews.length,
+      reviewed: reviewedCount,
+      pending: Math.max(monthlyWeekReviews.length - reviewedCount, 0)
+    };
+  }, [monthlyWeekReviews]);
+  const isMonthlyTaskWorkspace = activeTab === 'monthly' && reviewSubTab === 'tasks';
+  const isMonthlyWeekRecordWorkspace = activeTab === 'monthly' && reviewSubTab === 'weekly-records';
+  const renderTaskReviewCard = (task: PADEntry) => {
+    const { evaluation, score } = readTaskReviewState(okrReviews, task);
+    const owner = state.users.find(u => u.id === task.ownerId);
+
+    return (
+      <div key={task.id} className="w-[22rem] md:w-[25rem] shrink-0 bg-white p-5 rounded-[1.75rem] border border-slate-100 shadow-sm h-full">
+        <div className="flex flex-col gap-4 h-full">
+          <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-2 cursor-pointer hover:opacity-80" onClick={() => handleTaskClick(task)}>
+                <span className="text-sm font-bold text-indigo-600 hover:underline break-all">{task.title}</span>
+                <span className={`text-[10px] px-2 py-0.5 rounded-full font-black ${
+                  task.status === 'completed' ? 'bg-emerald-100 text-emerald-700' :
+                  task.status === 'in-progress' ? 'bg-blue-100 text-blue-700' :
+                  task.status === 'paused' ? 'bg-orange-100 text-orange-700' :
+                  task.status === 'terminated' ? 'bg-red-100 text-red-700' :
+                  'bg-slate-200 text-slate-700'
+                }`}>
+                  {task.status === 'completed' ? '已完成' :
+                   task.status === 'in-progress' ? '处理中' :
+                   task.status === 'paused' ? '暂停' :
+                   task.status === 'terminated' ? '终止' :
+                   task.status === 'submitted' ? '已提交' : '草稿'}
+                </span>
+              </div>
+              <div className="mt-2 text-xs text-slate-500 font-medium">
+                {task.startDate ? new Date(task.startDate).toLocaleDateString() : '-'} 至 {task.dueDate ? new Date(task.dueDate).toLocaleDateString() : '-'}
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              {owner && (
+                <div className="flex items-center gap-1.5 bg-slate-50 px-2 py-1 rounded-full border border-slate-100">
+                  <div className="w-5 h-5 rounded-full bg-brand-100 flex items-center justify-center text-[10px] font-black text-brand-600">
+                    {owner.name.charAt(0)}
+                  </div>
+                  <span className="text-[10px] font-bold text-slate-600">{owner.name}</span>
+                </div>
+              )}
+              <div className="w-32 flex items-center gap-2 bg-slate-50 px-3 py-2 rounded-xl border border-slate-100 shrink-0">
+                <span className="text-[10px] font-black text-slate-400 uppercase">评分</span>
+                <input 
+                  type="number"
+                  min="0" max="100"
+                  className="w-full bg-transparent text-sm font-black text-brand-600 outline-none text-right"
+                  value={score}
+                  disabled={!canEditReview}
+                  onChange={e => handleNumberInput(e.target.value, (val) => {
+                    updateOkrReviews(
+                      updateTaskReviewState(okrReviews, task, {
+                        score: val,
+                      })
+                    );
+                  }, 100)}
+                  onFocus={e => e.target.select()}
+                />
+                <span className="text-[10px] font-black text-slate-400">/ 100</span>
+              </div>
+            </div>
+          </div>
+
+          <div className="flex-1">
+            <div className="mb-2 flex flex-col gap-1 md:flex-row md:items-center md:justify-between">
+              <label className="text-[11px] font-black uppercase tracking-widest text-slate-400">任务复盘</label>
+              <span className="text-[11px] font-medium text-slate-400">支持输入更完整的过程复盘、问题与改进建议</span>
+            </div>
+            <textarea 
+              placeholder="输入对该任务的复盘内容、关键问题、经验沉淀或后续建议..."
+              className="w-full min-h-[132px] max-h-72 resize-y bg-slate-50 border border-slate-100 rounded-2xl px-4 py-3 text-sm font-medium text-slate-700 outline-none focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500 transition-all leading-6"
+              value={evaluation}
+              disabled={!canEditReview}
+              onChange={e => {
+                updateOkrReviews(
+                  updateTaskReviewState(okrReviews, task, {
+                    evaluation: e.target.value,
+                  })
+                );
+              }}
+            />
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  const renderWeeklyReviewCard = (item: { period: string; review: ReviewEntry | null }) => {
+    const { period, review } = item;
+
+    return (
+      <div
+        key={period}
+        onClick={() => attemptLeave(() => {
+          setActiveTab('weekly');
+          setSelectedWeek(period);
+        })}
+        className="w-[20rem] md:w-[23rem] shrink-0 bg-white p-5 rounded-[1.75rem] border border-slate-100 shadow-sm hover:border-brand-300 hover:shadow-md transition-all cursor-pointer group"
+      >
+        <div className="flex items-center justify-between mb-3">
+          <span className="text-sm font-black text-slate-700">{period}</span>
+          {review ? (
+            <span className="text-[10px] font-bold px-2 py-1 rounded-md bg-emerald-50 text-emerald-600">已复盘</span>
+          ) : (
+            <span className="text-[10px] font-bold px-2 py-1 rounded-md bg-slate-100 text-slate-500">未复盘</span>
+          )}
+        </div>
+        {review ? (
+          <>
+            <div className="flex items-center gap-2 mb-2">
+              <span className="text-2xl font-black text-brand-600">{review.score}</span>
+              <span className="text-xs text-slate-400 font-bold">/ 100 分</span>
+            </div>
+            <p className="text-sm leading-6 text-slate-500 line-clamp-3 min-h-[72px]">{review.content}</p>
+          </>
+        ) : (
+          <div className="h-[104px] flex items-center text-slate-300">
+            <span className="text-xs font-bold">点击发起该周复盘</span>
+          </div>
+        )}
+        <div className="mt-4 flex items-center justify-end text-brand-600 opacity-0 group-hover:opacity-100 transition-opacity">
+          <span className="text-xs font-bold mr-1">{review ? '查看周复盘' : '去复盘'}</span>
+          <ChevronRight size={14} />
+        </div>
+      </div>
+    );
+  };
 
   const returnToReviewDashboard = () => {
     navigate(location.state?.from || '/okr-review', {
@@ -687,7 +833,7 @@ const ReviewView: React.FC = () => {
                        </div>
                     </div>
                     <textarea 
-                      className="w-full h-40 p-6 bg-slate-50 border border-slate-100 rounded-[2rem] text-sm font-bold text-slate-700 outline-none focus:border-brand-300 focus:bg-white transition-all resize-none leading-relaxed"
+                      className="w-full min-h-[13rem] md:min-h-[16rem] p-6 bg-slate-50 border border-slate-100 rounded-[2rem] text-sm font-bold text-slate-700 outline-none focus:border-brand-300 focus:bg-white transition-all resize-y leading-relaxed"
                       placeholder="输入本周期整体复盘总结..."
                       value={reviewContent}
                       disabled={!canEditReview}
@@ -732,27 +878,61 @@ const ReviewView: React.FC = () => {
                     )}
 
                     {activeTab === 'monthly' && (
-                      <div className="flex items-center justify-between border-b border-slate-200">
-                        <div className="flex items-center gap-4">
+                      <div className="sticky top-0 z-10 -mx-2 rounded-[1.75rem] border border-slate-200 bg-white/95 px-4 py-3 shadow-sm backdrop-blur">
+                        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                          <div className="flex items-center gap-4 overflow-x-auto">
                           <button
-                            className={`pb-2 text-sm font-black uppercase tracking-widest transition-colors ${reviewSubTab === 'tasks' ? 'text-brand-600 border-b-2 border-brand-600' : 'text-slate-400 hover:text-slate-600'}`}
+                            className={`flex items-center gap-2 pb-2 text-sm font-black uppercase tracking-widest transition-colors ${reviewSubTab === 'tasks' ? 'text-brand-600 border-b-2 border-brand-600' : 'text-slate-400 hover:text-slate-600'}`}
                             onClick={() => setReviewSubTab('tasks')}
                           >
                             任务复盘
+                            <span className={`rounded-full px-2 py-0.5 text-[10px] ${reviewSubTab === 'tasks' ? 'bg-brand-50 text-brand-600' : 'bg-slate-100 text-slate-500'}`}>
+                              {deptTasks.length}
+                            </span>
                           </button>
                           <button
-                            className={`pb-2 text-sm font-black uppercase tracking-widest transition-colors ${reviewSubTab === 'weekly-records' ? 'text-brand-600 border-b-2 border-brand-600' : 'text-slate-400 hover:text-slate-600'}`}
+                            className={`flex items-center gap-2 pb-2 text-sm font-black uppercase tracking-widest transition-colors ${reviewSubTab === 'weekly-records' ? 'text-brand-600 border-b-2 border-brand-600' : 'text-slate-400 hover:text-slate-600'}`}
                             onClick={() => setReviewSubTab('weekly-records')}
                           >
                             周复盘记录
+                            <span className={`rounded-full px-2 py-0.5 text-[10px] ${reviewSubTab === 'weekly-records' ? 'bg-brand-50 text-brand-600' : 'bg-slate-100 text-slate-500'}`}>
+                              {monthlyWeekReviews.length}
+                            </span>
                           </button>
+                        </div>
+                          <p className="text-xs font-medium text-slate-400">
+                            月度复盘支持分区浏览，避免任务和周记录过多时整页过长。
+                          </p>
                         </div>
                       </div>
                     )}
 
                     {(activeTab === 'weekly' || reviewSubTab === 'tasks') && activeTab !== 'quarterly' && (
-                      <div className="space-y-4">
-                        <div className="flex justify-end gap-2 mb-2">
+                      <div className={`space-y-4 ${isMonthlyTaskWorkspace ? 'rounded-[2rem] border border-slate-200 bg-slate-50/80 p-4 md:p-5' : ''}`}>
+                        {isMonthlyTaskWorkspace && (
+                          <div className="flex flex-col gap-4 rounded-[1.5rem] border border-white/70 bg-white px-4 py-4 shadow-sm">
+                            <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
+                              <div>
+                                <div className="text-xs font-black uppercase tracking-[0.24em] text-slate-400">任务复盘工作台</div>
+                              </div>
+                              <div className="flex flex-wrap gap-2">
+                                <div className="rounded-2xl bg-brand-50 px-4 py-3 text-brand-600">
+                                  <div className="text-[10px] font-black uppercase tracking-widest">任务总数</div>
+                                  <div className="mt-1 text-xl font-black">{taskReviewStats.total}</div>
+                                </div>
+                                <div className="rounded-2xl bg-emerald-50 px-4 py-3 text-emerald-600">
+                                  <div className="text-[10px] font-black uppercase tracking-widest">已填写</div>
+                                  <div className="mt-1 text-xl font-black">{taskReviewStats.reviewed}</div>
+                                </div>
+                                <div className="rounded-2xl bg-amber-50 px-4 py-3 text-amber-600">
+                                  <div className="text-[10px] font-black uppercase tracking-widest">待完善</div>
+                                  <div className="mt-1 text-xl font-black">{taskReviewStats.pending}</div>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        )}
+                        <div className="flex flex-wrap justify-end gap-2 mb-2">
                           <button
                             onClick={loadDeptTasks}
                             className="px-3 py-1.5 bg-slate-100 text-slate-600 rounded-lg text-xs font-bold hover:bg-slate-200 transition-colors flex items-center gap-1"
@@ -789,136 +969,50 @@ const ReviewView: React.FC = () => {
                             读取任务到总结
                           </button>
                         </div>
-                        {deptTasks.length === 0 ? (
-                          <div className="text-center py-8 text-slate-400 text-sm italic font-medium">暂无关联任务</div>
-                        ) : (
-                          deptTasks.map(task => {
-                            const {
-                              evaluation,
-                              score,
-                            } = readTaskReviewState(okrReviews, task);
-                            const owner = state.users.find(u => u.id === task.ownerId);
-
-                            return (
-                              <div key={task.id} className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm">
-                                <div className="flex items-center justify-between mb-4">
-                                  <div className="flex items-center gap-3 cursor-pointer hover:opacity-80" onClick={() => handleTaskClick(task)}>
-                                    <span className="text-sm font-bold text-indigo-600 hover:underline">{task.title}</span>
-                                    <span className={`text-[10px] px-2 py-0.5 rounded-full font-black ${
-                                      task.status === 'completed' ? 'bg-emerald-100 text-emerald-700' :
-                                      task.status === 'in-progress' ? 'bg-blue-100 text-blue-700' :
-                                      task.status === 'paused' ? 'bg-orange-100 text-orange-700' :
-                                      task.status === 'terminated' ? 'bg-red-100 text-red-700' :
-                                      'bg-slate-200 text-slate-700'
-                                    }`}>
-                                      {task.status === 'completed' ? '已完成' :
-                                       task.status === 'in-progress' ? '处理中' :
-                                       task.status === 'paused' ? '暂停' :
-                                       task.status === 'terminated' ? '终止' :
-                                       task.status === 'submitted' ? '已提交' : '草稿'}
-                                    </span>
-                                  </div>
-                                  <div className="flex items-center gap-2">
-                                    <div className="text-xs text-slate-500 font-medium">
-                                      {task.startDate ? new Date(task.startDate).toLocaleDateString() : '-'} 至 {task.dueDate ? new Date(task.dueDate).toLocaleDateString() : '-'}
-                                    </div>
-                                    {owner && (
-                                      <div className="flex items-center gap-1.5 bg-slate-50 px-2 py-1 rounded-full border border-slate-100">
-                                        <div className="w-5 h-5 rounded-full bg-brand-100 flex items-center justify-center text-[10px] font-black text-brand-600">
-                                          {owner.name.charAt(0)}
-                                        </div>
-                                        <span className="text-[10px] font-bold text-slate-600">{owner.name}</span>
-                                      </div>
-                                    )}
-                                  </div>
-                                </div>
-                                
-                                <div className="flex gap-4 items-center">
-                                  <div className="flex-1">
-                                    <input 
-                                      type="text"
-                                      placeholder="输入对该任务的评价..."
-                                      className="w-full bg-slate-50 border border-slate-100 rounded-xl px-4 py-2.5 text-xs font-medium text-slate-700 outline-none focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500 transition-all"
-                                      value={evaluation}
-                                      disabled={!canEditReview}
-                                      onChange={e => {
-                                        updateOkrReviews(
-                                          updateTaskReviewState(okrReviews, task, {
-                                            evaluation: e.target.value,
-                                          })
-                                        );
-                                      }}
-                                    />
-                                  </div>
-                                  <div className="w-32 flex items-center gap-2 bg-slate-50 px-3 py-2 rounded-xl border border-slate-100">
-                                    <span className="text-[10px] font-black text-slate-400 uppercase">评分</span>
-                                    <input 
-                                      type="number"
-                                      min="0" max="100"
-                                      className="w-full bg-transparent text-sm font-black text-brand-600 outline-none text-right"
-                                      value={score}
-                                      disabled={!canEditReview}
-                                      onChange={e => handleNumberInput(e.target.value, (val) => {
-                                        updateOkrReviews(
-                                          updateTaskReviewState(okrReviews, task, {
-                                            score: val,
-                                          })
-                                        );
-                                      }, 100)}
-                                      onFocus={e => e.target.select()}
-                                    />
-                                    <span className="text-[10px] font-black text-slate-400">/ 100</span>
-                                  </div>
-                                </div>
-                              </div>
-                            );
-                          })
-                        )}
+                        <div className={isMonthlyTaskWorkspace ? 'overflow-x-auto pb-2 custom-scrollbar' : 'overflow-x-auto pb-2 custom-scrollbar'}>
+                          {deptTasks.length === 0 ? (
+                            <div className={`text-center py-8 text-slate-400 text-sm italic font-medium ${isMonthlyTaskWorkspace ? 'rounded-[1.5rem] border border-dashed border-slate-200 bg-white' : ''}`}>暂无关联任务</div>
+                          ) : (
+                            <div className="flex items-stretch gap-4 min-w-max">
+                              {deptTasks.map(task => renderTaskReviewCard(task))}
+                            </div>
+                          )}
+                        </div>
                       </div>
                     )}
 
                     {activeTab === 'monthly' && reviewSubTab === 'weekly-records' && (
-                      <div className="space-y-4">
-                        {monthlyWeekReviews.length === 0 ? (
-                          <div className="text-center py-8 text-slate-400 text-sm italic font-medium">本月暂无周复盘记录</div>
-                        ) : (
-                          monthlyWeekReviews.map(({ period, review }) => (
-                            <div
-                              key={period}
-                              onClick={() => attemptLeave(() => {
-                                setActiveTab('weekly');
-                                setSelectedWeek(period);
-                              })}
-                              className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm hover:border-brand-300 hover:shadow-md transition-all cursor-pointer group"
-                            >
-                              <div className="flex items-center justify-between mb-3">
-                                <span className="text-sm font-black text-slate-700">{period}</span>
-                                {review ? (
-                                  <span className="text-[10px] font-bold px-2 py-1 rounded-md bg-emerald-50 text-emerald-600">已复盘</span>
-                                ) : (
-                                  <span className="text-[10px] font-bold px-2 py-1 rounded-md bg-slate-100 text-slate-500">未复盘</span>
-                                )}
+                      <div className={`space-y-4 rounded-[2rem] border border-slate-200 bg-slate-50/80 p-4 md:p-5 ${isMonthlyWeekRecordWorkspace ? '' : ''}`}>
+                        <div className="flex flex-col gap-4 rounded-[1.5rem] border border-white/70 bg-white px-4 py-4 shadow-sm">
+                          <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
+                            <div>
+                              <div className="text-xs font-black uppercase tracking-[0.24em] text-slate-400">周复盘记录面板</div>
+                            </div>
+                            <div className="flex flex-wrap gap-2">
+                              <div className="rounded-2xl bg-brand-50 px-4 py-3 text-brand-600">
+                                <div className="text-[10px] font-black uppercase tracking-widest">周数</div>
+                                <div className="mt-1 text-xl font-black">{monthlyWeekReviewStats.total}</div>
                               </div>
-                              {review ? (
-                                <>
-                                  <div className="flex items-center gap-2 mb-2">
-                                    <span className="text-2xl font-black text-brand-600">{review.score}</span>
-                                    <span className="text-xs text-slate-400 font-bold">/ 100 分</span>
-                                  </div>
-                                  <p className="text-xs text-slate-500 line-clamp-2">{review.content}</p>
-                                </>
-                              ) : (
-                                <div className="h-12 flex items-center text-slate-300">
-                                  <span className="text-xs font-bold">点击发起该周复盘</span>
-                                </div>
-                              )}
-                              <div className="mt-4 flex items-center justify-end text-brand-600 opacity-0 group-hover:opacity-100 transition-opacity">
-                                <span className="text-xs font-bold mr-1">{review ? '查看周复盘' : '去复盘'}</span>
-                                <ChevronRight size={14} />
+                              <div className="rounded-2xl bg-emerald-50 px-4 py-3 text-emerald-600">
+                                <div className="text-[10px] font-black uppercase tracking-widest">已复盘</div>
+                                <div className="mt-1 text-xl font-black">{monthlyWeekReviewStats.reviewed}</div>
+                              </div>
+                              <div className="rounded-2xl bg-slate-100 px-4 py-3 text-slate-600">
+                                <div className="text-[10px] font-black uppercase tracking-widest">待处理</div>
+                                <div className="mt-1 text-xl font-black">{monthlyWeekReviewStats.pending}</div>
                               </div>
                             </div>
-                          ))
-                        )}
+                          </div>
+                        </div>
+                        <div className="overflow-x-auto pb-2 custom-scrollbar">
+                          {monthlyWeekReviews.length === 0 ? (
+                            <div className="rounded-[1.5rem] border border-dashed border-slate-200 bg-white text-center py-8 text-slate-400 text-sm italic font-medium">本月暂无周复盘记录</div>
+                          ) : (
+                            <div className="flex items-stretch gap-4 min-w-max">
+                              {monthlyWeekReviews.map(item => renderWeeklyReviewCard(item))}
+                            </div>
+                          )}
+                        </div>
                       </div>
                     )}
 
