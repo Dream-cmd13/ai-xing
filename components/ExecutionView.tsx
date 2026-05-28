@@ -11,7 +11,7 @@ import TaskModal from './TaskModal';
 import { Building2, ChevronDown, ChevronRight, LayoutGrid, Plus, X, Calendar, User as UserIcon, Clock } from 'lucide-react';
 import { usePageToast } from '../hooks/usePageToast';
 import { getUserFacingError } from '../utils/userFacingError';
-import { canManageTask, getVisibleDepartments } from '../utils/permissions';
+import { canManageDepartment, canManageTask, getVisibleDepartments } from '../utils/permissions';
 import { ensureTaskTargetWeeks } from '../utils/taskPeriods.js';
 
 
@@ -96,6 +96,16 @@ const ExecutionView: React.FC = () => {
     return list;
   }, [visibleDepartments]);
 
+  const selectedDepartment = useMemo(
+    () => flatDepts.find(d => d.id === selectedDeptId) || null,
+    [flatDepts, selectedDeptId]
+  );
+  const canManageSelectedDepartment = selectedDepartment
+    ? canManageDepartment(selectedDepartment, currentUser, state.systemRoles || [], state.departments)
+    : false;
+  const canCreateExecutionTask = permissions.create && canManageSelectedDepartment;
+  const canEditExecutionTask = permissions.update && canManageSelectedDepartment;
+
   const groupedAvailableKRs = useMemo(() => {
     if (!taskModal.weekId) return [];
     const year = parseInt(taskModal.weekId.split('-')[0]);
@@ -154,6 +164,7 @@ const ExecutionView: React.FC = () => {
   };
 
   const handleAddTask = (weekId: string, alignedKrId: string) => {
+    if (!canCreateExecutionTask) return;
     setTaskModal({
       isOpen: true,
       weekId,
@@ -178,6 +189,7 @@ const ExecutionView: React.FC = () => {
   };
 
   const handleTaskClick = (weekId: string, task: PADEntry) => {
+    if (!canEditExecutionTask) return;
     const isOwner = task.ownerId === currentUser.id;
     const isParticipant = task.participantIds?.includes(currentUser.id);
     const isApprover = task.approverIds?.includes(currentUser.id);
@@ -220,6 +232,8 @@ const ExecutionView: React.FC = () => {
     const targetOwnerId = newTask.ownerId || currentUser.id;
 
     const isNewTask = !state.tasks.some(e => e.id === newTask.id);
+    if (isNewTask && !canCreateExecutionTask) return;
+    if (!isNewTask && (!canEditExecutionTask || !canManageTask(newTask, currentUser, state.systemRoles || [], state.departments))) return;
 
     if (!isNewTask) {
       const oldTask = state.tasks.find(e => e.id === newTask.id);
@@ -396,6 +410,8 @@ const ExecutionView: React.FC = () => {
               selectedYear={selectedYear}
               selectedPeriod={selectedPeriod}
               selectedDeptId={selectedDeptId}
+              canCreateTask={canCreateExecutionTask}
+              canEditTask={canEditExecutionTask}
               onAddTask={handleAddTask}
               onTaskClick={handleTaskClick}
             />
@@ -432,8 +448,8 @@ const ExecutionView: React.FC = () => {
         mode={taskModal.mode}
         readOnly={
           taskModal.mode === 'create'
-            ? !permissions.create
-            : (!permissions.update || !canManageTask(taskModal.data as PADEntry, currentUser, state.systemRoles || [], state.departments))
+            ? !canCreateExecutionTask
+            : (!canEditExecutionTask || !canManageTask(taskModal.data as PADEntry, currentUser, state.systemRoles || [], state.departments))
         }
         periodWeeks={periodWeeks}
       />

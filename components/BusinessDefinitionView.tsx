@@ -35,11 +35,16 @@ const BusinessDefinitionView: React.FC = () => {
   const strategy = state.strategy;
   const [activeBusinessId, setActiveBusinessId] = useState<string | null>(businesses.length > 0 ? businesses[0].id : null);
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
+  const [createdBusinessIds, setCreatedBusinessIds] = useState<string[]>([]);
+
+  const canEditBusiness = (business: BusinessDefinition) =>
+    permissions.update || createdBusinessIds.includes(business.id);
 
   const handleAddBusiness = () => {
     if (!permissions.create) return;
+    const newBusinessId = `biz-${Date.now()}`;
     const newBusiness: BusinessDefinition = {
-      id: `biz-${Date.now()}`,
+      id: newBusinessId,
       name: `新事业 ${businesses.length + 1}`,
       businessFormat: '',
       customerPersona: '',
@@ -48,12 +53,14 @@ const BusinessDefinitionView: React.FC = () => {
       coreProductPower: ''
     };
     setBusinesses([...businesses, newBusiness]);
-    setActiveBusinessId(newBusiness.id);
+    setCreatedBusinessIds([...createdBusinessIds, newBusinessId]);
+    setActiveBusinessId(newBusinessId);
     setIsDirty(true);
   };
 
   const handleUpdateBusiness = (id: string, updates: Partial<BusinessDefinition>) => {
-    if (!permissions.update) return;
+    const targetBusiness = businesses.find(b => b.id === id);
+    if (!targetBusiness || !canEditBusiness(targetBusiness)) return;
     setBusinesses(businesses.map(b => b.id === id ? { ...b, ...updates } : b));
     setIsDirty(true);
   };
@@ -64,7 +71,7 @@ const BusinessDefinitionView: React.FC = () => {
   };
 
   const confirmDelete = () => {
-    if (!pendingDeleteId) return;
+    if (!pendingDeleteId || !permissions.update) return;
     const newBusinesses = businesses.filter(b => b.id !== pendingDeleteId);
     setBusinesses(newBusinesses);
     if (activeBusinessId === pendingDeleteId) {
@@ -74,7 +81,15 @@ const BusinessDefinitionView: React.FC = () => {
     setPendingDeleteId(null);
   };
 
+  const saveBusinesses = async () => {
+    const success = await handleSave(['businesses']);
+    if (success) {
+      setCreatedBusinessIds([]);
+    }
+  };
+
   const activeBusiness = businesses.find(b => b.id === activeBusinessId);
+  const canEditActiveBusiness = !!activeBusiness && canEditBusiness(activeBusiness);
   const isBusinessDirty = dirtyDomains.includes('businesses');
   const isStrategyDirty = dirtyDomains.includes('strategy');
 
@@ -90,7 +105,7 @@ const BusinessDefinitionView: React.FC = () => {
         </div>
         <div className="flex items-center gap-2 w-full md:w-auto">
           <button 
-            onClick={() => handleSave(['businesses'])}
+            onClick={saveBusinesses}
             disabled={isSaving}
             className={`flex-1 md:flex-none flex items-center justify-center gap-2 px-6 py-2.5 rounded-xl text-xs font-black uppercase transition-all shadow-lg ${showSaveSuccess && isBusinessDirty ? 'bg-emerald-50 text-emerald-600 shadow-emerald-100' : isBusinessDirty ? 'bg-brand-600 text-white shadow-brand-200 hover:bg-brand-700' : 'bg-slate-100 text-slate-400 cursor-default'}`}
           >
@@ -145,7 +160,7 @@ const BusinessDefinitionView: React.FC = () => {
                   value={activeBusiness.name || ''}
                   onChange={e => handleUpdateBusiness(activeBusiness.id, { name: e.target.value })}
                   placeholder="输入事业名称..."
-                  disabled={!permissions.update}
+                  disabled={!canEditActiveBusiness}
                 />
                 {permissions.update && (
                   <button onClick={() => handleDeleteBusiness(activeBusiness.id)} className="p-2 text-red-400 hover:bg-red-50 rounded-xl transition-colors shrink-0">
@@ -200,7 +215,7 @@ const BusinessDefinitionView: React.FC = () => {
                         placeholder="描述目标顾客的特征、行为、偏好等..."
                         value={activeBusiness.customerPersona || ''}
                         onChange={e => handleUpdateBusiness(activeBusiness.id, { customerPersona: e.target.value })}
-                        disabled={!permissions.update}
+                        disabled={!canEditActiveBusiness}
                       />
                     </div>
                     <div>
@@ -210,7 +225,7 @@ const BusinessDefinitionView: React.FC = () => {
                         placeholder="描述顾客的核心痛点 and 需求..."
                         value={activeBusiness.customerNeeds || ''}
                         onChange={e => handleUpdateBusiness(activeBusiness.id, { customerNeeds: e.target.value })}
-                        disabled={!permissions.update}
+                        disabled={!canEditActiveBusiness}
                       />
                     </div>
                   </div>
@@ -231,7 +246,7 @@ const BusinessDefinitionView: React.FC = () => {
                         placeholder="顾客容易感知到的外在属性（如外观、包装、基础功能等）..."
                         value={activeBusiness.surfaceProductPower || ''}
                         onChange={e => handleUpdateBusiness(activeBusiness.id, { surfaceProductPower: e.target.value })}
-                        disabled={!permissions.update}
+                        disabled={!canEditActiveBusiness}
                       />
                     </div>
                     <div>
@@ -241,7 +256,7 @@ const BusinessDefinitionView: React.FC = () => {
                         placeholder="不可替代的核心竞争优势（如独家技术、品牌心智、极致性价比等）..."
                         value={activeBusiness.coreProductPower || ''}
                         onChange={e => handleUpdateBusiness(activeBusiness.id, { coreProductPower: e.target.value })}
-                        disabled={!permissions.update}
+                        disabled={!canEditActiveBusiness}
                       />
                     </div>
                   </div>
@@ -260,7 +275,7 @@ const BusinessDefinitionView: React.FC = () => {
                       placeholder="如：客户需求 -> 报价 -> 模具开发 -> 打样 -> 样品承认..."
                       value={activeBusiness.businessFormat || ''}
                       onChange={e => handleUpdateBusiness(activeBusiness.id, { businessFormat: e.target.value })}
-                      disabled={!permissions.update}
+                      disabled={!canEditActiveBusiness}
                     />
                   </div>
                 </div>

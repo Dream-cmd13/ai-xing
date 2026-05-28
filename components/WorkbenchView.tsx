@@ -21,6 +21,7 @@ const WorkbenchView: React.FC = () => {
   const { currentUser } = useAuthStore();
   const actions = useAppActions();
   const permissions = usePermissions('workbench');
+  const taskPermissions = usePermissions('task-center');
   const { 
     handleSetDepartments: setDepartments, handleSetUsers: setUsers, 
     handleSetSystemRoles: setSystemRoles, handleSetAISettings: setAISettings, 
@@ -420,8 +421,8 @@ const WorkbenchView: React.FC = () => {
         mode={taskModal.mode}
         readOnly={
           taskModal.mode === 'create'
-            ? !permissions.create
-            : (!permissions.update || !canManageTask(taskModal.data as PADEntry, currentUser, state.systemRoles || [], state.departments))
+            ? !taskPermissions.create
+            : (!taskPermissions.update || !canManageTask(taskModal.data as PADEntry, currentUser, state.systemRoles || [], state.departments))
         }
         aiSettings={state.aiSettings}
       />

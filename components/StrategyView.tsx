@@ -93,6 +93,7 @@ const StrategyView: React.FC = () => {
   const onSaveStrategy = async () => {
     const success = await handleSave([...activeSaveDomains]);
     if (success) {
+      setCreatedOkrIds([]);
       showToast('保存成功', 'success');
     }
   };
@@ -212,6 +213,7 @@ const StrategyView: React.FC = () => {
   // Custom Confirmation
   const [pendingDeleteOkr, setPendingDeleteOkr] = useState<{deptId: string | null, period: string, okrIdx: number} | null>(null);
   const [pendingDeleteKR, setPendingDeleteKR] = useState<{ type: 'company' | 'dept', deptId?: string, period?: string, okrIdx: number, krIdx: number } | null>(null);
+  const [createdOkrIds, setCreatedOkrIds] = useState<string[]>([]);
 
   // ... (existing code)
 
@@ -249,8 +251,17 @@ const StrategyView: React.FC = () => {
     return list;
   }, [currentUser, state.departments, state.systemRoles]);
 
+  const canCreateOkr = permissions.create;
+  const canEditOkr = permissions.update;
+  const canEditOkrEntry = (okr: OKR) => canEditOkr || createdOkrIds.includes(okr.id);
+  const canManageDeptOkr = (department: Department) =>
+    !!currentUser && canManageDepartment(department, currentUser, state.systemRoles || [], state.departments);
+  const canCreateDeptOkr = (department: Department) =>
+    canCreateOkr && canManageDeptOkr(department);
   const canEditDeptOkr = (department: Department) =>
-    !!currentUser && permissions.update && canManageDepartment(department, currentUser, state.systemRoles || []);
+    canEditOkr && canManageDeptOkr(department);
+  const canEditDeptOkrEntry = (department: Department, okr: OKR) =>
+    canManageDeptOkr(department) && canEditOkrEntry(okr);
 
   useEffect(() => {
     if (!backendError) return;
@@ -356,12 +367,14 @@ const StrategyView: React.FC = () => {
   };
 
   const updateCompanyObjective = (idx: number, objective: string) => {
+    if (!currentCompanyOKRs[idx] || !canEditOkrEntry(currentCompanyOKRs[idx])) return;
     const yearOKRs = [...currentCompanyOKRs];
     yearOKRs[idx] = { ...yearOKRs[idx], objective };
     updateStrategy({ companyOKRs: { ...state.strategy.companyOKRs, [selectedYear]: yearOKRs } });
   };
 
   const updateCompanyKR = (okrIdx: number, krIdx: number, val: string) => {
+    if (!currentCompanyOKRs[okrIdx] || !canEditOkrEntry(currentCompanyOKRs[okrIdx])) return;
     const yearOKRs = [...currentCompanyOKRs];
     const krs = [...yearOKRs[okrIdx].keyResults];
     krs[krIdx] = val;
@@ -370,6 +383,7 @@ const StrategyView: React.FC = () => {
   };
 
   const addCompanyKR = (okrIdx: number) => {
+    if (!currentCompanyOKRs[okrIdx] || !canEditOkrEntry(currentCompanyOKRs[okrIdx])) return;
     const yearOKRs = [...currentCompanyOKRs];
     const krs = [...yearOKRs[okrIdx].keyResults, ''];
     yearOKRs[okrIdx] = { ...yearOKRs[okrIdx], keyResults: krs };
@@ -377,6 +391,7 @@ const StrategyView: React.FC = () => {
   };
 
   const deleteCompanyKR = (okrIdx: number, krIdx: number) => {
+    if (!currentCompanyOKRs[okrIdx] || !canEditOkrEntry(currentCompanyOKRs[okrIdx])) return;
     setPendingDeleteKR({ type: 'company', okrIdx, krIdx });
   };
 
@@ -385,6 +400,7 @@ const StrategyView: React.FC = () => {
       const deptOkrs = { ...(d.okrs || {}) };
       const yearOkrs = { ...(deptOkrs[selectedYear] || deptOkrs[String(selectedYear)] || {}) };
       const list = [...(yearOkrs[q] || [])];
+      if (!list[idx] || !canEditDeptOkrEntry(d, list[idx])) return d;
       list[idx] = { ...list[idx], ...updates };
       yearOkrs[q] = list;
       deptOkrs[selectedYear] = yearOkrs;
@@ -398,6 +414,7 @@ const StrategyView: React.FC = () => {
       const deptOkrs = { ...(d.okrs || {}) };
       const yearOkrs = { ...(deptOkrs[selectedYear] || deptOkrs[String(selectedYear)] || {}) };
       const list = [...(yearOkrs[q] || [])];
+      if (!list[okrIdx] || !canEditDeptOkrEntry(d, list[okrIdx])) return d;
       const krs = [...list[okrIdx].keyResults];
       krs[krIdx] = val;
       list[okrIdx] = { ...list[okrIdx], keyResults: krs };
@@ -413,6 +430,7 @@ const StrategyView: React.FC = () => {
       const deptOkrs = { ...(d.okrs || {}) };
       const yearOkrs = { ...(deptOkrs[selectedYear] || deptOkrs[String(selectedYear)] || {}) };
       const list = [...(yearOkrs[q] || [])];
+      if (!list[okrIdx] || !canEditDeptOkrEntry(d, list[okrIdx])) return d;
       const krs = [...list[okrIdx].keyResults, ''];
       list[okrIdx] = { ...list[okrIdx], keyResults: krs };
       yearOkrs[q] = list;
@@ -423,6 +441,9 @@ const StrategyView: React.FC = () => {
   };
 
   const deleteDeptKR = (deptId: string, q: string, okrIdx: number, krIdx: number) => {
+    const dept = flatDepts.find(d => d.id === deptId);
+    const okr = dept?.okrs?.[selectedYear]?.[q]?.[okrIdx];
+    if (!dept || !okr || !canEditDeptOkrEntry(dept, okr)) return;
     setPendingDeleteKR({ type: 'dept', deptId, period: q, okrIdx, krIdx });
   };
 
@@ -431,6 +452,7 @@ const StrategyView: React.FC = () => {
     const { type, deptId, period, okrIdx, krIdx } = pendingDeleteKR;
 
     if (type === 'company') {
+      if (!currentCompanyOKRs[okrIdx] || !canEditOkrEntry(currentCompanyOKRs[okrIdx])) return;
       const yearOKRs = [...currentCompanyOKRs];
       const krs = yearOKRs[okrIdx].keyResults.filter((_, i) => i !== krIdx);
       yearOKRs[okrIdx] = { ...yearOKRs[okrIdx], keyResults: krs };
@@ -440,6 +462,7 @@ const StrategyView: React.FC = () => {
         const deptOkrs = { ...(d.okrs || {}) };
         const yearOkrs = { ...(deptOkrs[selectedYear] || {}) };
         const list = [...(yearOkrs[period] || [])];
+        if (!list[okrIdx] || !canEditDeptOkrEntry(d, list[okrIdx])) return d;
         const krs = list[okrIdx].keyResults.filter((_, i) => i !== krIdx);
         list[okrIdx] = { ...list[okrIdx], keyResults: krs };
         yearOkrs[period] = list;
@@ -455,11 +478,14 @@ const StrategyView: React.FC = () => {
     if (!pendingDeleteOkr) return;
     const { deptId, period, okrIdx } = pendingDeleteOkr;
     if (deptId === null) {
+      if (!currentCompanyOKRs[okrIdx] || !canEditOkrEntry(currentCompanyOKRs[okrIdx])) return;
       updateStrategy({ companyOKRs: { ...state.strategy.companyOKRs, [selectedYear]: currentCompanyOKRs.filter((_, idx) => idx !== okrIdx) } });
     } else {
       const depts = updateDeptRecursive(state.departments, deptId, d => {
         const deptOkrs = { ...(d.okrs || {}) };
         const yearOkrs = { ...(deptOkrs[selectedYear] || {}) };
+        const currentOkr = (yearOkrs[period] || [])[okrIdx];
+        if (!currentOkr || !canEditDeptOkrEntry(d, currentOkr)) return d;
         const list = (yearOkrs[period] || []).filter((_, i) => i !== okrIdx);
         yearOkrs[period] = list;
         deptOkrs[selectedYear] = yearOkrs;
@@ -471,21 +497,38 @@ const StrategyView: React.FC = () => {
   };
 
   const addDeptOkr = (deptId: string, q: string) => {
+    const targetDept = flatDepts.find(d => d.id === deptId);
+    if (!targetDept || !canCreateDeptOkr(targetDept)) return;
+    const newOkrId = `okr-${Date.now()}`;
     const depts = updateDeptRecursive(state.departments, deptId, d => {
       const deptOkrs = { ...(d.okrs || {}) };
       const yearOkrs = { ...(deptOkrs[selectedYear] || {}) };
-      const list = [...(yearOkrs[q] || []), { id: `okr-${Date.now()}`, objective: '', keyResults: [''] }];
+      const list = [...(yearOkrs[q] || []), { id: newOkrId, objective: '', keyResults: [''] }];
       yearOkrs[q] = list;
       deptOkrs[selectedYear] = yearOkrs;
       return { ...d, okrs: deptOkrs };
     });
     updateDepartments(depts);
+    setCreatedOkrIds(prev => [...prev, newOkrId]);
   };
 
   const addNewYear = () => {
+    if (!canCreateOkr) return;
     const nextYear = Math.max(...availableYears) + 1;
     setAvailableYears([...availableYears, nextYear]);
     setSelectedYear(nextYear);
+  };
+
+  const addCompanyOkr = () => {
+    if (!canCreateOkr) return;
+    const newOkrId = `c-okr-${Date.now()}`;
+    setCreatedOkrIds(prev => [...prev, newOkrId]);
+    updateStrategy({
+      companyOKRs: {
+        ...state.strategy.companyOKRs,
+        [selectedYear]: [...currentCompanyOKRs, { id: newOkrId, objective: '', keyResults: [''] }]
+      }
+    });
   };
 
 
@@ -510,7 +553,7 @@ const StrategyView: React.FC = () => {
                   {availableYears.map(y => <option key={y} value={y}>{y} 年度</option>)}
                 </select>
               </div>
-              {permissions.update && (
+              {canCreateOkr && (
                 <button onClick={addNewYear} className="p-1 md:p-1.5 text-slate-400 hover:text-brand-600 hover:bg-brand-50 rounded-lg transition-all" title="新增规划年度"><Plus size={14} className="md:w-4 md:h-4"/></button>
               )}
               <div className="w-px h-4 bg-slate-200 mx-1 md:mx-2 hidden md:block"></div>
@@ -546,8 +589,8 @@ const StrategyView: React.FC = () => {
           <div className="max-w-4xl mx-auto space-y-6 md:space-y-8 pb-12 py-4 md:py-6">
             <header className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
                <h3 className="text-xs md:text-sm font-black text-slate-400 uppercase tracking-widest flex items-center gap-2"><Calendar size={16}/> {selectedYear} 年度公司核心战略目标</h3>
-              {permissions.update && (
-                 <button onClick={() => updateStrategy({ companyOKRs: { ...state.strategy.companyOKRs, [selectedYear]: [...currentCompanyOKRs, { id: `c-okr-${Date.now()}`, objective: '', keyResults: [''] }] } })} className="bg-brand-600 text-white font-black text-xs px-4 md:px-6 py-2 md:py-2.5 rounded-xl md:rounded-2xl shadow-xl shadow-brand-100 hover:bg-brand-700 transition-all flex items-center gap-2 w-full md:w-auto justify-center">
+              {canCreateOkr && (
+                 <button onClick={addCompanyOkr} className="bg-brand-600 text-white font-black text-xs px-4 md:px-6 py-2 md:py-2.5 rounded-xl md:rounded-2xl shadow-xl shadow-brand-100 hover:bg-brand-700 transition-all flex items-center gap-2 w-full md:w-auto justify-center">
                    <Plus size={16}/> 新增年度战略
                  </button>
                )}
@@ -571,7 +614,7 @@ const StrategyView: React.FC = () => {
                          <IMEInput 
                            className="w-full bg-transparent text-xl md:text-3xl font-black text-slate-800 tracking-tighter outline-none placeholder-slate-200 disabled:opacity-50" 
                            value={o.objective || ''} 
-                           disabled={!permissions.update}
+                           disabled={!canEditOkrEntry(o)}
                            onChange={e => updateCompanyObjective(i, e.target.value)} 
                            placeholder="输入公司年度目标..." 
                          />
@@ -580,7 +623,7 @@ const StrategyView: React.FC = () => {
                         <button onClick={() => runAiCheck(o.id, o.objective, o.keyResults)} disabled={checking === o.id} className="px-3 md:px-4 py-1.5 md:py-2 bg-brand-50 text-brand-600 rounded-xl flex items-center gap-1 md:gap-2 text-[10px] font-black uppercase hover:bg-brand-100 transition-all border border-brand-100">
                           {checking === o.id ? <Loader2 className="animate-spin h-3 w-3"/> : <Wand2 size={14} className="md:w-4 md:h-4"/>} <span className="hidden sm:inline">AI 检查</span>
                         </button>
-                        {permissions.update && (
+                        {canEditOkrEntry(o) && (
                           <button onClick={() => setPendingDeleteOkr({deptId: null, period: 'Annual', okrIdx: i})} className="p-1.5 md:p-2 text-slate-200 hover:text-red-500 hover:bg-red-50 rounded-xl transition-all"><Trash2 size={16} className="md:w-[18px] md:h-[18px]"/></button>
                         )}
                       </div>
@@ -594,16 +637,16 @@ const StrategyView: React.FC = () => {
                           <IMEInput 
                             className="flex-1 bg-slate-50 hover:bg-white border border-transparent hover:border-slate-200 focus:border-brand-300 focus:bg-white p-2 md:p-3 rounded-xl md:rounded-2xl text-[10px] md:text-xs font-bold text-slate-700 outline-none transition-all shadow-inner disabled:opacity-50"
                             value={kr || ''}
-                            disabled={!permissions.update}
+                            disabled={!canEditOkrEntry(o)}
                             onChange={e => updateCompanyKR(i, ki, e.target.value)}
                             placeholder="输入关键指标..."
                           />
-                          {permissions.update && (
+                          {canEditOkrEntry(o) && (
                         <button onClick={() => deleteCompanyKR(i, ki)} className="p-1 md:p-2 text-slate-300 hover:text-red-500 md:opacity-0 group-hover:opacity-100 transition-all"><Minus size={14}/></button>
                       )}
                         </div>
                       ))}
-                      {permissions.update && (
+                      {canEditOkrEntry(o) && (
                         <button onClick={() => addCompanyKR(i)} className="ml-3 md:ml-5 flex items-center gap-1 md:gap-2 text-[10px] font-black text-brand-600 py-2"><Plus size={12}/> 添加 KR 指标</button>
                       )}
                     </div>
@@ -641,6 +684,7 @@ const StrategyView: React.FC = () => {
             {visibleDeptCards.map(({ department: d, depth }) => {
               const targetPeriod = deptViewMode === 'Annual' ? 'Annual' : activeQuarter;
               const periodOkrs = (d.okrs?.[selectedYear]?.[targetPeriod]) || [];
+              const canCreateCurrentDepartment = canCreateDeptOkr(d);
               const canEditCurrentDepartment = canEditDeptOkr(d);
               return (
                 <div key={d.id} className="bg-white rounded-[2rem] md:rounded-[3rem] border shadow-sm overflow-hidden mb-4 md:mb-6 group">
@@ -655,7 +699,7 @@ const StrategyView: React.FC = () => {
                               L{depth + 1}
                             </span>
                           )}
-                          {!canEditCurrentDepartment && (
+                          {!canEditCurrentDepartment && !canCreateCurrentDepartment && (
                             <span className="text-[10px] font-black bg-slate-100 text-slate-500 px-2 py-0.5 rounded uppercase">
                               只读
                             </span>
@@ -682,7 +726,7 @@ const StrategyView: React.FC = () => {
                                <IMEInput 
                                  className="w-full font-black text-slate-800 outline-none text-base md:text-lg border-b-2 border-slate-50 focus:border-brand-300 transition-colors bg-transparent pb-1 disabled:opacity-50" 
                                  value={okr.objective || ''} 
-                                 disabled={!canEditCurrentDepartment}
+                                 disabled={!canEditDeptOkrEntry(d, okr)}
                                  onChange={e => updateDeptOkrField(d.id, targetPeriod, idx, { objective: e.target.value })} 
                                  placeholder="输入部门目标..." 
                                />
@@ -698,7 +742,7 @@ const StrategyView: React.FC = () => {
                                      okrIdx: idx,
                                      currentAlignedIds: okr.alignedToIds || []
                                    })}
-                                  disabled={!canEditCurrentDepartment}
+                                  disabled={!canEditDeptOkrEntry(d, okr)}
                                    className="bg-transparent text-[10px] font-black outline-none w-full md:max-w-[200px] truncate hover:text-brand-600 text-left disabled:opacity-50"
                                  >
                                    {okr.alignedToIds && okr.alignedToIds.length > 0 
@@ -710,7 +754,7 @@ const StrategyView: React.FC = () => {
                                  {checking === okr.id ? <Loader2 className="animate-spin h-3 w-3 md:h-4 md:w-4"/> : <Wand2 size={14} className="md:w-4 md:h-4"/>}
                                  <span className="text-[10px] font-black uppercase">AI 检查</span>
                                </button>
-                               {canEditCurrentDepartment && (
+                               {canEditDeptOkrEntry(d, okr) && (
                                  <button onClick={() => setPendingDeleteOkr({deptId: d.id, period: targetPeriod, okrIdx: idx})} className="p-2 md:p-3 text-red-100 hover:text-red-400 rounded-xl bg-red-50 md:bg-transparent"><Trash2 size={14} className="md:w-4 md:h-4"/></button>
                                )}
                              </div>
@@ -723,15 +767,15 @@ const StrategyView: React.FC = () => {
                                  <IMEInput 
                                    className="flex-1 bg-slate-50 p-2 rounded-xl text-[10px] md:text-xs font-bold text-slate-600 border border-transparent focus:border-brand-100 focus:bg-white outline-none disabled:opacity-50"
                                    value={kr || ''}
-                                   disabled={!canEditCurrentDepartment}
+                                   disabled={!canEditDeptOkrEntry(d, okr)}
                                    onChange={e => updateDeptKR(d.id, targetPeriod, idx, ki, e.target.value)}
                                  />
-                                 {canEditCurrentDepartment && (
+                                 {canEditDeptOkrEntry(d, okr) && (
                                    <button onClick={() => deleteDeptKR(d.id, targetPeriod, idx, ki)} className="p-1 text-slate-300 hover:text-red-500"><Minus size={14}/></button>
                                  )}
                                </div>
                              ))}
-                             {canEditCurrentDepartment && (
+                             {canEditDeptOkrEntry(d, okr) && (
                                <button onClick={() => addDeptKR(d.id, targetPeriod, idx)} className="ml-3 md:ml-4 text-[10px] font-black text-brand-600 py-1 flex items-center gap-1"><Plus size={12}/> 添加量化指标</button>
                              )}
                           </div>
@@ -744,7 +788,7 @@ const StrategyView: React.FC = () => {
                           )}
                         </div>
                       ))}
-                      {canEditCurrentDepartment && (
+                      {canCreateCurrentDepartment && (
                         <button onClick={() => addDeptOkr(d.id, targetPeriod)} className="w-full py-4 md:py-5 border-2 border-dashed border-slate-200 rounded-2xl md:rounded-[2.5rem] text-slate-400 font-black uppercase text-[10px] md:text-xs hover:border-brand-300 hover:text-brand-600 hover:bg-white transition-all flex items-center justify-center gap-2">
                           <Plus size={16} className="md:w-[18px] md:h-[18px]"/> 录入 {targetPeriod} 目标
                         </button>

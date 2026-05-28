@@ -71,6 +71,7 @@ const MenuPermissionView: React.FC = () => {
   }
 
   const handleAddRole = () => {
+    if (!permissions.create) return;
     setEditingRole({
       id: `role-${Date.now()}`,
       name: '新角色',
@@ -80,7 +81,7 @@ const MenuPermissionView: React.FC = () => {
   };
 
   const handleSaveRole = () => {
-    if (!editingRole) return;
+    if (!editingRole || !permissions.update) return;
     const newRoles = roles.some(r => r.id === editingRole.id)
       ? roles.map(r => r.id === editingRole.id ? editingRole : r)
       : [...roles, editingRole];
@@ -90,18 +91,19 @@ const MenuPermissionView: React.FC = () => {
   };
 
   const handleDeleteRole = (id: string) => {
+    if (!permissions.update) return;
     setPendingDeleteRoleId(id);
   };
 
   const confirmDeleteRole = () => {
-    if (!pendingDeleteRoleId) return;
+    if (!pendingDeleteRoleId || !permissions.update) return;
     setSystemRoles(roles.filter(r => r.id !== pendingDeleteRoleId));
     setIsDirty(true);
     setPendingDeleteRoleId(null);
   };
 
   const handleSaveUser = () => {
-    if (!editingUser) return;
+    if (!editingUser || !permissions.update) return;
     setUsers(users.map(u => u.id === editingUser.id ? editingUser : u));
     setIsDirty(true);
     setEditingUser(null);
@@ -113,6 +115,7 @@ const MenuPermissionView: React.FC = () => {
     field: keyof MenuPermission,
     value: boolean
   ) => {
+    if (!permissions.update) return;
     if (target === 'role' && editingRole) {
       const currentPerms = editingRole.permissions[menuId] || { view: false, create: false, update: false };
       const newPerms = { ...currentPerms, [field]: value };
@@ -157,7 +160,7 @@ const MenuPermissionView: React.FC = () => {
   };
 
   const togglePadPermission = (deptId: string) => {
-    if (!editingUser) return;
+    if (!editingUser || !permissions.update) return;
     const currentPerms = editingUser.padPermissions || [];
     const newPerms = currentPerms.includes(deptId) 
       ? currentPerms.filter(id => id !== deptId)
@@ -166,7 +169,7 @@ const MenuPermissionView: React.FC = () => {
   };
 
   const clearCustomPermission = (menuId: string) => {
-    if (!editingUser || !editingUser.customPermissions) return;
+    if (!editingUser || !editingUser.customPermissions || !permissions.update) return;
     const newCustomPerms = { ...editingUser.customPermissions };
     delete newCustomPerms[menuId];
     setEditingUser({ ...editingUser, customPermissions: newCustomPerms });
@@ -202,8 +205,8 @@ const MenuPermissionView: React.FC = () => {
                 // Define which permissions are available for each menu item
                 const availablePerms = {
                   view: true,
-                  create: ['process', 'org', 'task-center', 'review', 'user'].includes(item.id),
-                  update: !['roles', 'okr-review', 'workbench'].includes(item.id)
+                  create: ['process', 'org', 'business-definition', 'okr', 'execution', 'task-center', 'user'].includes(item.id),
+                  update: !['roles', 'workbench'].includes(item.id)
                 };
 
                 return (
@@ -403,7 +406,13 @@ const MenuPermissionView: React.FC = () => {
                     <h3 className="font-bold text-lg text-slate-800">编辑角色: {editingRole.name}</h3>
                     <div className="flex gap-2 w-full md:w-auto">
                       <button onClick={() => setEditingRole(null)} className="flex-1 md:flex-none px-4 py-2 text-slate-500 hover:bg-slate-100 rounded-lg font-medium text-sm transition-colors">取消</button>
-                      <button onClick={handleSaveRole} className="flex-1 md:flex-none px-4 py-2 bg-brand-600 text-white rounded-lg font-medium text-sm hover:bg-brand-700 transition-colors">应用更改</button>
+                      <button
+                        onClick={handleSaveRole}
+                        disabled={!permissions.update}
+                        className="flex-1 md:flex-none px-4 py-2 bg-brand-600 text-white rounded-lg font-medium text-sm hover:bg-brand-700 transition-colors disabled:opacity-50"
+                      >
+                        应用更改
+                      </button>
                     </div>
                   </div>
                   
@@ -413,8 +422,9 @@ const MenuPermissionView: React.FC = () => {
                       <input 
                         type="text" 
                         value={editingRole.name || ''}
+                        disabled={!permissions.update}
                         onChange={e => setEditingRole({...editingRole, name: e.target.value})}
-                        className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm outline-none focus:border-brand-500"
+                        className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm outline-none focus:border-brand-500 disabled:opacity-50"
                       />
                     </div>
                     <div>
@@ -422,8 +432,9 @@ const MenuPermissionView: React.FC = () => {
                       <input 
                         type="text" 
                         value={editingRole.description || ''}
+                        disabled={!permissions.update}
                         onChange={e => setEditingRole({...editingRole, description: e.target.value})}
-                        className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm outline-none focus:border-brand-500"
+                        className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm outline-none focus:border-brand-500 disabled:opacity-50"
                       />
                     </div>
                   </div>
@@ -566,13 +577,15 @@ const MenuPermissionView: React.FC = () => {
                               <button
                                 key={role.id}
                                 onClick={() => {
+                                  if (!permissions.update) return;
                                   const currentIds = editingUser.systemRoleIds || [];
                                   const newIds = isSelected 
                                     ? currentIds.filter(id => id !== role.id)
                                     : [...currentIds, role.id];
                                   setEditingUser({ ...editingUser, systemRoleIds: newIds });
                                 }}
-                                className={`px-4 py-2 rounded-lg text-sm font-medium border transition-all flex items-center gap-2 ${isSelected ? 'bg-brand-50 border-brand-500 text-brand-700' : 'bg-white border-slate-200 text-slate-600 hover:border-brand-300'}`}
+                                disabled={!permissions.update}
+                                className={`px-4 py-2 rounded-lg text-sm font-medium border transition-all flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed ${isSelected ? 'bg-brand-50 border-brand-500 text-brand-700' : 'bg-white border-slate-200 text-slate-600 hover:border-brand-300'}`}
                               >
                                 {isSelected && <Check size={14} />}
                                 {role.name}

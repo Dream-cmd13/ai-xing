@@ -1,5 +1,5 @@
-import React, { useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import React, { useEffect, useMemo, useState } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { useAppStore } from '../store/useAppStore';
 import { useAuthStore } from '../store/useAuthStore';
 import { useAppActions } from '../hooks/useAppActions';
@@ -10,6 +10,8 @@ import { Building2, Calendar, Target, ChevronRight, Plus, FileText } from 'lucid
 import { getVisibleDepartments } from '../utils/permissions';
 
 
+const OKR_REVIEW_SELECTED_DEPT_STORAGE_KEY = 'okrReviewDashboard.selectedDeptId';
+
 
 const OkrReviewDashboard: React.FC = () => {
   const state = useAppStore();
@@ -18,7 +20,10 @@ const OkrReviewDashboard: React.FC = () => {
   const { currentUser } = useAuthStore();
   const actions = useAppActions();
   const permissions = usePermissions('okr-review');
+  const canLaunchReview = permissions.update;
+  const location = useLocation();
   const navigate = useNavigate();
+  const { selectedDeptId: restoredDeptId } = (location.state as { selectedDeptId?: string } | null) || {};
 
   const navigateToReview = (tab: 'weekly' | 'monthly' | 'quarterly', deptId: string, period?: string) => {
     navigate('/review', {
@@ -46,7 +51,11 @@ const OkrReviewDashboard: React.FC = () => {
   const currentProcessId = state.currentProcessId;
   const setCurrentProcessId = state.setCurrentProcessId;
 
-  const [selectedDeptId, setSelectedDeptId] = useState<string | null>(null);
+  const [selectedDeptId, setSelectedDeptId] = useState<string | null>(() => {
+    if (restoredDeptId) return restoredDeptId;
+    if (typeof window === 'undefined') return null;
+    return sessionStorage.getItem(OKR_REVIEW_SELECTED_DEPT_STORAGE_KEY);
+  });
   const [visibleWeeksCount, setVisibleWeeksCount] = useState(6);
   const [visibleMonthsCount, setVisibleMonthsCount] = useState(6);
   const [visibleQuartersCount, setVisibleQuartersCount] = useState(6);
@@ -66,7 +75,22 @@ const OkrReviewDashboard: React.FC = () => {
   }, [visibleDepartments]);
 
   const selectedDept = useMemo(() => {
-    return flatDepts.find(d => d.id === selectedDeptId) || flatDepts[0];
+    return flatDepts.find(d => d.id === selectedDeptId) || null;
+  }, [flatDepts, selectedDeptId]);
+
+  useEffect(() => {
+    if (!selectedDeptId || typeof window === 'undefined') return;
+    sessionStorage.setItem(OKR_REVIEW_SELECTED_DEPT_STORAGE_KEY, selectedDeptId);
+  }, [selectedDeptId]);
+
+  useEffect(() => {
+    if (!selectedDeptId || flatDepts.length === 0) return;
+    if (flatDepts.some(d => d.id === selectedDeptId)) return;
+
+    setSelectedDeptId(null);
+    if (typeof window !== 'undefined') {
+      sessionStorage.removeItem(OKR_REVIEW_SELECTED_DEPT_STORAGE_KEY);
+    }
   }, [flatDepts, selectedDeptId]);
 
   const renderDeptTree = (depts: Department[], depth = 0) => {
@@ -163,13 +187,15 @@ const OkrReviewDashboard: React.FC = () => {
                     <Calendar className="text-brand-500" size={20} />
                     周复盘记录
                   </h3>
-                  <button 
-                    onClick={() => navigateToReview('weekly', selectedDept.id)}
-                    className="flex items-center gap-1 text-sm font-bold text-brand-600 hover:text-brand-700 bg-brand-50 px-3 py-1.5 rounded-lg transition-colors"
-                  >
-                    <Plus size={16} />
-                    发起周复盘
-                  </button>
+                  {canLaunchReview && (
+                    <button 
+                      onClick={() => navigateToReview('weekly', selectedDept.id)}
+                      className="flex items-center gap-1 text-sm font-bold text-brand-600 hover:text-brand-700 bg-brand-50 px-3 py-1.5 rounded-lg transition-colors"
+                    >
+                      <Plus size={16} />
+                      发起周复盘
+                    </button>
+                  )}
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                   {recentWeeks.map(week => {
@@ -226,13 +252,15 @@ const OkrReviewDashboard: React.FC = () => {
                     <Calendar className="text-indigo-500" size={20} />
                     月度复盘记录
                   </h3>
-                  <button 
-                    onClick={() => navigateToReview('monthly', selectedDept.id)}
-                    className="flex items-center gap-1 text-sm font-bold text-indigo-600 hover:text-indigo-700 bg-indigo-50 px-3 py-1.5 rounded-lg transition-colors"
-                  >
-                    <Plus size={16} />
-                    发起月度复盘
-                  </button>
+                  {canLaunchReview && (
+                    <button 
+                      onClick={() => navigateToReview('monthly', selectedDept.id)}
+                      className="flex items-center gap-1 text-sm font-bold text-indigo-600 hover:text-indigo-700 bg-indigo-50 px-3 py-1.5 rounded-lg transition-colors"
+                    >
+                      <Plus size={16} />
+                      发起月度复盘
+                    </button>
+                  )}
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                   {recentMonths.map(month => {
@@ -289,13 +317,15 @@ const OkrReviewDashboard: React.FC = () => {
                     <Target className="text-violet-500" size={20} />
                     季度复盘记录
                   </h3>
-                  <button 
-                    onClick={() => navigateToReview('quarterly', selectedDept.id)}
-                    className="flex items-center gap-1 text-sm font-bold text-violet-600 hover:text-violet-700 bg-violet-50 px-3 py-1.5 rounded-lg transition-colors"
-                  >
-                    <Plus size={16} />
-                    发起季度复盘
-                  </button>
+                  {canLaunchReview && (
+                    <button 
+                      onClick={() => navigateToReview('quarterly', selectedDept.id)}
+                      className="flex items-center gap-1 text-sm font-bold text-violet-600 hover:text-violet-700 bg-violet-50 px-3 py-1.5 rounded-lg transition-colors"
+                    >
+                      <Plus size={16} />
+                      发起季度复盘
+                    </button>
+                  )}
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                   {recentQuarters.map(quarter => {

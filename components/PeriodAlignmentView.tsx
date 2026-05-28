@@ -14,6 +14,8 @@ interface PeriodAlignmentViewProps {
   selectedYear: number;
   selectedPeriod: string;
   selectedDeptId: string | null;
+  canCreateTask: boolean;
+  canEditTask: boolean;
   onAddTask: (deptId: string, krId?: string, weekId?: string) => void;
   onTaskClick: (task: PADEntry) => void;
 }
@@ -22,6 +24,8 @@ const PeriodAlignmentView: React.FC<PeriodAlignmentViewProps> = ({
   selectedYear,
   selectedPeriod,
   selectedDeptId,
+  canCreateTask,
+  canEditTask,
   onAddTask,
   onTaskClick
 }) => {
@@ -205,8 +209,8 @@ const PeriodAlignmentView: React.FC<PeriodAlignmentViewProps> = ({
                             {tasks.map(t => (
                               <div 
                                 key={t.id} 
-                                onClick={() => onTaskClick(w.id, t)}
-                                className="bg-white p-2 rounded-lg border shadow-sm text-[10px] font-bold text-slate-700 hover:border-brand-300 transition-all cursor-pointer"
+                                onClick={canEditTask ? () => onTaskClick(w.id, t) : undefined}
+                                className={`bg-white p-2 rounded-lg border shadow-sm text-[10px] font-bold text-slate-700 transition-all ${canEditTask ? 'cursor-pointer' : 'cursor-default'} ${canEditTask ? 'hover:border-brand-300' : ''}`}
                               >
                                 <div className="flex items-center gap-1 mb-1">
                                   {t.status === 'completed' ? <CheckCircle size={10} className="text-emerald-500"/> : <Clock size={10} className="text-amber-500"/>}
@@ -214,12 +218,14 @@ const PeriodAlignmentView: React.FC<PeriodAlignmentViewProps> = ({
                                 </div>
                               </div>
                             ))}
-                            <button 
-                              onClick={() => onAddTask(w.id, krId)}
-                              className="w-full py-2 rounded-lg border border-dashed border-slate-200 text-slate-300 hover:text-brand-600 hover:border-brand-300 hover:bg-brand-50 transition-all flex items-center justify-center opacity-0 group-hover:opacity-100"
-                            >
-                              <Plus size={14}/>
-                            </button>
+                            {canCreateTask && (
+                              <button 
+                                onClick={() => onAddTask(w.id, krId)}
+                                className="w-full py-2 rounded-lg border border-dashed border-slate-200 text-slate-300 hover:text-brand-600 hover:border-brand-300 hover:bg-brand-50 transition-all flex items-center justify-center opacity-0 group-hover:opacity-100"
+                              >
+                                <Plus size={14}/>
+                              </button>
+                            )}
                           </div>
                         );
                       })}

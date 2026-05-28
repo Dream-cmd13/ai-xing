@@ -179,8 +179,8 @@ export const hasPermission = (
   menuId: string,
   action: keyof MenuPermission
 ): boolean => {
-  if (menuId === 'workbench') return true;
   if (isAdminUser(user, systemRoles)) return true;
+  if (menuId === 'workbench') return action === 'view';
 
   // Check custom permissions first (override)
   if (user.customPermissions && user.customPermissions[menuId]) {
