@@ -4,6 +4,8 @@ import { motion, AnimatePresence } from 'motion/react';
 import { useAuthStore } from '../store/useAuthStore';
 import { useAppStore } from '../store/useAppStore';
 import { RouteDataLayout } from './RouteDataLayout';
+import { hasPermission } from '../utils/permissions';
+import { Lock } from 'lucide-react';
 
 const WorkbenchView = lazy(() => import('../components/WorkbenchView'));
 const ProcessView = lazy(() => import('../components/ProcessView'));
@@ -20,10 +22,28 @@ const OkrReviewDashboard = lazy(() => import('../components/OkrReviewDashboard')
 const MenuPermissionView = lazy(() => import('../components/MenuPermissionView'));
 const LoginView = lazy(() => import('../components/LoginView'));
 
-const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
-  const { isAuthenticated } = useAuthStore();
+const ProtectedRoute = ({ children, menuId }: { children: React.ReactNode, menuId?: string }) => {
+  const { isAuthenticated, currentUser } = useAuthStore();
+  const { systemRoles } = useAppStore();
   
   if (!isAuthenticated) return <Navigate to="/login" replace />;
+
+  if (menuId && currentUser) {
+    const canView = hasPermission(currentUser, systemRoles || [], menuId, 'view');
+    if (!canView) {
+      return (
+        <div className="h-full w-full flex items-center justify-center bg-slate-50 absolute inset-0 z-50">
+          <div className="text-center bg-white p-12 rounded-[3rem] border shadow-sm flex flex-col items-center">
+            <div className="w-20 h-20 bg-slate-50 text-slate-300 rounded-full flex items-center justify-center mb-6">
+              <Lock size={32} />
+            </div>
+            <h2 className="text-xl font-black text-slate-800">权限不足</h2>
+            <p className="text-slate-400 text-sm mt-2">您没有访问该页面的权限，或该菜单已对您隐藏。</p>
+          </div>
+        </div>
+      );
+    }
+  }
   
   return <>{children}</>;
 };
@@ -81,19 +101,19 @@ export const AppRoutes: React.FC = () => {
             />
             <Route path="/" element={<ProtectedRoute><RouteDataLayout /></ProtectedRoute>}>
               <Route index element={<Navigate to="/workbench" replace />} />
-              <Route path="workbench" element={<WorkbenchView />} />
-              <Route path="process" element={<ProcessView />} />
-              <Route path="org" element={<OrgView />} />
-              <Route path="okr" element={<StrategyView />} />
-              <Route path="business-definition" element={<BusinessDefinitionView />} />
-              <Route path="weekly" element={<WeeklyView />} />
-              <Route path="user" element={<UserView />} />
-              <Route path="roles" element={<RoleQueryView />} />
-              <Route path="task-center" element={<TaskCenterView />} />
-              <Route path="execution" element={<ExecutionView />} />
-              <Route path="review" element={<ReviewView />} />
-              <Route path="okr-review" element={<OkrReviewDashboard />} />
-              <Route path="menu-permissions" element={<MenuPermissionView />} />
+              <Route path="workbench" element={<ProtectedRoute menuId="workbench"><WorkbenchView /></ProtectedRoute>} />
+              <Route path="process" element={<ProtectedRoute menuId="process"><ProcessView /></ProtectedRoute>} />
+              <Route path="org" element={<ProtectedRoute menuId="org"><OrgView /></ProtectedRoute>} />
+              <Route path="okr" element={<ProtectedRoute menuId="okr"><StrategyView /></ProtectedRoute>} />
+              <Route path="business-definition" element={<ProtectedRoute menuId="business-definition"><BusinessDefinitionView /></ProtectedRoute>} />
+              <Route path="weekly" element={<ProtectedRoute menuId="weekly"><WeeklyView /></ProtectedRoute>} />
+              <Route path="user" element={<ProtectedRoute menuId="user"><UserView /></ProtectedRoute>} />
+              <Route path="roles" element={<ProtectedRoute menuId="roles"><RoleQueryView /></ProtectedRoute>} />
+              <Route path="task-center" element={<ProtectedRoute menuId="task-center"><TaskCenterView /></ProtectedRoute>} />
+              <Route path="execution" element={<ProtectedRoute menuId="execution"><ExecutionView /></ProtectedRoute>} />
+              <Route path="review" element={<ProtectedRoute menuId="review"><ReviewView /></ProtectedRoute>} />
+              <Route path="okr-review" element={<ProtectedRoute menuId="okr-review"><OkrReviewDashboard /></ProtectedRoute>} />
+              <Route path="menu-permissions" element={<ProtectedRoute menuId="menu-permissions"><MenuPermissionView /></ProtectedRoute>} />
             </Route>
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
