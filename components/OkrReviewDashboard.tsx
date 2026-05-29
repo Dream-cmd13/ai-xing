@@ -58,7 +58,8 @@ const OkrReviewDashboard: React.FC = () => {
   });
   const [visibleWeeksCount, setVisibleWeeksCount] = useState(6);
   const [visibleMonthsCount, setVisibleMonthsCount] = useState(6);
-  const [visibleQuartersCount, setVisibleQuartersCount] = useState(6);
+  const [quarterReviewYear, setQuarterReviewYear] = useState(new Date().getFullYear());
+  const [showQuarterYearSelector, setShowQuarterYearSelector] = useState(false);
 
   const visibleDepartments = useMemo(() => getVisibleDepartments(currentUser, state.departments, state.systemRoles || []), [currentUser, state.departments, state.systemRoles]);
 
@@ -151,7 +152,16 @@ const OkrReviewDashboard: React.FC = () => {
 
   const recentWeeks = getRecentPeriods('weekly', visibleWeeksCount);
   const recentMonths = getRecentPeriods('monthly', visibleMonthsCount);
-  const recentQuarters = getRecentPeriods('quarterly', visibleQuartersCount);
+  const yearQuarterCards = useMemo(() => {
+    return [1, 2, 3, 4].map((quarter) => {
+      const period = `${quarterReviewYear}-Q${quarter}`;
+      return {
+        period,
+        quarter,
+        review: selectedDept?.reviews?.[period]?.[0] || null,
+      };
+    });
+  }, [quarterReviewYear, selectedDept]);
 
   return (
     <div className="h-full flex flex-col bg-slate-50">
@@ -317,61 +327,76 @@ const OkrReviewDashboard: React.FC = () => {
                     <Target className="text-violet-500" size={20} />
                     季度复盘记录
                   </h3>
-                  {canLaunchReview && (
-                    <button 
-                      onClick={() => navigateToReview('quarterly', selectedDept.id)}
-                      className="flex items-center gap-1 text-sm font-bold text-violet-600 hover:text-violet-700 bg-violet-50 px-3 py-1.5 rounded-lg transition-colors"
+                  <div className="flex items-center gap-3">
+                    <button
+                      onClick={() => setShowQuarterYearSelector(prev => !prev)}
+                      className="text-sm font-bold text-slate-500 hover:text-violet-600 bg-white border border-slate-200 px-3 py-1.5 rounded-lg transition-colors hover:border-violet-300"
                     >
-                      <Plus size={16} />
-                      发起季度复盘
+                      查看更多
                     </button>
-                  )}
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                  {recentQuarters.map(quarter => {
-                    const review = selectedDept.reviews?.[quarter]?.[0];
-                    return (
-                      <div 
-                        key={quarter} 
-                        onClick={() => navigateToReview('quarterly', selectedDept.id, quarter)}
-                        className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm hover:shadow-md hover:border-violet-300 transition-all cursor-pointer group"
+                    {canLaunchReview && (
+                      <button 
+                        onClick={() => navigateToReview('quarterly', selectedDept.id)}
+                        className="flex items-center gap-1 text-sm font-bold text-violet-600 hover:text-violet-700 bg-violet-50 px-3 py-1.5 rounded-lg transition-colors"
                       >
-                        <div className="flex justify-between items-start mb-3">
-                          <span className="text-sm font-black text-slate-700">{quarter}</span>
-                          {review ? (
-                            <span className="text-[10px] font-bold px-2 py-1 rounded-md bg-emerald-50 text-emerald-600">已复盘</span>
-                          ) : (
-                            <span className="text-[10px] font-bold px-2 py-1 rounded-md bg-slate-100 text-slate-500">未复盘</span>
-                          )}
+                        <Plus size={16} />
+                        发起季度复盘
+                      </button>
+                    )}
+                  </div>
+                </div>
+                {showQuarterYearSelector && (
+                  <div className="mb-4 flex items-center gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
+                    <Calendar size={14} className="text-slate-400" />
+                    <span className="text-xs font-black text-slate-500">切换年份</span>
+                    <select
+                      className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-bold text-slate-600 outline-none"
+                      value={quarterReviewYear}
+                      onChange={(e) => setQuarterReviewYear(Number(e.target.value))}
+                    >
+                      {[2024, 2025, 2026].map((year) => (
+                        <option key={year} value={year}>{year}年</option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {yearQuarterCards.map(({ period, quarter, review }) => (
+                    <div 
+                      key={period} 
+                      onClick={() => navigateToReview('quarterly', selectedDept.id, period)}
+                      className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm hover:shadow-md hover:border-violet-300 transition-all cursor-pointer group"
+                    >
+                      <div className="flex justify-between items-start mb-3">
+                        <div>
+                          <div className="text-lg font-black text-slate-800">Q{quarter}</div>
+                          <div className="mt-1 text-xs font-bold text-slate-400">{quarterReviewYear} 年</div>
                         </div>
                         {review ? (
-                          <>
-                            <div className="flex items-center gap-2 mb-2">
-                              <span className="text-2xl font-black text-violet-600">{review.score}</span>
-                              <span className="text-xs text-slate-400 font-bold">/ 100 分</span>
-                            </div>
-                            <p className="text-xs text-slate-500 line-clamp-2">{review.content}</p>
-                          </>
+                          <span className="text-[10px] font-bold px-2 py-1 rounded-md bg-emerald-50 text-emerald-600">已复盘</span>
                         ) : (
-                          <div className="h-16 flex items-center justify-center text-slate-300">
-                            <FileText size={24} className="opacity-20" />
-                          </div>
+                          <span className="text-[10px] font-bold px-2 py-1 rounded-md bg-slate-100 text-slate-500">未复盘</span>
                         )}
-                        <div className="mt-4 flex items-center justify-end text-violet-600 opacity-0 group-hover:opacity-100 transition-opacity">
-                          <span className="text-xs font-bold mr-1">{review ? '查看详情' : '去复盘'}</span>
-                          <ChevronRight size={14} />
-                        </div>
                       </div>
-                    );
-                  })}
-                </div>
-                <div className="mt-4 flex justify-center">
-                  <button 
-                    onClick={() => setVisibleQuartersCount(prev => prev + 6)}
-                    className="text-xs font-bold text-slate-400 hover:text-violet-600 transition-colors bg-white border border-slate-200 px-4 py-2 rounded-full hover:border-violet-300 hover:shadow-sm"
-                  >
-                    查看更多
-                  </button>
+                      {review ? (
+                        <>
+                          <div className="flex items-center gap-2 mb-2">
+                            <span className="text-2xl font-black text-violet-600">{review.score}</span>
+                            <span className="text-xs text-slate-400 font-bold">/ 100 分</span>
+                          </div>
+                          <p className="text-xs text-slate-500 line-clamp-2">{review.content}</p>
+                        </>
+                      ) : (
+                        <div className="h-16 flex items-center justify-center text-slate-300">
+                          <FileText size={24} className="opacity-20" />
+                        </div>
+                      )}
+                      <div className="mt-4 flex items-center justify-end text-violet-600 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <span className="text-xs font-bold mr-1">{review ? '查看详情' : '去复盘'}</span>
+                        <ChevronRight size={14} />
+                      </div>
+                    </div>
+                  ))}
                 </div>
               </section>
             </div>

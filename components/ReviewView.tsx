@@ -7,7 +7,7 @@ import { usePageToast } from '../hooks/usePageToast';
 import { usePermissions } from '../hooks/usePermissions';
 
 import { AppState, Department, ReviewEntry, ObjectiveReview, User, PADEntry, MenuPermission, OKR } from '../types';
-import { Calendar, Building2, ClipboardCheck, Save, CheckCircle, Loader2, Target, TrendingUp, MessageSquare, FileText, Lock, Download, RefreshCw, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Calendar, Building2, ClipboardCheck, Save, CheckCircle, Loader2, Target, TrendingUp, MessageSquare, FileText, Lock, Download, RefreshCw, ChevronLeft, ChevronRight, PieChart } from 'lucide-react';
 import PageToast from './PageToast';
 import TaskModal from './TaskModal';
 import { getUserFacingError } from '../utils/userFacingError';
@@ -78,7 +78,7 @@ const ReviewView: React.FC = () => {
   const [okrReviews, setOkrReviews] = useState<Record<string, ObjectiveReview>>({});
   const [currentQuarterlyOkrIndex, setCurrentQuarterlyOkrIndex] = useState(0);
   const [reviewSubTab, setReviewSubTab] = useState<'tasks' | 'weekly-records' | 'okrs'>(
-    initialTab === 'quarterly' ? 'okrs' : 'tasks'
+    initialTab === 'quarterly' || initialTab === 'monthly' ? 'okrs' : 'tasks'
   );
   const [loadedDraftSnapshot, setLoadedDraftSnapshot] = useState<ReviewDraftSnapshot>(() => createReviewDraftSnapshot());
   const [pendingLeaveAction, setPendingLeaveAction] = useState<(() => void) | null>(null);
@@ -95,11 +95,15 @@ const ReviewView: React.FC = () => {
       setReviewSubTab('okrs');
       return;
     }
+    if (activeTab === 'monthly') {
+      setReviewSubTab('okrs');
+      return;
+    }
     if (activeTab === 'weekly') {
       setReviewSubTab('tasks');
       return;
     }
-    if (reviewSubTab === 'okrs') {
+    if (reviewSubTab === 'okrs' && activeTab === 'weekly') {
       setReviewSubTab('tasks');
     }
   }, [activeTab]);
@@ -405,10 +409,16 @@ const ReviewView: React.FC = () => {
   };
 
   const handleNumberInput = (val: string, setter: (n: number) => void, max: number = 100) => {
+    // Remove any non-digit characters to prevent negative signs or other text
+    let cleaned = val.replace(/\D/g, '');
     // Remove leading zeros unless the value is just "0"
-    // Also prevent negative numbers and cap at max
-    let cleaned = val.replace(/^0+(?=\d)/, '');
-    if (cleaned === '') cleaned = '0';
+    cleaned = cleaned.replace(/^0+(?=\d)/, '');
+    
+    if (cleaned === '') {
+      setter(0);
+      return;
+    }
+    
     const num = Math.min(max, Math.max(0, Number(cleaned)));
     setter(num);
   };
@@ -562,8 +572,8 @@ const ReviewView: React.FC = () => {
     const owner = state.users.find(u => u.id === task.ownerId);
 
     return (
-      <div key={task.id} className="w-[22rem] md:w-[25rem] shrink-0 bg-white p-5 rounded-[1.75rem] border border-slate-100 shadow-sm h-full">
-        <div className="flex flex-col gap-4 h-full">
+      <div key={task.id} className="w-full bg-white p-5 rounded-[1.75rem] border border-slate-100 shadow-sm">
+        <div className="flex flex-col gap-4">
           <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-2 cursor-pointer hover:opacity-80" onClick={() => handleTaskClick(task)}>
@@ -595,46 +605,37 @@ const ReviewView: React.FC = () => {
                   <span className="text-[10px] font-bold text-slate-600">{owner.name}</span>
                 </div>
               )}
-              <div className="w-32 flex items-center gap-2 bg-slate-50 px-3 py-2 rounded-xl border border-slate-100 shrink-0">
-                <span className="text-[10px] font-black text-slate-400 uppercase">评分</span>
-                <input 
-                  type="number"
-                  min="0" max="100"
-                  className="w-full bg-transparent text-sm font-black text-brand-600 outline-none text-right"
-                  value={score}
-                  disabled={!canEditReview}
-                  onChange={e => handleNumberInput(e.target.value, (val) => {
-                    updateOkrReviews(
-                      updateTaskReviewState(okrReviews, task, {
-                        score: val,
-                      })
-                    );
-                  }, 100)}
-                  onFocus={e => e.target.select()}
-                />
-                <span className="text-[10px] font-black text-slate-400">/ 100</span>
-              </div>
             </div>
           </div>
 
-          <div className="flex-1">
-            <div className="mb-2 flex flex-col gap-1 md:flex-row md:items-center md:justify-between">
-              <label className="text-[11px] font-black uppercase tracking-widest text-slate-400">任务复盘</label>
-              <span className="text-[11px] font-medium text-slate-400">支持输入更完整的过程复盘、问题与改进建议</span>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="flex-1">
+              <div className="mb-2 flex flex-col gap-1 md:flex-row md:items-center md:justify-between">
+                <label className="text-[11px] font-black uppercase tracking-widest text-slate-400">预期成果</label>
+              </div>
+              <div className="w-full min-h-[100px] max-h-72 overflow-y-auto bg-slate-50 border border-slate-100 rounded-2xl px-4 py-3 text-sm font-medium text-slate-600 leading-6 custom-scrollbar whitespace-pre-wrap">
+                {task.deliverable || '暂无预期成果'}
+              </div>
             </div>
-            <textarea 
-              placeholder="输入对该任务的复盘内容、关键问题、经验沉淀或后续建议..."
-              className="w-full min-h-[132px] max-h-72 resize-y bg-slate-50 border border-slate-100 rounded-2xl px-4 py-3 text-sm font-medium text-slate-700 outline-none focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500 transition-all leading-6"
-              value={evaluation}
-              disabled={!canEditReview}
-              onChange={e => {
-                updateOkrReviews(
-                  updateTaskReviewState(okrReviews, task, {
-                    evaluation: e.target.value,
-                  })
-                );
-              }}
-            />
+
+            <div className="flex-1">
+              <div className="mb-2 flex flex-col gap-1 md:flex-row md:items-center md:justify-between">
+                <label className="text-[11px] font-black uppercase tracking-widest text-slate-400">实际成果</label>
+              </div>
+              <textarea 
+                placeholder="输入该任务的实际成果..."
+                className="w-full min-h-[100px] max-h-72 resize-y bg-slate-50 border border-slate-100 rounded-2xl px-4 py-3 text-sm font-medium text-slate-700 outline-none focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500 transition-all leading-6"
+                value={evaluation}
+                disabled={!canEditReview}
+                onChange={e => {
+                  updateOkrReviews(
+                    updateTaskReviewState(okrReviews, task, {
+                      evaluation: e.target.value,
+                    })
+                  );
+                }}
+              />
+            </div>
           </div>
         </div>
       </div>
@@ -651,7 +652,7 @@ const ReviewView: React.FC = () => {
           setActiveTab('weekly');
           setSelectedWeek(period);
         })}
-        className="w-[20rem] md:w-[23rem] shrink-0 bg-white p-5 rounded-[1.75rem] border border-slate-100 shadow-sm hover:border-brand-300 hover:shadow-md transition-all cursor-pointer group"
+        className="w-full bg-white p-5 rounded-[1.75rem] border border-slate-100 shadow-sm hover:border-brand-300 hover:shadow-md transition-all cursor-pointer group"
       >
         <div className="flex items-center justify-between mb-3">
           <span className="text-sm font-black text-slate-700">{period}</span>
@@ -821,14 +822,19 @@ const ReviewView: React.FC = () => {
                        <div className="flex items-center gap-2 bg-slate-50 px-3 py-1 rounded-xl border">
                           <span className="text-[10px] font-black text-slate-400 uppercase">综合评分</span>
                           <input 
-                            type="number" 
-                            min="0" max="100" 
-                            className="w-12 bg-transparent text-sm font-black text-brand-600 outline-none text-right"
-                            value={reviewScore}
-                            disabled={!canEditReview}
-                            onChange={e => handleNumberInput(e.target.value, updateReviewScore, 100)}
-                            onFocus={e => e.target.select()}
-                          />
+                              type="text" 
+                              className="w-12 bg-transparent text-sm font-black text-brand-600 outline-none text-right"
+                              value={reviewScore === 0 ? 0 : reviewScore || ''}
+                              disabled={!canEditReview}
+                              onChange={e => {
+                                if (e.target.value === '') {
+                                  updateReviewScore('' as any);
+                                  return;
+                                }
+                                handleNumberInput(e.target.value, updateReviewScore, 100)
+                              }}
+                              onFocus={e => e.target.select()}
+                            />
                           <span className="text-xs font-bold text-slate-300">/ 100</span>
                        </div>
                     </div>
@@ -843,7 +849,7 @@ const ReviewView: React.FC = () => {
 
                  {/* Review Detail */}
                  <div className="space-y-6">
-                    {activeTab === 'quarterly' && currentOkrs.length > 1 && (
+                    {(activeTab === 'quarterly' || (activeTab === 'monthly' && reviewSubTab === 'okrs')) && currentOkrs.length > 1 && (
                       <div className="rounded-[2rem] border border-slate-200 bg-white px-4 py-3 shadow-sm">
                         <div className="flex items-center gap-3">
                           <button
@@ -881,6 +887,15 @@ const ReviewView: React.FC = () => {
                       <div className="sticky top-0 z-10 -mx-2 rounded-[1.75rem] border border-slate-200 bg-white/95 px-4 py-3 shadow-sm backdrop-blur">
                         <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
                           <div className="flex items-center gap-4 overflow-x-auto">
+                          <button
+                            className={`flex items-center gap-2 pb-2 text-sm font-black uppercase tracking-widest transition-colors ${reviewSubTab === 'okrs' ? 'text-brand-600 border-b-2 border-brand-600' : 'text-slate-400 hover:text-slate-600'}`}
+                            onClick={() => setReviewSubTab('okrs')}
+                          >
+                            {selectedMonth ? `${parseInt(selectedMonth.split('-')[1].replace('M', ''))}月 OKR` : '月度 OKR'}
+                            <span className={`rounded-full px-2 py-0.5 text-[10px] ${reviewSubTab === 'okrs' ? 'bg-brand-50 text-brand-600' : 'bg-slate-100 text-slate-500'}`}>
+                              {currentOkrs.length}
+                            </span>
+                          </button>
                           <button
                             className={`flex items-center gap-2 pb-2 text-sm font-black uppercase tracking-widest transition-colors ${reviewSubTab === 'tasks' ? 'text-brand-600 border-b-2 border-brand-600' : 'text-slate-400 hover:text-slate-600'}`}
                             onClick={() => setReviewSubTab('tasks')}
@@ -969,11 +984,11 @@ const ReviewView: React.FC = () => {
                             读取任务到总结
                           </button>
                         </div>
-                        <div className={isMonthlyTaskWorkspace ? 'overflow-x-auto pb-2 custom-scrollbar' : 'overflow-x-auto pb-2 custom-scrollbar'}>
+                        <div className={isMonthlyTaskWorkspace ? 'pb-2' : 'pb-2'}>
                           {deptTasks.length === 0 ? (
                             <div className={`text-center py-8 text-slate-400 text-sm italic font-medium ${isMonthlyTaskWorkspace ? 'rounded-[1.5rem] border border-dashed border-slate-200 bg-white' : ''}`}>暂无关联任务</div>
                           ) : (
-                            <div className="flex items-stretch gap-4 min-w-max">
+                            <div className="flex flex-col gap-4">
                               {deptTasks.map(task => renderTaskReviewCard(task))}
                             </div>
                           )}
@@ -1004,11 +1019,11 @@ const ReviewView: React.FC = () => {
                             </div>
                           </div>
                         </div>
-                        <div className="overflow-x-auto pb-2 custom-scrollbar">
+                        <div className="pb-2">
                           {monthlyWeekReviews.length === 0 ? (
                             <div className="rounded-[1.5rem] border border-dashed border-slate-200 bg-white text-center py-8 text-slate-400 text-sm italic font-medium">本月暂无周复盘记录</div>
                           ) : (
-                            <div className="flex items-stretch gap-4 min-w-max">
+                            <div className="flex flex-col gap-4">
                               {monthlyWeekReviews.map(item => renderWeeklyReviewCard(item))}
                             </div>
                           )}
@@ -1016,7 +1031,7 @@ const ReviewView: React.FC = () => {
                       </div>
                     )}
 
-                    {activeTab === 'quarterly' && (
+                    {(activeTab === 'quarterly' || (activeTab === 'monthly' && reviewSubTab === 'okrs')) && (
                       <div className="space-y-6">
                         {currentQuarterlyOkr ? (() => {
                           const okr = currentQuarterlyOkr;
@@ -1028,19 +1043,14 @@ const ReviewView: React.FC = () => {
                             <span className="bg-white border text-slate-500 text-[10px] font-black px-2 py-1 rounded uppercase">{okr.period}</span>
                             <h5 className="font-bold text-slate-800 flex-1">{okr.objective}</h5>
                             <div className="flex items-center gap-2 bg-white px-3 py-1 rounded-xl border">
-                               <span className="text-[10px] font-black text-slate-400 uppercase">进度</span>
-                               <input 
-                                 type="number" 
-                                 min="0" max="100" 
-                                 className="w-12 bg-transparent text-sm font-black text-brand-600 outline-none text-right"
-                                 value={currentReview.progress || 0}
-                                 disabled={!canEditReview}
-                                 onChange={e => handleNumberInput(e.target.value, (val) => updateOkrReviews({ 
-                                   ...okrReviews, 
-                                   [okr.id]: { ...currentReview, progress: val } 
-                                 }))}
-                                 onFocus={e => e.target.select()}
-                               />
+                               <span className="text-[10px] font-black text-slate-400 uppercase">进度汇总</span>
+                               <span className="w-12 text-sm font-black text-brand-600 text-right">
+                                 {(() => {
+                                   const krCount = okr.keyResults?.length || 0;
+                                   const totalKrProgress = okr.keyResults?.reduce((sum: number, _: any, idx: number) => sum + (currentReview.krReviews?.[idx]?.progress || 0), 0) || 0;
+                                   return krCount > 0 ? Math.round(totalKrProgress / krCount) : 0;
+                                 })()}
+                               </span>
                                <span className="text-xs font-bold text-slate-300">%</span>
                             </div>
                          </div>
@@ -1051,97 +1061,119 @@ const ReviewView: React.FC = () => {
                              const krReview = currentReview.krReviews?.[idx] || { comment: '', progress: 0, status: 'on-track' };
                              return (
                                <div key={idx} className="bg-white p-4 rounded-xl border border-slate-100">
-                                 <div className="flex justify-between items-start mb-2">
-                                   <p className="text-xs font-bold text-slate-600 mb-2 flex-1 mr-4">{kr}</p>
-                                   <select 
-                                     className={`text-[10px] font-black uppercase px-2 py-1 rounded border outline-none ${
-                                       krReview.status === 'at-risk' ? 'bg-red-50 text-red-600 border-red-100' :
-                                       krReview.status === 'behind' ? 'bg-orange-50 text-orange-600 border-orange-100' :
-                                       'bg-emerald-50 text-emerald-600 border-emerald-100'
-                                     }`}
-                                     value={krReview.status || 'on-track'}
-                                     disabled={!canEditReview}
-                                     onChange={e => {
-                                       const newKrReviews = [...(currentReview.krReviews || [])];
-                                       while(newKrReviews.length <= idx) newKrReviews.push({ comment: '', progress: 0, status: 'on-track' });
-                                       newKrReviews[idx] = { ...newKrReviews[idx], status: e.target.value as any };
-                                       updateOkrReviews({ ...okrReviews, [okr.id]: { ...currentReview, krReviews: newKrReviews } });
-                                     }}
-                                   >
-                                     <option value="on-track">正常推进</option>
-                                     <option value="at-risk">有风险</option>
-                                     <option value="behind">滞后</option>
-                                   </select>
+                                 <div className="flex gap-4 items-start">
+                                   <p className="w-1/4 shrink-0 text-xs font-bold text-slate-600 pt-2">{kr}</p>
+                                   <div className="flex-1">
+                                     <textarea 
+                                       placeholder="输入 KR 执行情况..."
+                                       className="w-full bg-slate-50 border-none rounded-lg px-3 py-2 text-xs font-medium text-slate-600 outline-none focus:ring-1 focus:ring-brand-200 resize-y min-h-[120px]"
+                                       value={krReview.comment || ''}
+                                       disabled={!canEditReview}
+                                       onChange={e => {
+                                         const newKrReviews = [...(currentReview.krReviews || [])];
+                                         while(newKrReviews.length <= idx) newKrReviews.push({ comment: '', progress: 0, status: 'on-track' });
+                                         newKrReviews[idx] = { ...newKrReviews[idx], comment: e.target.value };
+                                         updateOkrReviews({ ...okrReviews, [okr.id]: { ...currentReview, krReviews: newKrReviews } });
+                                       }}
+                                     />
+                                   </div>
+                                   <div className="flex flex-col gap-2 mt-2">
+                                     <select 
+                                       className={`w-24 shrink-0 text-[10px] font-black uppercase px-2 py-1 rounded border outline-none ${
+                                         krReview.status === 'at-risk' ? 'bg-red-50 text-red-600 border-red-100' :
+                                         krReview.status === 'behind' ? 'bg-orange-50 text-orange-600 border-orange-100' :
+                                         'bg-emerald-50 text-emerald-600 border-emerald-100'
+                                       }`}
+                                       value={krReview.status || 'on-track'}
+                                       disabled={!canEditReview}
+                                       onChange={e => {
+                                         const newKrReviews = [...(currentReview.krReviews || [])];
+                                         while(newKrReviews.length <= idx) newKrReviews.push({ comment: '', progress: 0, status: 'on-track' });
+                                         newKrReviews[idx] = { ...newKrReviews[idx], status: e.target.value as any };
+                                         updateOkrReviews({ ...okrReviews, [okr.id]: { ...currentReview, krReviews: newKrReviews } });
+                                       }}
+                                     >
+                                       <option value="on-track">正常推进</option>
+                                       <option value="at-risk">有风险</option>
+                                       <option value="behind">滞后</option>
+                                     </select>
+                                     <div className="w-24 shrink-0 flex items-center gap-1 bg-slate-50 px-2 py-1 rounded-lg">
+                                       <span className="text-[10px] text-slate-400">进度</span>
+                                       <input 
+                                           type="text"
+                                           className="w-full bg-transparent text-xs font-bold text-slate-600 outline-none text-right"
+                                           value={krReview.progress === 0 ? 0 : krReview.progress || ''}
+                                           disabled={!canEditReview}
+                                           onChange={e => {
+                                             if (e.target.value === '') {
+                                                const newKrReviews = [...(currentReview.krReviews || [])];
+                                                while(newKrReviews.length <= idx) newKrReviews.push({ comment: '', progress: 0, status: 'on-track' });
+                                                newKrReviews[idx] = { ...newKrReviews[idx], progress: '' as any };
+                                                updateOkrReviews({ ...okrReviews, [okr.id]: { ...currentReview, krReviews: newKrReviews } });
+                                                return;
+                                             }
+                                             handleNumberInput(e.target.value, (val) => {
+                                               const newKrReviews = [...(currentReview.krReviews || [])];
+                                               while(newKrReviews.length <= idx) newKrReviews.push({ comment: '', progress: 0, status: 'on-track' });
+                                               newKrReviews[idx] = { ...newKrReviews[idx], progress: val };
+                                               updateOkrReviews({ ...okrReviews, [okr.id]: { ...currentReview, krReviews: newKrReviews } });
+                                             });
+                                           }}
+                                           onFocus={e => e.target.select()}
+                                         />
+                                       <span className="text-[10px] text-slate-400">%</span>
+                                     </div>
+                                   </div>
                                  </div>
-                                 <div className="flex gap-4 items-center">
-                                    <div className="flex-1">
-                                      <input 
-                                        type="text"
-                                        placeholder="输入 KR 执行情况..."
-                                        className="w-full bg-slate-50 border-none rounded-lg px-3 py-2 text-xs font-medium text-slate-600 outline-none focus:ring-1 focus:ring-brand-200"
-                                        value={krReview.comment || ''}
-                                        disabled={!canEditReview}
-                                        onChange={e => {
-                                          const newKrReviews = [...(currentReview.krReviews || [])];
-                                          while(newKrReviews.length <= idx) newKrReviews.push({ comment: '', progress: 0, status: 'on-track' });
-                                          newKrReviews[idx] = { ...newKrReviews[idx], comment: e.target.value };
-                                          updateOkrReviews({ ...okrReviews, [okr.id]: { ...currentReview, krReviews: newKrReviews } });
-                                        }}
-                                      />
-                                    </div>
-                                    <div className="w-24 flex items-center gap-1 bg-slate-50 px-2 py-1 rounded-lg">
-                                      <span className="text-[10px] text-slate-400">进度</span>
-                                      <input 
-                                        type="number"
-                                        min="0" max="100"
-                                        className="w-full bg-transparent text-xs font-bold text-slate-600 outline-none text-right"
-                                        value={krReview.progress || 0}
-                                        disabled={!canEditReview}
-                                        onChange={e => handleNumberInput(e.target.value, (val) => {
-                                          const newKrReviews = [...(currentReview.krReviews || [])];
-                                          while(newKrReviews.length <= idx) newKrReviews.push({ comment: '', progress: 0, status: 'on-track' });
-                                          newKrReviews[idx] = { ...newKrReviews[idx], progress: val };
-                                          updateOkrReviews({ ...okrReviews, [okr.id]: { ...currentReview, krReviews: newKrReviews } });
-                                        })}
-                                        onFocus={e => e.target.select()}
-                                      />
-                                      <span className="text-[10px] text-slate-400">%</span>
-                                    </div>
-                                  </div>
                                </div>
                              );
                            })}
                          </div>
                          
-                         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                            <div className="space-y-2">
-                               <label className="text-[10px] font-black text-slate-400 uppercase flex items-center gap-1"><MessageSquare size={12}/> 经验教训</label>
-                               <textarea 
-                                 className="w-full h-24 p-4 bg-white border border-slate-200 rounded-2xl text-xs font-bold outline-none focus:border-brand-300 resize-none"
-                                 value={currentReview.lessonsLearned || ''}
-                                 disabled={!canEditReview}
-                                 onChange={e => updateOkrReviews({ ...okrReviews, [okr.id]: { ...currentReview, lessonsLearned: e.target.value } })}
-                               />
-                            </div>
-                            <div className="space-y-2">
-                               <label className="text-[10px] font-black text-slate-400 uppercase flex items-center gap-1"><FileText size={12}/> 方法论沉淀</label>
-                               <textarea 
-                                 className="w-full h-24 p-4 bg-white border border-slate-200 rounded-2xl text-xs font-bold outline-none focus:border-brand-300 resize-none"
-                                 value={currentReview.methodology || ''}
-                                 disabled={!canEditReview}
-                                 onChange={e => updateOkrReviews({ ...okrReviews, [okr.id]: { ...currentReview, methodology: e.target.value } })}
-                               />
-                            </div>
-                            <div className="space-y-2">
-                               <label className="text-[10px] font-black text-slate-400 uppercase flex items-center gap-1"><TrendingUp size={12}/> 下一步计划</label>
-                               <textarea 
-                                 className="w-full h-24 p-4 bg-white border border-slate-200 rounded-2xl text-xs font-bold outline-none focus:border-brand-300 resize-none"
-                                 value={currentReview.nextSteps || ''}
-                                 disabled={!canEditReview}
-                                 onChange={e => updateOkrReviews({ ...okrReviews, [okr.id]: { ...currentReview, nextSteps: e.target.value } })}
-                               />
-                            </div>
-                         </div>
+                         {(() => {
+                           const krCount = okr.keyResults?.length || 0;
+                           const totalKrProgress = okr.keyResults?.reduce((sum: number, _: any, idx: number) => sum + (currentReview.krReviews?.[idx]?.progress || 0), 0) || 0;
+                           const averageKrProgress = krCount > 0 ? Math.round(totalKrProgress / krCount) : 0;
+                           
+                           return (
+                             <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+                                <div className="space-y-2">
+                                   <label className="text-[10px] font-black text-slate-400 uppercase flex items-center gap-1"><PieChart size={12}/> KR 完成度汇总</label>
+                                   <div className="w-full h-24 bg-slate-50 border border-slate-200 rounded-2xl flex flex-col items-center justify-center">
+                                      <div className="text-2xl font-black text-brand-600">{averageKrProgress}%</div>
+                                      <div className="text-[10px] text-slate-400 mt-1">根据所有 KR 进度计算</div>
+                                   </div>
+                                </div>
+                                <div className="space-y-2">
+                                   <label className="text-[10px] font-black text-slate-400 uppercase flex items-center gap-1"><MessageSquare size={12}/> 经验教训</label>
+                                   <textarea 
+                                     className="w-full h-24 p-4 bg-white border border-slate-200 rounded-2xl text-xs font-bold outline-none focus:border-brand-300 resize-none"
+                                     value={currentReview.lessonsLearned || ''}
+                                     disabled={!canEditReview}
+                                     onChange={e => updateOkrReviews({ ...okrReviews, [okr.id]: { ...currentReview, lessonsLearned: e.target.value } })}
+                                   />
+                                </div>
+                                <div className="space-y-2">
+                                   <label className="text-[10px] font-black text-slate-400 uppercase flex items-center gap-1"><FileText size={12}/> 方法论沉淀</label>
+                                   <textarea 
+                                     className="w-full h-24 p-4 bg-white border border-slate-200 rounded-2xl text-xs font-bold outline-none focus:border-brand-300 resize-none"
+                                     value={currentReview.methodology || ''}
+                                     disabled={!canEditReview}
+                                     onChange={e => updateOkrReviews({ ...okrReviews, [okr.id]: { ...currentReview, methodology: e.target.value } })}
+                                   />
+                                </div>
+                                <div className="space-y-2">
+                                   <label className="text-[10px] font-black text-slate-400 uppercase flex items-center gap-1"><TrendingUp size={12}/> 下一步计划</label>
+                                   <textarea 
+                                     className="w-full h-24 p-4 bg-white border border-slate-200 rounded-2xl text-xs font-bold outline-none focus:border-brand-300 resize-none"
+                                     value={currentReview.nextSteps || ''}
+                                     disabled={!canEditReview}
+                                     onChange={e => updateOkrReviews({ ...okrReviews, [okr.id]: { ...currentReview, nextSteps: e.target.value } })}
+                                   />
+                                </div>
+                             </div>
+                           );
+                         })()}
                       </div>
                       );
                     })() : (
