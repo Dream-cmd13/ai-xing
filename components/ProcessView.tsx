@@ -14,7 +14,7 @@ import {
 } from 'lucide-react';
 import PageToast from './PageToast';
 import { usePageToast } from '../hooks/usePageToast';
-import { canPersistProcess, getManagedDepartmentIds } from '../utils/permissions';
+import { canPersistProcess, canManageProcess, getManagedDepartmentIds } from '../utils/permissions';
 
 
 
@@ -164,7 +164,7 @@ const ProcessView: React.FC = () => {
   }, [currentUser, managedDepartmentIds.length, permissions.create]);
   const canEditCurrentProcess = useMemo(() => {
     if (!currentUser || !currentProcess) return false;
-    return permissions.update && canPersistProcess(currentProcess, currentUser, state.systemRoles || [], departments);
+    return permissions.update && canManageProcess(currentProcess, currentUser, state.systemRoles || [], departments);
   }, [currentProcess, currentUser, departments, permissions.update, state.systemRoles]);
   const canSaveProcessChanges = useMemo(() => {
     if (!currentUser) return false;
@@ -538,10 +538,13 @@ const ProcessView: React.FC = () => {
                   onMouseDown={(e) => { 
                     e.stopPropagation(); 
                     setSelectedNodeId(node.id); 
-                    setDragInfo({ nodeId: node.id, startX: e.clientX, startY: e.clientY, nodeX: node.x, nodeY: node.y }); 
+                    if (canEditCurrentProcess) {
+                      setDragInfo({ nodeId: node.id, startX: e.clientX, startY: e.clientY, nodeX: node.x, nodeY: node.y }); 
+                    }
                   }} 
                   style={{ left: displayX, top: displayY }}
-                  className={`absolute flex flex-col items-center justify-center text-center cursor-grab active:cursor-grabbing transition-shadow
+                  className={`absolute flex flex-col items-center justify-center text-center transition-shadow
+                    ${canEditCurrentProcess ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer'}
                     ${(node.type === 'start' || node.type === 'end') ? 'w-[80px] h-[80px] rounded-full' : 'w-[170px] min-h-[60px] rounded-xl p-3'}
                     ${node.type === 'start' ? 'bg-emerald-500 text-white' : node.type === 'end' ? 'bg-slate-900 text-white' : node.type === 'decision' ? 'bg-amber-50 border-2 border-amber-400' : 'bg-white border-2 border-slate-100'}
                     ${selectedNodeId === node.id ? 'ring-4 ring-brand-500/20 border-brand-500 z-30 scale-105 shadow-xl' : 'z-10 shadow-sm'}

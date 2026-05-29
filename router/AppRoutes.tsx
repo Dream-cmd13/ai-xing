@@ -106,12 +106,12 @@ export const AppRoutes: React.FC = () => {
               <Route path="org" element={<ProtectedRoute menuId="org"><OrgView /></ProtectedRoute>} />
               <Route path="okr" element={<ProtectedRoute menuId="okr"><StrategyView /></ProtectedRoute>} />
               <Route path="business-definition" element={<ProtectedRoute menuId="business-definition"><BusinessDefinitionView /></ProtectedRoute>} />
-              <Route path="weekly" element={<ProtectedRoute menuId="weekly"><WeeklyView /></ProtectedRoute>} />
+              <Route path="weekly" element={<ProtectedRoute menuId="execution"><WeeklyView /></ProtectedRoute>} />
               <Route path="user" element={<ProtectedRoute menuId="user"><UserView /></ProtectedRoute>} />
               <Route path="roles" element={<ProtectedRoute menuId="roles"><RoleQueryView /></ProtectedRoute>} />
               <Route path="task-center" element={<ProtectedRoute menuId="task-center"><TaskCenterView /></ProtectedRoute>} />
               <Route path="execution" element={<ProtectedRoute menuId="execution"><ExecutionView /></ProtectedRoute>} />
-              <Route path="review" element={<ProtectedRoute menuId="review"><ReviewView /></ProtectedRoute>} />
+              <Route path="review" element={<ProtectedRoute menuId="okr-review"><ReviewView /></ProtectedRoute>} />
               <Route path="okr-review" element={<ProtectedRoute menuId="okr-review"><OkrReviewDashboard /></ProtectedRoute>} />
               <Route path="menu-permissions" element={<ProtectedRoute menuId="menu-permissions"><MenuPermissionView /></ProtectedRoute>} />
             </Route>
