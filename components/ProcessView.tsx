@@ -462,6 +462,7 @@ const ProcessView: React.FC = () => {
             </div>
           </div>
         )}
+        {LeaveModal}
       </div>
     );
   }
