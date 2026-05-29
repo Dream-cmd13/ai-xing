@@ -451,10 +451,19 @@ const ReviewView: React.FC = () => {
   }, [activeTab, selectedDept, selectedMonth]);
 
   const appendContentToSummary = (sectionTitle: string, sectionContent: string) => {
+    const managedTitles = ['本期任务汇总', '本月周复盘记录汇总'];
+    const escapeRegex = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     const normalized = sectionContent.trim();
     const nextContent = normalized ? `${sectionTitle}：\n${normalized}` : `${sectionTitle}：\n暂无内容`;
-    const prefix = reviewContent.trim();
-    updateReviewContent(prefix ? `${prefix}\n\n${nextContent}` : nextContent);
+    const otherTitles = managedTitles.filter((title) => title !== sectionTitle).map(escapeRegex);
+    const nextTitlePattern = otherTitles.length > 0 ? `(?=\\n\\n(?:${otherTitles.join('|')})：\\n|$)` : '(?=$)';
+    const sectionPattern = new RegExp(`${escapeRegex(sectionTitle)}：\\n[\\s\\S]*?${nextTitlePattern}`, 'g');
+    const cleaned = reviewContent
+      .replace(sectionPattern, '')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim();
+
+    updateReviewContent(cleaned ? `${cleaned}\n\n${nextContent}` : nextContent);
   };
 
   const loadDeptTasks = () => {
