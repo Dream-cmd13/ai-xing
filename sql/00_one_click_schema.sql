@@ -248,12 +248,23 @@ CREATE INDEX IF NOT EXISTS idx_processes_created_by ON public.processes(created_
 -- 4) Security helper functions
 -- =========================
 
+CREATE OR REPLACE FUNCTION public.current_auth_username()
+RETURNS TEXT AS $$
+  SELECT NULLIF(
+    lower(split_part(COALESCE(auth.jwt()->>'email', current_setting('request.jwt.claim.email', true), ''), '@', 1)),
+    ''
+  );
+$$ LANGUAGE sql STABLE;
+
 CREATE OR REPLACE FUNCTION public.is_admin()
 RETURNS BOOLEAN AS $$
 BEGIN
   RETURN EXISTS (
     SELECT 1 FROM public.users u
-    WHERE u.auth_id = auth.uid() AND (
+    WHERE (
+      u.auth_id = auth.uid()
+      OR lower(u.username) = public.current_auth_username()
+    ) AND (
       u.role = 'Admin'
       OR (
         u.system_role_ids IS NOT NULL 
@@ -277,6 +288,8 @@ RETURNS TEXT AS $$
   END
   FROM public.users
   WHERE auth_id = auth.uid()
+     OR lower(username) = public.current_auth_username()
+  ORDER BY CASE WHEN auth_id = auth.uid() THEN 0 ELSE 1 END
   LIMIT 1;
 $$ LANGUAGE sql SECURITY DEFINER STABLE;
 
@@ -296,12 +309,22 @@ $$ LANGUAGE plpgsql SECURITY DEFINER STABLE;
 
 CREATE OR REPLACE FUNCTION public.current_user_id()
 RETURNS TEXT AS $$
-  SELECT id FROM public.users WHERE auth_id = auth.uid() LIMIT 1;
+  SELECT id
+  FROM public.users
+  WHERE auth_id = auth.uid()
+     OR lower(username) = public.current_auth_username()
+  ORDER BY CASE WHEN auth_id = auth.uid() THEN 0 ELSE 1 END
+  LIMIT 1;
 $$ LANGUAGE sql SECURITY DEFINER STABLE;
 
 CREATE OR REPLACE FUNCTION public.current_user_department_id()
 RETURNS TEXT AS $$
-  SELECT department_id FROM public.users WHERE auth_id = auth.uid() LIMIT 1;
+  SELECT department_id
+  FROM public.users
+  WHERE auth_id = auth.uid()
+     OR lower(username) = public.current_auth_username()
+  ORDER BY CASE WHEN auth_id = auth.uid() THEN 0 ELSE 1 END
+  LIMIT 1;
 $$ LANGUAGE sql SECURITY DEFINER STABLE;
 
 CREATE OR REPLACE FUNCTION public.current_user_pad_permissions()
@@ -309,6 +332,8 @@ RETURNS JSONB AS $$
   SELECT COALESCE(pad_permissions, '[]'::jsonb)
   FROM public.users
   WHERE auth_id = auth.uid()
+     OR lower(username) = public.current_auth_username()
+  ORDER BY CASE WHEN auth_id = auth.uid() THEN 0 ELSE 1 END
   LIMIT 1;
 $$ LANGUAGE sql SECURITY DEFINER STABLE;
 
@@ -334,6 +359,8 @@ BEGIN
   INTO user_record
   FROM public.users
   WHERE auth_id = auth.uid()
+     OR lower(username) = public.current_auth_username()
+  ORDER BY CASE WHEN auth_id = auth.uid() THEN 0 ELSE 1 END
   LIMIT 1;
 
   IF user_record IS NULL THEN
@@ -378,6 +405,7 @@ RETURNS BOOLEAN AS $$
 DECLARE
   current_department_id TEXT;
   pad_permissions JSONB;
+  pad_department_id TEXT;
 BEGIN
   IF public.is_admin() THEN
     RETURN true;
@@ -396,12 +424,53 @@ BEGIN
     RETURN true;
   END IF;
 
-  pad_permissions := public.current_user_pad_permissions();
-  RETURN EXISTS (
+  IF current_department_id IS NOT NULL AND EXISTS (
     SELECT 1
-    FROM jsonb_array_elements_text(COALESCE(pad_permissions, '[]'::jsonb)) AS permission_value(value)
-    WHERE permission_value.value = target_department_id
-  );
+    FROM public.departments
+    WHERE id = target_department_id
+      AND public.find_department_in_tree(
+        COALESCE(sub_departments, '[]'::jsonb),
+        current_department_id
+      ) IS NOT NULL
+  ) THEN
+    RETURN true;
+  END IF;
+
+  pad_permissions := public.current_user_pad_permissions();
+  FOR pad_department_id IN
+    SELECT value
+    FROM jsonb_array_elements_text(COALESCE(pad_permissions, '[]'::jsonb))
+  LOOP
+    IF pad_department_id = target_department_id THEN
+      RETURN true;
+    END IF;
+
+    IF EXISTS (
+      SELECT 1
+      FROM public.departments
+      WHERE id = target_department_id
+        AND public.find_department_in_tree(
+          COALESCE(sub_departments, '[]'::jsonb),
+          pad_department_id
+        ) IS NOT NULL
+    ) THEN
+      RETURN true;
+    END IF;
+  END LOOP;
+
+  RETURN false;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER STABLE;
+
+CREATE OR REPLACE FUNCTION public.current_user_can_save_departments()
+RETURNS BOOLEAN AS $$
+BEGIN
+  RETURN public.is_admin()
+    OR public.has_menu_permission('org', 'create')
+    OR public.has_menu_permission('org', 'update')
+    OR public.has_menu_permission('okr', 'create')
+    OR public.has_menu_permission('okr', 'update')
+    OR public.has_menu_permission('okr-review', 'update');
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER STABLE;
 
@@ -544,6 +613,71 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql STABLE;
 
+CREATE OR REPLACE FUNCTION public.current_user_can_manage_department_node(
+  p_node JSONB,
+  p_current_user_id TEXT
+)
+RETURNS BOOLEAN AS $$
+DECLARE
+  node_id TEXT;
+  current_department_id TEXT;
+  pad_permissions JSONB;
+BEGIN
+  IF p_node IS NULL OR jsonb_typeof(p_node) <> 'object' THEN
+    RETURN false;
+  END IF;
+
+  node_id := p_node->>'id';
+  current_department_id := public.current_user_department_id();
+
+  IF COALESCE(p_node->>'managerUserId', '') = COALESCE(p_current_user_id, '') THEN
+    RETURN true;
+  END IF;
+
+  IF node_id IS NOT NULL
+     AND current_department_id IS NOT NULL
+     AND node_id = current_department_id THEN
+    RETURN true;
+  END IF;
+
+  pad_permissions := public.current_user_pad_permissions();
+  RETURN EXISTS (
+    SELECT 1
+    FROM jsonb_array_elements_text(COALESCE(pad_permissions, '[]'::jsonb)) AS permission_value(value)
+    WHERE permission_value.value = node_id
+  );
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER STABLE;
+
+CREATE OR REPLACE FUNCTION public.current_user_can_manage_department_tree(
+  p_node JSONB,
+  p_current_user_id TEXT
+)
+RETURNS BOOLEAN AS $$
+DECLARE
+  child_node JSONB;
+BEGIN
+  IF p_node IS NULL OR jsonb_typeof(p_node) <> 'object' THEN
+    RETURN false;
+  END IF;
+
+  IF public.current_user_can_manage_department_node(p_node, p_current_user_id) THEN
+    RETURN true;
+  END IF;
+
+  FOR child_node IN
+    SELECT value
+    FROM jsonb_array_elements(COALESCE(p_node->'subDepartments', '[]'::jsonb))
+  LOOP
+    IF public.current_user_can_manage_department_tree(child_node, p_current_user_id) THEN
+      RETURN true;
+    END IF;
+  END LOOP;
+
+  RETURN false;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER STABLE;
+
 CREATE OR REPLACE FUNCTION public.sanitize_new_department_subtree_for_manager(
   p_node JSONB
 )
@@ -596,21 +730,13 @@ BEGIN
   END IF;
 
   IF p_next_node IS NULL THEN
-    IF COALESCE(p_previous_node->>'managerUserId', '') = COALESCE(p_current_user_id, '')
-       OR (
-         public.is_manager()
-         AND COALESCE(p_previous_node->>'id', '') = public.current_user_department_id()
-       ) THEN
+    IF public.current_user_can_manage_department_node(p_previous_node, p_current_user_id) THEN
       RETURN NULL;
     END IF;
     RETURN p_previous_node;
   END IF;
 
-  managed_here := COALESCE(p_previous_node->>'managerUserId', '') = COALESCE(p_current_user_id, '')
-    OR (
-      public.is_manager()
-      AND COALESCE(p_previous_node->>'id', '') = public.current_user_department_id()
-    );
+  managed_here := public.current_user_can_manage_department_node(p_previous_node, p_current_user_id);
 
   IF managed_here THEN
     FOR next_child IN
@@ -635,6 +761,12 @@ BEGIN
 
       previous_child := NULL;
     END LOOP;
+
+    IF public.has_menu_permission('org', 'update') THEN
+      RETURN jsonb_strip_nulls(
+        p_next_node || jsonb_build_object('subDepartments', merged_children)
+      );
+    END IF;
 
     RETURN jsonb_strip_nulls(
       (p_next_node - 'managerUserId' - 'managerName' - 'subDepartments')
@@ -724,6 +856,46 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER STABLE;
 
+CREATE OR REPLACE FUNCTION public.current_user_can_manage_task(
+  task_department_id TEXT,
+  task_participant_ids JSONB,
+  task_approver_ids JSONB
+)
+RETURNS BOOLEAN AS $$
+DECLARE
+  current_id TEXT;
+BEGIN
+  IF public.is_admin() THEN
+    RETURN true;
+  END IF;
+
+  current_id := public.current_user_id();
+
+  IF task_department_id IS NOT NULL
+     AND task_department_id = public.current_user_department_id() THEN
+    RETURN true;
+  END IF;
+
+  IF EXISTS (
+    SELECT 1
+    FROM jsonb_array_elements_text(COALESCE(task_participant_ids, '[]'::jsonb)) AS participant_value(value)
+    WHERE participant_value.value = current_id
+  ) THEN
+    RETURN true;
+  END IF;
+
+  IF EXISTS (
+    SELECT 1
+    FROM jsonb_array_elements_text(COALESCE(task_approver_ids, '[]'::jsonb)) AS approver_value(value)
+    WHERE approver_value.value = current_id
+  ) THEN
+    RETURN true;
+  END IF;
+
+  RETURN false;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER STABLE;
+
 CREATE OR REPLACE FUNCTION public.current_user_can_view_process(
   process_department_id TEXT,
   process_created_by TEXT
@@ -767,7 +939,7 @@ BEGIN
     RAISE EXCEPTION '未识别当前登录用户，无法保存部门';
   END IF;
 
-  IF NOT public.is_admin() AND NOT public.is_manager() THEN
+  IF NOT public.current_user_can_save_departments() THEN
     RAISE EXCEPTION '无权限保存部门';
   END IF;
 
@@ -782,17 +954,11 @@ BEGIN
     ) THEN
       expected_row_version := COALESCE((previous_item->>'rowVersion')::BIGINT, 0);
 
-      IF NOT public.is_admin() THEN
+      IF NOT public.is_admin() AND NOT public.has_menu_permission('org', 'update') THEN
         IF NOT EXISTS (
           SELECT 1
           FROM jsonb_array_elements(COALESCE(p_previous_departments, '[]'::jsonb)) AS managed_roots(value)
-          WHERE (
-            COALESCE(managed_roots.value->>'managerUserId', '') = current_id
-            OR public.department_tree_has_manager(
-              COALESCE(managed_roots.value->'subDepartments', '[]'::jsonb),
-              current_id
-            )
-          )
+          WHERE public.current_user_can_manage_department_tree(managed_roots.value, current_id)
           AND public.find_department_in_tree(
             COALESCE(managed_roots.value->'subDepartments', '[]'::jsonb),
             previous_item->>'id'
@@ -823,17 +989,11 @@ BEGIN
     LIMIT 1;
 
     IF previous_item IS NULL THEN
-      IF NOT public.is_admin() THEN
+      IF NOT public.is_admin() AND NOT public.has_menu_permission('org', 'create') THEN
         IF NOT EXISTS (
           SELECT 1
           FROM jsonb_array_elements(COALESCE(p_next_departments, '[]'::jsonb)) AS managed_roots(value)
-          WHERE (
-            COALESCE(managed_roots.value->>'managerUserId', '') = current_id
-            OR public.department_tree_has_manager(
-              COALESCE(managed_roots.value->'subDepartments', '[]'::jsonb),
-              current_id
-            )
-          )
+          WHERE public.current_user_can_manage_department_tree(managed_roots.value, current_id)
           AND public.find_department_in_tree(
             COALESCE(managed_roots.value->'subDepartments', '[]'::jsonb),
             next_item->>'id'
@@ -887,7 +1047,9 @@ BEGIN
 
       IF previous_snapshot IS DISTINCT FROM next_snapshot THEN
         IF NOT public.is_admin() THEN
-          IF COALESCE(previous_item->>'managerUserId', '') <> current_id
+          IF NOT public.has_menu_permission('org', 'update')
+             AND NOT public.current_user_can_manage_department_tree(previous_item, current_id)
+             AND COALESCE(previous_item->>'managerUserId', '') <> current_id
              AND NOT public.department_tree_has_manager(
                COALESCE(previous_item->'subDepartments', '[]'::jsonb),
                current_id
@@ -902,27 +1064,29 @@ BEGIN
             RAISE EXCEPTION '仅允许修改自己负责的部门';
           END IF;
 
-          next_item := public.merge_department_subtree_for_manager(
-            previous_item,
-            next_item,
-            current_id
-          );
+          IF NOT public.has_menu_permission('org', 'update') THEN
+            next_item := public.merge_department_subtree_for_manager(
+              previous_item,
+              next_item,
+              current_id
+            );
+          END IF;
           
           next_snapshot := jsonb_strip_nulls(next_item - 'rowVersion' - 'updatedAt');
         END IF;
 
         IF previous_snapshot IS DISTINCT FROM next_snapshot THEN
-          expected_row_version := COALESCE((previous_item->>'rowVersion')::BIGINT, 0);
+          expected_row_version := COALESCE((previous_item->>'rowVersion')::BIGINT, (next_item->>'rowVersion')::BIGINT, 0);
 
           UPDATE public.departments
         SET
           name = COALESCE(next_item->>'name', ''),
           manager_name = CASE
-            WHEN public.is_admin() THEN COALESCE(next_item->>'managerName', '')
+            WHEN public.is_admin() OR public.has_menu_permission('org', 'update') THEN COALESCE(next_item->>'managerName', '')
             ELSE COALESCE(previous_item->>'managerName', '')
           END,
           manager_user_id = CASE
-            WHEN public.is_admin() THEN NULLIF(next_item->>'managerUserId', '')
+            WHEN public.is_admin() OR public.has_menu_permission('org', 'update') THEN NULLIF(next_item->>'managerUserId', '')
             ELSE NULLIF(previous_item->>'managerUserId', '')
           END,
           responsibilities = COALESCE(next_item->>'responsibilities', ''),
@@ -1133,7 +1297,9 @@ DECLARE
   previous_snapshot JSONB;
   next_snapshot JSONB;
 BEGIN
-  IF NOT public.is_admin() THEN
+  IF NOT public.is_admin()
+     AND NOT public.has_menu_permission('user', 'update')
+     AND NOT public.has_menu_permission('menu-permissions', 'update') THEN
     RAISE EXCEPTION '无权限保存用户';
   END IF;
 
@@ -1299,7 +1465,8 @@ DECLARE
   previous_snapshot JSONB;
   next_snapshot JSONB;
 BEGIN
-  IF NOT public.is_admin() THEN
+  IF NOT public.is_admin()
+     AND NOT public.has_menu_permission('menu-permissions', 'update') THEN
     RAISE EXCEPTION '无权限保存系统角色';
   END IF;
 
@@ -1542,22 +1709,47 @@ CREATE POLICY users_select ON public.users FOR SELECT TO authenticated
   USING (
     public.is_admin()
     OR public.is_manager()
+    OR public.has_menu_permission('user', 'view')
+    OR public.has_menu_permission('menu-permissions', 'view')
     OR auth_id = auth.uid()
+    OR lower(username) = public.current_auth_username()
     OR department_id = public.current_user_department_id()
   );
-CREATE POLICY users_insert ON public.users FOR INSERT TO authenticated WITH CHECK (public.is_admin());
+CREATE POLICY users_insert ON public.users FOR INSERT TO authenticated
+  WITH CHECK (public.is_admin() OR public.has_menu_permission('user', 'create'));
 CREATE POLICY users_update ON public.users FOR UPDATE TO authenticated
-  USING (public.is_admin())
-  WITH CHECK (public.is_admin());
-CREATE POLICY users_delete ON public.users FOR DELETE TO authenticated USING (public.is_admin());
+  USING (
+    public.is_admin()
+    OR public.has_menu_permission('user', 'update')
+    OR public.has_menu_permission('menu-permissions', 'update')
+  )
+  WITH CHECK (
+    public.is_admin()
+    OR public.has_menu_permission('user', 'update')
+    OR public.has_menu_permission('menu-permissions', 'update')
+  );
+CREATE POLICY users_delete ON public.users FOR DELETE TO authenticated
+  USING (public.is_admin() OR public.has_menu_permission('user', 'update'));
 
 CREATE POLICY departments_select ON public.departments FOR SELECT TO authenticated
   USING (public.current_user_has_department_visibility(id));
-CREATE POLICY departments_insert ON public.departments FOR INSERT TO authenticated WITH CHECK (public.is_admin());
+CREATE POLICY departments_insert ON public.departments FOR INSERT TO authenticated
+  WITH CHECK (public.is_admin() OR public.has_menu_permission('org', 'create'));
 CREATE POLICY departments_update ON public.departments FOR UPDATE TO authenticated
-  USING (public.is_admin())
-  WITH CHECK (public.is_admin());
-CREATE POLICY departments_delete ON public.departments FOR DELETE TO authenticated USING (public.is_admin());
+  USING (
+    public.is_admin()
+    OR public.has_menu_permission('org', 'update')
+    OR public.has_menu_permission('okr', 'update')
+    OR public.has_menu_permission('okr-review', 'update')
+  )
+  WITH CHECK (
+    public.is_admin()
+    OR public.has_menu_permission('org', 'update')
+    OR public.has_menu_permission('okr', 'update')
+    OR public.has_menu_permission('okr-review', 'update')
+  );
+CREATE POLICY departments_delete ON public.departments FOR DELETE TO authenticated
+  USING (public.is_admin() OR public.has_menu_permission('org', 'update'));
 
 CREATE POLICY processes_select ON public.processes FOR SELECT TO authenticated USING (true);
 CREATE POLICY processes_insert ON public.processes FOR INSERT TO authenticated WITH CHECK (true);
@@ -1565,8 +1757,23 @@ CREATE POLICY processes_update ON public.processes FOR UPDATE TO authenticated U
 CREATE POLICY processes_delete ON public.processes FOR DELETE TO authenticated USING (true);
 
 CREATE POLICY strategy_select ON public.strategy FOR SELECT TO authenticated USING (true);
-CREATE POLICY strategy_insert ON public.strategy FOR INSERT TO authenticated WITH CHECK (public.is_admin() OR public.has_menu_permission('business-definition', 'create'));
-CREATE POLICY strategy_update ON public.strategy FOR UPDATE TO authenticated USING (public.is_admin() OR public.has_menu_permission('business-definition', 'update')) WITH CHECK (public.is_admin() OR public.has_menu_permission('business-definition', 'update'));
+CREATE POLICY strategy_insert ON public.strategy FOR INSERT TO authenticated
+  WITH CHECK (
+    public.is_admin()
+    OR public.has_menu_permission('business-definition', 'create')
+    OR public.has_menu_permission('okr', 'create')
+  );
+CREATE POLICY strategy_update ON public.strategy FOR UPDATE TO authenticated
+  USING (
+    public.is_admin()
+    OR public.has_menu_permission('business-definition', 'update')
+    OR public.has_menu_permission('okr', 'update')
+  )
+  WITH CHECK (
+    public.is_admin()
+    OR public.has_menu_permission('business-definition', 'update')
+    OR public.has_menu_permission('okr', 'update')
+  );
 CREATE POLICY strategy_delete ON public.strategy FOR DELETE TO authenticated USING (public.is_admin());
 
 CREATE POLICY businesses_select ON public.businesses FOR SELECT TO authenticated USING (true);
@@ -1601,39 +1808,53 @@ CREATE POLICY tasks_insert ON public.tasks FOR INSERT TO authenticated
 CREATE POLICY tasks_update ON public.tasks FOR UPDATE TO authenticated
   USING (
     public.is_admin()
-    OR public.has_menu_permission('task-center', 'update')
-    OR public.has_menu_permission('execution', 'update')
-    OR public.is_department_manager(department_id)
-    OR created_by = public.current_user_id()
+    OR (
+      (
+        public.has_menu_permission('task-center', 'update')
+        OR public.has_menu_permission('execution', 'update')
+      )
+      AND public.current_user_can_manage_task(department_id, participant_ids, approver_ids)
+    )
   )
   WITH CHECK (
     public.is_admin()
-    OR public.has_menu_permission('task-center', 'update')
-    OR public.has_menu_permission('execution', 'update')
-    OR public.is_department_manager(department_id)
     OR (
-      created_by = public.current_user_id()
-      AND department_id = public.current_user_department_id()
+      (
+        public.has_menu_permission('task-center', 'update')
+        OR public.has_menu_permission('execution', 'update')
+      )
+      AND public.current_user_can_manage_task(department_id, participant_ids, approver_ids)
     )
   );
 CREATE POLICY tasks_delete ON public.tasks FOR DELETE TO authenticated
   USING (
     public.is_admin()
-    OR public.has_menu_permission('task-center', 'update')
-    OR public.has_menu_permission('execution', 'update')
-    OR public.is_department_manager(department_id)
-    OR created_by = public.current_user_id()
+    OR (
+      (
+        public.has_menu_permission('task-center', 'update')
+        OR public.has_menu_permission('execution', 'update')
+      )
+      AND public.current_user_can_manage_task(department_id, participant_ids, approver_ids)
+    )
   );
 
 CREATE POLICY system_roles_select ON public.system_roles FOR SELECT TO authenticated USING (true);
-CREATE POLICY system_roles_insert ON public.system_roles FOR INSERT TO authenticated WITH CHECK (public.is_admin());
-CREATE POLICY system_roles_update ON public.system_roles FOR UPDATE TO authenticated USING (public.is_admin()) WITH CHECK (public.is_admin());
-CREATE POLICY system_roles_delete ON public.system_roles FOR DELETE TO authenticated USING (public.is_admin());
+CREATE POLICY system_roles_insert ON public.system_roles FOR INSERT TO authenticated
+  WITH CHECK (public.is_admin() OR public.has_menu_permission('menu-permissions', 'create'));
+CREATE POLICY system_roles_update ON public.system_roles FOR UPDATE TO authenticated
+  USING (public.is_admin() OR public.has_menu_permission('menu-permissions', 'update'))
+  WITH CHECK (public.is_admin() OR public.has_menu_permission('menu-permissions', 'update'));
+CREATE POLICY system_roles_delete ON public.system_roles FOR DELETE TO authenticated
+  USING (public.is_admin() OR public.has_menu_permission('menu-permissions', 'update'));
 
 CREATE POLICY settings_select ON public.settings FOR SELECT TO authenticated USING (true);
-CREATE POLICY settings_insert ON public.settings FOR INSERT TO authenticated WITH CHECK (public.is_admin());
-CREATE POLICY settings_update ON public.settings FOR UPDATE TO authenticated USING (public.is_admin()) WITH CHECK (public.is_admin());
-CREATE POLICY settings_delete ON public.settings FOR DELETE TO authenticated USING (public.is_admin());
+CREATE POLICY settings_insert ON public.settings FOR INSERT TO authenticated
+  WITH CHECK (public.is_admin() OR public.has_menu_permission('system-config', 'create'));
+CREATE POLICY settings_update ON public.settings FOR UPDATE TO authenticated
+  USING (public.is_admin() OR public.has_menu_permission('system-config', 'update'))
+  WITH CHECK (public.is_admin() OR public.has_menu_permission('system-config', 'update'));
+CREATE POLICY settings_delete ON public.settings FOR DELETE TO authenticated
+  USING (public.is_admin() OR public.has_menu_permission('system-config', 'update'));
 
 -- =========================
 -- 6) Realtime publication

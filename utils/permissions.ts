@@ -83,6 +83,26 @@ const collectDepartmentIds = (department: Department): string[] => {
   return ids;
 };
 
+const getScopedDepartmentIds = (
+  currentUser: User,
+  departments: Department[] = []
+): string[] => {
+  const scopedRoots: Department[] = [];
+  const addDepartmentScope = (departmentId: string | undefined) => {
+    if (!departmentId) return;
+    const department = findDepartmentById(departments, departmentId);
+    if (department) scopedRoots.push(department);
+  };
+
+  addDepartmentScope(currentUser.departmentId);
+  (currentUser.padPermissions || []).forEach(addDepartmentScope);
+  scopedRoots.push(...getManagedDepartments(currentUser, departments));
+
+  return Array.from(
+    new Set(scopedRoots.flatMap((department) => collectDepartmentIds(department)))
+  );
+};
+
 export const getManagedDepartments = (
   currentUser: User,
   departments: Department[] = []
@@ -101,11 +121,6 @@ export const getPrimaryManagedDepartmentId = (
   currentUser: User,
   departments: Department[] = []
 ): string | undefined => getManagedDepartmentIds(currentUser, departments)[0];
-
-const isManagedDepartment = (targetDepartmentId: string | undefined, currentUser: User, departments: Department[] = []): boolean => {
-  if (!targetDepartmentId) return false;
-  return getManagedDepartmentIds(currentUser, departments).includes(targetDepartmentId);
-};
 
 export const canViewTask = (task: PADEntry, currentUser: User, users: User[], systemRoles: SystemRole[] = [], departments: Department[] = []): boolean => {
   if (isAdminUser(currentUser, systemRoles) || isManagerUser(currentUser)) return true;
@@ -131,9 +146,10 @@ export const canManageTask = (
   departments: Department[] = []
 ): boolean => {
   if (isAdminUser(currentUser, systemRoles)) return true;
-  if (hasPermission(currentUser, systemRoles, 'task-center', 'update') || hasPermission(currentUser, systemRoles, 'execution', 'update')) return true;
-  if (isManagerUser(currentUser) && isManagedDepartment(task.departmentId, currentUser, departments)) return true;
-  return task.createdBy === currentUser.id;
+  if (task.departmentId && currentUser.departmentId && task.departmentId === currentUser.departmentId) return true;
+  if (task.participantIds?.includes(currentUser.id)) return true;
+  if (task.approverIds?.includes(currentUser.id)) return true;
+  return false;
 };
 
 export const canManageProcess = (
@@ -165,8 +181,7 @@ export const canManageDepartment = (
   departments: Department[] = []
 ): boolean => {
   if (isAdminUser(currentUser, systemRoles)) return true;
-  if (!isManagerUser(currentUser)) return false;
-  return isManagedDepartment(department.id, currentUser, departments);
+  return getScopedDepartmentIds(currentUser, departments).includes(department.id);
 };
 
 export const canManageReview = (

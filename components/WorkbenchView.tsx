@@ -301,6 +301,7 @@ const WorkbenchView: React.FC = () => {
           status: 'draft',
           priority: 'medium',
           ownerId: currentUser.id,
+          departmentId: currentUser.departmentId,
           visibility: 'public',
           targetWeeks: taskModal.weekId ? [taskModal.weekId] : [],
           startDate: Date.now(),

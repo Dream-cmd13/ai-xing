@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { PADEntry, User, Department, AISettings } from '../types';
 import { X, AlertCircle, Wand2, Loader2, Sparkles, CheckCircle, Trash2 } from 'lucide-react';
 import { checkPADQuality } from '../services/gemini';
@@ -38,6 +38,17 @@ const TaskModal: React.FC<TaskModalProps> = ({
   const [checking, setChecking] = useState(false);
   const [aiResult, setAiResult] = useState<string | null>(null);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const flatDepartments = useMemo(() => {
+    const list: Department[] = [];
+    const collect = (items: Department[]) => {
+      items.forEach((department) => {
+        list.push(department);
+        collect(department.subDepartments || []);
+      });
+    };
+    collect(departments);
+    return list;
+  }, [departments]);
 
   useEffect(() => {
     if (isOpen) {
@@ -74,6 +85,10 @@ const TaskModal: React.FC<TaskModalProps> = ({
     }
     if (!data.ownerId) {
       setError('请选择负责人');
+      return;
+    }
+    if (!data.departmentId) {
+      setError('请选择所属部门');
       return;
     }
     if (!data.startDate) {
@@ -326,8 +341,8 @@ const TaskModal: React.FC<TaskModalProps> = ({
                 value={data.departmentId || ''}
                 onChange={e => setData({ ...data, departmentId: e.target.value })}
               >
-                <option value="">未分配</option>
-                {departments.map(dept => (
+                <option value="" disabled>请选择部门</option>
+                {flatDepartments.map(dept => (
                   <option key={dept.id} value={dept.id}>{dept.name}</option>
                 ))}
               </select>

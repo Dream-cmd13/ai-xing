@@ -9,7 +9,7 @@ import { usePermissions } from '../hooks/usePermissions';
 import { AppState, User, Department, MenuPermission, UserRole } from '../types';
 import { addUser as addDbUser, updateUser as updateDbUser, deleteUser as deleteDbUser } from '../data';
 import { supabase } from '../supabase';
-import { getUserRoleLabel, isAdminUser } from '../utils/permissions';
+import { getUserRoleLabel } from '../utils/permissions';
 import { 
   Plus, Trash2, ShieldCheck, User as UserIcon, Key, RotateCcw,
   Building2, EyeOff, Save, WifiOff, CheckCircle, Lock, Unlock, AlertTriangle, UserMinus,
@@ -68,8 +68,8 @@ const UserView: React.FC = () => {
   };
 
   const roles = state.systemRoles || [];
-  const canManageUsers = !!currentUser && permissions.update && isAdminUser(currentUser, state.systemRoles || []);
-  const canCreateUsers = !!currentUser && permissions.create && isAdminUser(currentUser, state.systemRoles || []);
+  const canManageUsers = !!currentUser && permissions.update;
+  const canCreateUsers = !!currentUser && permissions.create;
 
   const flatDepts = useMemo(() => {
     const list: Department[] = [];

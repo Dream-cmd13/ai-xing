@@ -7,7 +7,7 @@ import { usePermissions } from '../hooks/usePermissions';
 
 import { Department, ProcessNode, ProcessDefinition, User, MenuPermission } from '../types';
 import { addDepartment as addDbDepartment, updateDepartment as updateDbDepartment, deleteDepartment as deleteDbDepartment } from '../data';
-import { canManageDepartment, isAdminUser } from '../utils/permissions';
+import { canManageDepartment } from '../utils/permissions';
 import { 
   Plus, Trash2, Building2, ChevronRight, X, Briefcase, ChevronDown, 
   ExternalLink, Search, User as UserIcon, Check, Minus, Save, WifiOff, CheckCircle, Info, Shield, Users, AlertCircle, Lock, Loader2
@@ -111,13 +111,13 @@ const OrgView: React.FC = () => {
     return Array.from(roles).sort();
   }, [departments]);
 
+  const canCreateDepartment = !!currentUser && permissions.create;
   const canEditDepartment = (department: Department) =>
     !!currentUser && permissions.update && canManageDepartment(department, currentUser, state.systemRoles || [], state.departments);
 
-  const isAdmin = !!currentUser && isAdminUser(currentUser, state.systemRoles || []);
-  const canEditDepartmentManager = (department: Department) => isAdmin && canEditDepartment(department);
+  const canEditDepartmentManager = (department: Department) => canEditDepartment(department);
   const canManageDepartmentStructure = (department: Department, inheritedPermission = false) =>
-    isAdmin || inheritedPermission || canEditDepartment(department);
+    inheritedPermission || canEditDepartment(department);
 
   const updateDeptRecursive = (depts: Department[], id: string, updater: (d: Department) => Department): Department[] => {
     return depts.map(d => {
@@ -226,7 +226,7 @@ const OrgView: React.FC = () => {
     if (!matchesSearch(d, searchQuery)) return null;
 
     const canManageStructure = canManageDepartmentStructure(d, inheritedStructurePermission);
-    const canDeleteDepartmentNode = isAdmin || (canManageStructure && depth > 0);
+    const canDeleteDepartmentNode = canManageStructure && (permissions.update || depth > 0);
 
     return (
       <div key={d.id} className="relative w-full">
@@ -280,8 +280,8 @@ const OrgView: React.FC = () => {
                   <option value="">选择负责人...</option>
                   {users.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
                 </select>
-                {!isAdmin && canEditDepartment(d) && (
-                  <p className="text-[9px] font-bold text-slate-400">部门负责人仅管理员可调整。</p>
+                {!canEditDepartmentManager(d) && (
+                  <p className="text-[9px] font-bold text-slate-400">需要组织修改权限才可调整部门负责人。</p>
                 )}
               </div>
               <div className="space-y-1">
@@ -422,12 +422,12 @@ const OrgView: React.FC = () => {
         <div className="flex flex-col md:flex-row gap-4 items-stretch md:items-center w-full md:w-auto">
            <div className="relative w-full md:w-auto"><input className="pl-10 pr-4 py-2.5 bg-slate-50 border rounded-xl text-xs font-bold outline-none focus:border-brand-500 w-full md:w-64 shadow-inner" placeholder="搜索部门..." value={searchQuery} onChange={e=>setSearchQuery(e.target.value)}/><Search size={14} className="absolute left-4 top-3.5 text-slate-300"/></div>
            <div className="flex gap-2 w-full md:w-auto">
-             <button disabled={!isAdmin} onClick={() => setShowAddRootModal(true)} className={`flex-1 md:flex-none justify-center px-6 py-2.5 rounded-xl text-xs font-black uppercase transition-all flex items-center gap-2 border ${isAdmin ? 'bg-slate-100 text-slate-600 hover:bg-slate-200 border-slate-200' : 'bg-slate-100 text-slate-300 border-slate-100 cursor-not-allowed'}`}><Plus size={16}/> 创建根部门</button>
-             {(permissions.update || isAdmin) && (
+             <button disabled={!canCreateDepartment} onClick={() => setShowAddRootModal(true)} className={`flex-1 md:flex-none justify-center px-6 py-2.5 rounded-xl text-xs font-black uppercase transition-all flex items-center gap-2 border ${canCreateDepartment ? 'bg-slate-100 text-slate-600 hover:bg-slate-200 border-slate-200' : 'bg-slate-100 text-slate-300 border-slate-100 cursor-not-allowed'}`}><Plus size={16}/> 创建根部门</button>
+             {permissions.update && (
                <button 
                  onClick={onSaveDepartments} 
-                 disabled={isSaving || (!isAdmin && !currentUser)} 
-                 className={`flex-1 md:flex-none justify-center px-6 py-2.5 rounded-xl text-xs font-black uppercase flex items-center gap-2 transition-all shadow-md ${isDirty ? 'bg-brand-600 text-white hover:bg-brand-700 shadow-brand-100' : 'bg-slate-100 text-slate-400 cursor-default'} ${(!isAdmin && !currentUser) ? 'opacity-50 cursor-not-allowed' : ''}`}
+                 disabled={isSaving || !currentUser}
+                 className={`flex-1 md:flex-none justify-center px-6 py-2.5 rounded-xl text-xs font-black uppercase flex items-center gap-2 transition-all shadow-md ${isDirty ? 'bg-brand-600 text-white hover:bg-brand-700 shadow-brand-100' : 'bg-slate-100 text-slate-400 cursor-default'} ${!currentUser ? 'opacity-50 cursor-not-allowed' : ''}`}
                >
                  {isSaving ? <Loader2 className="animate-spin" size={16}/> : <Save size={16} />} 
                  {isDirty ? '立即保存' : '已是最新'}
@@ -453,7 +453,11 @@ const OrgView: React.FC = () => {
                 <Building2 size={32}/>
               </div>
               <p className="text-slate-400 font-bold text-sm mb-4">暂无组织架构数据</p>
-              <button onClick={() => setShowAddRootModal(true)} className="px-6 py-2 bg-brand-600 text-white rounded-xl font-black text-xs uppercase shadow-lg shadow-brand-100">立即创建根部门</button>
+              <button
+                onClick={() => setShowAddRootModal(true)}
+                disabled={!canCreateDepartment}
+                className="px-6 py-2 bg-brand-600 text-white rounded-xl font-black text-xs uppercase shadow-lg shadow-brand-100 disabled:opacity-50 disabled:cursor-not-allowed"
+              >立即创建根部门</button>
             </div>
           )}
         </div>
@@ -535,7 +539,7 @@ const OrgView: React.FC = () => {
              </div>
 
              {!canAssignRoleMembers && (
-               <p className="mt-4 text-[10px] font-bold text-slate-400">仅管理员或负责该部门的部门长可调整岗位成员。</p>
+               <p className="mt-4 text-[10px] font-bold text-slate-400">需要组织修改权限且在可管理部门范围内才可调整岗位成员。</p>
              )}
 
              <button onClick={() => setAssigningRole(null)} className="w-full mt-10 py-4 bg-slate-900 text-white rounded-2xl font-black uppercase text-xs tracking-widest shadow-xl hover:bg-brand-600 transition-all">

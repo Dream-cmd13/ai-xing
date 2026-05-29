@@ -310,6 +310,7 @@ const ExecutionView: React.FC = () => {
           status: 'draft',
           priority: 'medium',
           ownerId: currentUser.id,
+          departmentId: selectedDeptId || currentUser.departmentId,
           visibility: 'public',
           alignedKrId: taskModal.data.alignedKrId,
           targetWeeks: taskModal.weekId ? [taskModal.weekId] : [],
