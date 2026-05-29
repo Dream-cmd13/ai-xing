@@ -450,6 +450,13 @@ const ReviewView: React.FC = () => {
     }));
   }, [activeTab, selectedDept, selectedMonth]);
 
+  const appendContentToSummary = (sectionTitle: string, sectionContent: string) => {
+    const normalized = sectionContent.trim();
+    const nextContent = normalized ? `${sectionTitle}：\n${normalized}` : `${sectionTitle}：\n暂无内容`;
+    const prefix = reviewContent.trim();
+    updateReviewContent(prefix ? `${prefix}\n\n${nextContent}` : nextContent);
+  };
+
   const loadDeptTasks = () => {
     if (!selectedDeptId) {
       setDeptTasks([]);
@@ -525,18 +532,6 @@ const ReviewView: React.FC = () => {
   }, [currentOkrs, currentQuarterlyOkrIndex]);
 
   const currentQuarterlyOkr = currentOkrs[currentQuarterlyOkrIndex] || null;
-  const taskReviewStats = useMemo(() => {
-    const reviewedCount = deptTasks.filter((task) => {
-      const { evaluation, score } = readTaskReviewState(okrReviews, task);
-      return evaluation.trim().length > 0 || Number(score) > 0;
-    }).length;
-
-    return {
-      total: deptTasks.length,
-      reviewed: reviewedCount,
-      pending: Math.max(deptTasks.length - reviewedCount, 0)
-    };
-  }, [deptTasks, okrReviews]);
   const monthlyWeekReviewStats = useMemo(() => {
     const reviewedCount = monthlyWeekReviews.filter(({ review }) => Boolean(review)).length;
     return {
@@ -545,8 +540,6 @@ const ReviewView: React.FC = () => {
       pending: Math.max(monthlyWeekReviews.length - reviewedCount, 0)
     };
   }, [monthlyWeekReviews]);
-  const isMonthlyTaskWorkspace = activeTab === 'monthly' && reviewSubTab === 'tasks';
-  const isMonthlyWeekRecordWorkspace = activeTab === 'monthly' && reviewSubTab === 'weekly-records';
   const renderTaskReviewCard = (task: PADEntry) => {
     const { evaluation, score } = readTaskReviewState(okrReviews, task);
     const owner = state.users.find(u => u.id === task.ownerId);
@@ -877,15 +870,6 @@ const ReviewView: React.FC = () => {
                             </span>
                           </button>
                           <button
-                            className={`flex items-center gap-2 pb-2 text-sm font-black uppercase tracking-widest transition-colors ${reviewSubTab === 'tasks' ? 'text-brand-600 border-b-2 border-brand-600' : 'text-slate-400 hover:text-slate-600'}`}
-                            onClick={() => attemptLeave(() => setReviewSubTab('tasks'))}
-                          >
-                            任务复盘
-                            <span className={`rounded-full px-2 py-0.5 text-[10px] ${reviewSubTab === 'tasks' ? 'bg-brand-50 text-brand-600' : 'bg-slate-100 text-slate-500'}`}>
-                              {deptTasks.length}
-                            </span>
-                          </button>
-                          <button
                             className={`flex items-center gap-2 pb-2 text-sm font-black uppercase tracking-widest transition-colors ${reviewSubTab === 'weekly-records' ? 'text-brand-600 border-b-2 border-brand-600' : 'text-slate-400 hover:text-slate-600'}`}
                             onClick={() => attemptLeave(() => setReviewSubTab('weekly-records'))}
                           >
@@ -896,37 +880,14 @@ const ReviewView: React.FC = () => {
                           </button>
                         </div>
                           <p className="text-xs font-medium text-slate-400">
-                            月度复盘支持分区浏览，避免任务和周记录过多时整页过长。
+                            月度复盘支持分区浏览 OKR 与周复盘记录，避免内容过长影响查看。
                           </p>
                         </div>
                       </div>
                     )}
 
-                    {(activeTab === 'weekly' || reviewSubTab === 'tasks') && activeTab !== 'quarterly' && (
-                      <div className={`space-y-4 ${isMonthlyTaskWorkspace ? 'rounded-[2rem] border border-slate-200 bg-slate-50/80 p-4 md:p-5' : ''}`}>
-                        {isMonthlyTaskWorkspace && (
-                          <div className="flex flex-col gap-4 rounded-[1.5rem] border border-white/70 bg-white px-4 py-4 shadow-sm">
-                            <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
-                              <div>
-                                <div className="text-xs font-black uppercase tracking-[0.24em] text-slate-400">任务复盘工作台</div>
-                              </div>
-                              <div className="flex flex-wrap gap-2">
-                                <div className="rounded-2xl bg-brand-50 px-4 py-3 text-brand-600">
-                                  <div className="text-[10px] font-black uppercase tracking-widest">任务总数</div>
-                                  <div className="mt-1 text-xl font-black">{taskReviewStats.total}</div>
-                                </div>
-                                <div className="rounded-2xl bg-emerald-50 px-4 py-3 text-emerald-600">
-                                  <div className="text-[10px] font-black uppercase tracking-widest">已填写</div>
-                                  <div className="mt-1 text-xl font-black">{taskReviewStats.reviewed}</div>
-                                </div>
-                                <div className="rounded-2xl bg-amber-50 px-4 py-3 text-amber-600">
-                                  <div className="text-[10px] font-black uppercase tracking-widest">待完善</div>
-                                  <div className="mt-1 text-xl font-black">{taskReviewStats.pending}</div>
-                                </div>
-                              </div>
-                            </div>
-                          </div>
-                        )}
+                    {activeTab === 'weekly' && (
+                      <div className="space-y-4">
                         <div className="flex flex-wrap justify-end gap-2 mb-2">
                           <button
                             onClick={loadDeptTasks}
@@ -939,23 +900,15 @@ const ReviewView: React.FC = () => {
                             disabled={!canEditReview}
                             onClick={() => {
                               if (!canEditReview) return;
-                              const statusMap: Record<string, string> = {
-                                'draft': '草稿',
-                                'submitted': '已提交',
-                                'in-progress': '进行中',
-                                'paused': '已暂停',
-                                'terminated': '已终止',
-                                'completed': '已完成'
-                              };
-                              const formatDate = (ts: number) => {
-                                const d = new Date(ts);
-                                return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-                              };
-                              const taskSummary = deptTasks.length > 0 
-                                ? deptTasks.map(t => `- ${t.title} [${statusMap[t.status] || t.status}] (${formatDate(t.startDate)} 至 ${formatDate(t.dueDate)})`).join('\n')
+                              const taskSummary = deptTasks.length > 0
+                                ? deptTasks.map((task, index) => {
+                                    const { evaluation } = readTaskReviewState(okrReviews, task);
+                                    const expected = task.deliverable?.trim() || '暂无预期成果';
+                                    const actual = evaluation.trim() || task.taskReview?.trim() || '暂无实际成果';
+                                    return `${index + 1}. 任务标题：${task.title}\n预期成果：${expected}\n实际成果：${actual}`;
+                                  }).join('\n\n')
                                 : '暂无关联任务';
-                              const prefix = reviewContent ? reviewContent + '\n\n' : '';
-                              updateReviewContent(`${prefix}本期任务汇总：\n${taskSummary}`);
+                              appendContentToSummary('本期任务汇总', taskSummary);
                               showToast('已将任务读取到总结中', 'success');
                             }}
                             className="px-3 py-1.5 bg-indigo-50 text-indigo-600 rounded-lg text-xs font-bold hover:bg-indigo-100 transition-colors flex items-center gap-1"
@@ -964,9 +917,9 @@ const ReviewView: React.FC = () => {
                             读取任务到总结
                           </button>
                         </div>
-                        <div className={isMonthlyTaskWorkspace ? 'pb-2' : 'pb-2'}>
+                        <div className="pb-2">
                           {deptTasks.length === 0 ? (
-                            <div className={`text-center py-8 text-slate-400 text-sm italic font-medium ${isMonthlyTaskWorkspace ? 'rounded-[1.5rem] border border-dashed border-slate-200 bg-white' : ''}`}>暂无关联任务</div>
+                            <div className="text-center py-8 text-slate-400 text-sm italic font-medium">暂无关联任务</div>
                           ) : (
                             <div className="flex flex-col gap-4">
                               {deptTasks.map(task => renderTaskReviewCard(task))}
@@ -977,7 +930,7 @@ const ReviewView: React.FC = () => {
                     )}
 
                     {activeTab === 'monthly' && reviewSubTab === 'weekly-records' && (
-                      <div className={`space-y-4 rounded-[2rem] border border-slate-200 bg-slate-50/80 p-4 md:p-5 ${isMonthlyWeekRecordWorkspace ? '' : ''}`}>
+                      <div className="space-y-4 rounded-[2rem] border border-slate-200 bg-slate-50/80 p-4 md:p-5">
                         <div className="flex flex-col gap-4 rounded-[1.5rem] border border-white/70 bg-white px-4 py-4 shadow-sm">
                           <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
                             <div>
@@ -998,6 +951,28 @@ const ReviewView: React.FC = () => {
                               </div>
                             </div>
                           </div>
+                        </div>
+                        <div className="flex flex-wrap justify-end gap-2">
+                          <button
+                            disabled={!canEditReview}
+                            onClick={() => {
+                              if (!canEditReview) return;
+                              const weeklySummary = monthlyWeekReviews.length > 0
+                                ? monthlyWeekReviews.map(({ period, review }, index) => {
+                                    if (!review) {
+                                      return `${index + 1}. ${period}\n总结：暂无周复盘记录`;
+                                    }
+                                    return `${index + 1}. ${period}\n评分：${review.score}\n总结：${review.content || '暂无总结内容'}`;
+                                  }).join('\n\n')
+                                : '本月暂无周复盘记录';
+                              appendContentToSummary('本月周复盘记录汇总', weeklySummary);
+                              showToast('已将周复盘记录读取到总结中', 'success');
+                            }}
+                            className="px-3 py-1.5 bg-indigo-50 text-indigo-600 rounded-lg text-xs font-bold hover:bg-indigo-100 transition-colors flex items-center gap-1 disabled:opacity-50 disabled:hover:bg-indigo-50"
+                          >
+                            <Download size={14} />
+                            读取周复盘记录到总结
+                          </button>
                         </div>
                         <div className="pb-2">
                           {monthlyWeekReviews.length === 0 ? (
