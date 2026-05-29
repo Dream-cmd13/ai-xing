@@ -1,5 +1,6 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { useAppStore } from '@/store/useAppStore';
+import { useLeaveGuard } from '@/hooks/useLeaveGuard';
 import { useAuthStore } from '@/store/useAuthStore';
 import { useAppActions } from '@/hooks/useAppActions';
 import { usePermissions } from '@/hooks/usePermissions';
@@ -46,6 +47,7 @@ const PeriodAlignmentView: React.FC<PeriodAlignmentViewProps> = ({
   const isSaving = state.isSaving;
   const showSaveSuccess = state.showSaveSuccess;
   const isDirty = state.isDirty;
+  const { LeaveModal } = useLeaveGuard(isDirty);
   const setIsDirty = state.setIsDirty;
   const backendError = state.backendError;
   const currentProcessId = state.currentProcessId;
@@ -243,6 +245,7 @@ const PeriodAlignmentView: React.FC<PeriodAlignmentViewProps> = ({
           </div>
         </div>
       </div>
+      {LeaveModal}
     </div>
   );
 };

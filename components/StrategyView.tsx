@@ -1,5 +1,6 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { useAppStore } from '@/store/useAppStore';
+import { useLeaveGuard } from '@/hooks/useLeaveGuard';
 import { useAuthStore } from '@/store/useAuthStore';
 import { useAppActions } from '@/hooks/useAppActions';
 import { usePermissions } from '@/hooks/usePermissions';
@@ -116,6 +117,7 @@ const StrategyView: React.FC = () => {
   const activeSaveDomains = activeTab === 'dept-okr' ? ['departments'] as const : ['strategy'] as const;
   const isCurrentTabDirty = activeSaveDomains.some(domain => dirtyDomains.includes(domain));
   const saveButtonLabel = activeTab === 'dept-okr' ? '保存部门 OKR' : '保存公司 OKR';
+  const { attemptLeave, LeaveModal } = useLeaveGuard(isCurrentTabDirty);
   
   // Helper to set dirty when modifying data
   const updateStrategy = (s: Partial<CompanyStrategy>) => {
@@ -575,7 +577,7 @@ const StrategyView: React.FC = () => {
           ].map(t => (
             <button 
               key={t.id} 
-              onClick={() => setActiveTab(t.id as any)} 
+              onClick={() => attemptLeave(() => setActiveTab(t.id as any))} 
               className={`flex-1 md:flex-none flex items-center justify-center gap-2 px-3 md:px-6 py-2 rounded-xl text-xs font-black uppercase transition-all whitespace-nowrap ${activeTab === t.id ? 'bg-white text-brand-600 shadow-md scale-105' : 'text-slate-500 hover:text-slate-700'}`}
             >
               {t.icon} <span className="hidden sm:inline">{t.label}</span>
@@ -886,6 +888,7 @@ const StrategyView: React.FC = () => {
           </div>
         </div>
       )}
+      {LeaveModal}
     </div>
   );
 };

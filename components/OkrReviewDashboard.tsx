@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useAppStore } from '../store/useAppStore';
+import { useLeaveGuard } from '@/hooks/useLeaveGuard';
 import { useAuthStore } from '../store/useAuthStore';
 import { useAppActions } from '../hooks/useAppActions';
 import { usePermissions } from '../hooks/usePermissions';
@@ -46,6 +47,7 @@ const OkrReviewDashboard: React.FC = () => {
   const isSaving = state.isSaving;
   const showSaveSuccess = state.showSaveSuccess;
   const isDirty = state.isDirty;
+  const { attemptLeave, LeaveModal } = useLeaveGuard(isDirty);
   const setIsDirty = state.setIsDirty;
   const backendError = state.backendError;
   const currentProcessId = state.currentProcessId;
@@ -98,7 +100,7 @@ const OkrReviewDashboard: React.FC = () => {
     return depts.map(d => (
       <div key={d.id} className="mb-1">
         <div 
-          onClick={() => setSelectedDeptId(d.id)}
+          onClick={() => attemptLeave(() => setSelectedDeptId(d.id))}
           className={`flex items-center gap-2 px-3 py-2 rounded-xl cursor-pointer transition-colors ${selectedDept?.id === d.id ? 'bg-brand-50 text-brand-600 font-bold' : 'text-slate-600 hover:bg-slate-50'}`}
           style={{ paddingLeft: `${depth * 12 + 12}px` }}
         >
@@ -407,6 +409,7 @@ const OkrReviewDashboard: React.FC = () => {
           )}
         </div>
       </div>
+      {LeaveModal}
     </div>
   );
 };

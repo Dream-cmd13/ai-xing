@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { useAppStore } from '../store/useAppStore';
+import { useLeaveGuard } from '@/hooks/useLeaveGuard';
 import { useAuthStore } from '../store/useAuthStore';
 import { useAppActions } from '../hooks/useAppActions';
 import { usePermissions } from '../hooks/usePermissions';
@@ -34,6 +35,7 @@ const OrgView: React.FC = () => {
   const isSaving = state.isSaving;
   const showSaveSuccess = state.showSaveSuccess;
   const isDirty = state.isDirty;
+  const { attemptLeave, LeaveModal } = useLeaveGuard(isDirty);
   const setIsDirty = state.setIsDirty;
   const backendError = state.backendError;
   const currentProcessId = state.currentProcessId;
@@ -241,7 +243,7 @@ const OrgView: React.FC = () => {
                 {d.name}
               </h4>
               <div className="flex items-center gap-3 mt-1">
-                <button onClick={() => setSelectedDeptId(selectedDeptId === d.id ? null : d.id)} className="text-[9px] font-black text-brand-600 uppercase hover:underline">岗位治理 ({d.roles.length})</button>
+                <button onClick={() => attemptLeave(() => setSelectedDeptId(selectedDeptId === d.id ? null : d.id))} className="text-[9px] font-black text-brand-600 uppercase hover:underline">岗位治理 ({d.roles.length})</button>
                 <button onClick={() => setEditingAttrId(editingAttrId === d.id ? null : d.id)} className="text-[9px] font-black text-slate-400 uppercase hover:underline">负责人与职责</button>
               </div>
             </div>
@@ -580,6 +582,7 @@ const OrgView: React.FC = () => {
         type={toastState?.type}
         onClose={clearToast}
       />
+      {LeaveModal}
     </div>
   );
 };

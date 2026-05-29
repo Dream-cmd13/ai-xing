@@ -28,6 +28,7 @@ const App: React.FC = () => {
   const { 
     setState, 
     setIsInitialLoadComplete, 
+    setLastSavedAISettings,
     setLastSavedUsers,
     setLastSavedSystemRoles,
     resetDomainLoadState,
@@ -87,6 +88,7 @@ const App: React.FC = () => {
               
               setLastSavedUsers(initialUsers);
               setLastSavedSystemRoles(initialSystemRoles);
+              setLastSavedAISettings(bootstrapData.aiSettings || DEFAULT_AI_SETTINGS);
               setDomainLoadState('users', { loaded: true, loading: false });
               setDomainLoadState('systemRoles', { loaded: true, loading: false });
               setDomainLoadState('aiSettings', { loaded: true, loading: false });
@@ -142,6 +144,7 @@ const App: React.FC = () => {
           lastSavedTasks: [],
           lastSavedUsers: [],
           lastSavedSystemRoles: [],
+          lastSavedAISettings: null,
           lastSavedStrategy: null
         });
         lastProcessedUserIdRef.current = null;
@@ -162,7 +165,7 @@ const App: React.FC = () => {
     return () => {
       subscription.unsubscribe();
     };
-  }, [login, resetDomainLoadState, setDomainLoadState, setIsInitialLoadComplete, setLastSavedSystemRoles, setLastSavedUsers, setState]);
+  }, [login, resetDomainLoadState, setDomainLoadState, setIsInitialLoadComplete, setLastSavedAISettings, setLastSavedSystemRoles, setLastSavedUsers, setState]);
 
   return (
     <BrowserRouter>

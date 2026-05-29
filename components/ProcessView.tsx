@@ -1,6 +1,7 @@
 
 import React, { useState, useMemo, useRef, useEffect, useCallback } from 'react';
 import { useAppStore } from '../store/useAppStore';
+import { useLeaveGuard } from '@/hooks/useLeaveGuard';
 import { useAuthStore } from '../store/useAuthStore';
 import { useAppActions } from '../hooks/useAppActions';
 import { usePermissions } from '../hooks/usePermissions';
@@ -114,6 +115,7 @@ const ProcessView: React.FC = () => {
   const isSaving = state.isSaving;
   const showSaveSuccess = state.showSaveSuccess;
   const isDirty = state.isDirty;
+  const { LeaveModal } = useLeaveGuard(isDirty);
   const setIsDirty = state.setIsDirty;
   const backendError = state.backendError;
   const currentProcessId = state.currentProcessId;
@@ -934,6 +936,7 @@ const ProcessView: React.FC = () => {
         type={toastState?.type}
         onClose={clearToast}
       />
+      {LeaveModal}
     </div>
   );
 };

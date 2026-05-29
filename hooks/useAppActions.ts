@@ -92,6 +92,7 @@ export const useAppActions = () => {
     if (!stateRef.current.aiSettings) return;
     const savedSettings = await saveAISettings(stateRef.current.aiSettings);
     store.setState({ aiSettings: savedSettings });
+    store.setLastSavedAISettings(savedSettings);
   };
 
   const saveProcessesDomain = async () => {
@@ -200,6 +201,7 @@ export const useAppActions = () => {
       };
       const savedSettings = await saveAISettings(nextSettings);
       store.setState({ aiSettings: savedSettings });
+      store.setLastSavedAISettings(savedSettings);
       store.setBackendError(null);
       store.clearDirtyDomains(['aiSettings']);
       store.setShowSaveSuccess(true);

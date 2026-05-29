@@ -16,6 +16,7 @@ import { isTaskInMonthlyPeriod, isTaskInWeeklyPeriod } from '../utils/taskPeriod
 import { readTaskReviewState, updateTaskReviewState } from '../utils/reviewTaskState.js';
 import { createReviewDraftSnapshot, hasReviewDraftChanges, ReviewDraftSnapshot } from '../utils/reviewDraft';
 import { syncTaskReviewsToTasks } from '../utils/taskReviewSync';
+import { useLeaveGuard } from '@/hooks/useLeaveGuard';
 
 
 
@@ -81,7 +82,6 @@ const ReviewView: React.FC = () => {
     initialTab === 'quarterly' || initialTab === 'monthly' ? 'okrs' : 'tasks'
   );
   const [loadedDraftSnapshot, setLoadedDraftSnapshot] = useState<ReviewDraftSnapshot>(() => createReviewDraftSnapshot());
-  const [pendingLeaveAction, setPendingLeaveAction] = useState<(() => void) | null>(null);
 
   const [taskModal, setTaskModal] = useState<{ isOpen: boolean, weekId: string | null, mode: 'create' | 'edit', data: Partial<PADEntry> }>({ isOpen: false, weekId: null, mode: 'edit', data: {} });
   const { toastState, showToast, clearToast } = usePageToast();
@@ -227,6 +227,21 @@ const ReviewView: React.FC = () => {
     [loadedDraftSnapshot, currentDraftSnapshot]
   );
 
+  const discardReviewDraft = useMemo(
+    () => () => {
+      clearToast();
+      setReviewContent(loadedDraftSnapshot.content);
+      setReviewScore(loadedDraftSnapshot.score);
+      setOkrReviews(loadedDraftSnapshot.okrReviews);
+      setIsDirty(false);
+    },
+    [clearToast, loadedDraftSnapshot, setIsDirty]
+  );
+
+  const { attemptLeave, LeaveModal } = useLeaveGuard(hasDraftChanges, {
+    onDiscard: discardReviewDraft
+  });
+
   useEffect(() => {
     setIsDirty(hasDraftChanges);
   }, [hasDraftChanges, setIsDirty]);
@@ -277,27 +292,6 @@ const ReviewView: React.FC = () => {
     setLoadedDraftSnapshot(nextSnapshot);
   }, [selectedDeptId, activeTab, selectedWeek, selectedMonth, flatDepts]);
 
-  const attemptLeave = (action: () => void) => {
-    if (!hasDraftChanges) {
-      action();
-      return;
-    }
-
-    setPendingLeaveAction(() => action);
-  };
-
-  const confirmLeave = () => {
-    const action = pendingLeaveAction;
-    setPendingLeaveAction(null);
-    clearToast();
-    setIsDirty(false);
-    action?.();
-  };
-
-  const cancelLeave = () => {
-    setPendingLeaveAction(null);
-  };
-
   const changeReviewTab = (nextTab: 'weekly' | 'monthly' | 'quarterly') => {
     if (nextTab === activeTab) return;
     attemptLeave(() => setActiveTab(nextTab));
@@ -322,20 +316,6 @@ const ReviewView: React.FC = () => {
     if (selectedWeek === nextWeek) return;
     attemptLeave(() => setSelectedWeek(nextWeek));
   };
-
-  useEffect(() => {
-    const handleAppNavigationAttempt = (nativeEvent: Event) => {
-      const event = nativeEvent as CustomEvent<{ path?: string; retry?: () => void }>;
-      if (!hasDraftChanges || !event.detail?.retry) return;
-      event.preventDefault();
-      setPendingLeaveAction(() => event.detail.retry!);
-    };
-
-    window.addEventListener('app:navigation-attempt', handleAppNavigationAttempt as EventListener);
-    return () => {
-      window.removeEventListener('app:navigation-attempt', handleAppNavigationAttempt as EventListener);
-    };
-  }, [hasDraftChanges]);
 
   const submitReview = async () => {
     if (!selectedDeptId) return;
@@ -889,7 +869,7 @@ const ReviewView: React.FC = () => {
                           <div className="flex items-center gap-4 overflow-x-auto">
                           <button
                             className={`flex items-center gap-2 pb-2 text-sm font-black uppercase tracking-widest transition-colors ${reviewSubTab === 'okrs' ? 'text-brand-600 border-b-2 border-brand-600' : 'text-slate-400 hover:text-slate-600'}`}
-                            onClick={() => setReviewSubTab('okrs')}
+                            onClick={() => attemptLeave(() => setReviewSubTab('okrs'))}
                           >
                             {selectedMonth ? `${parseInt(selectedMonth.split('-')[1].replace('M', ''))}月 OKR` : '月度 OKR'}
                             <span className={`rounded-full px-2 py-0.5 text-[10px] ${reviewSubTab === 'okrs' ? 'bg-brand-50 text-brand-600' : 'bg-slate-100 text-slate-500'}`}>
@@ -898,7 +878,7 @@ const ReviewView: React.FC = () => {
                           </button>
                           <button
                             className={`flex items-center gap-2 pb-2 text-sm font-black uppercase tracking-widest transition-colors ${reviewSubTab === 'tasks' ? 'text-brand-600 border-b-2 border-brand-600' : 'text-slate-400 hover:text-slate-600'}`}
-                            onClick={() => setReviewSubTab('tasks')}
+                            onClick={() => attemptLeave(() => setReviewSubTab('tasks'))}
                           >
                             任务复盘
                             <span className={`rounded-full px-2 py-0.5 text-[10px] ${reviewSubTab === 'tasks' ? 'bg-brand-50 text-brand-600' : 'bg-slate-100 text-slate-500'}`}>
@@ -907,7 +887,7 @@ const ReviewView: React.FC = () => {
                           </button>
                           <button
                             className={`flex items-center gap-2 pb-2 text-sm font-black uppercase tracking-widest transition-colors ${reviewSubTab === 'weekly-records' ? 'text-brand-600 border-b-2 border-brand-600' : 'text-slate-400 hover:text-slate-600'}`}
-                            onClick={() => setReviewSubTab('weekly-records')}
+                            onClick={() => attemptLeave(() => setReviewSubTab('weekly-records'))}
                           >
                             周复盘记录
                             <span className={`rounded-full px-2 py-0.5 text-[10px] ${reviewSubTab === 'weekly-records' ? 'bg-brand-50 text-brand-600' : 'bg-slate-100 text-slate-500'}`}>
@@ -1203,32 +1183,7 @@ const ReviewView: React.FC = () => {
         onClose={clearToast}
       />
 
-      {pendingLeaveAction && (
-        <div className="fixed inset-0 z-[1200] flex items-start justify-center bg-slate-900/35 p-6 pt-32 backdrop-blur-sm">
-          <div className="w-full max-w-xl rounded-[2rem] border border-slate-100 bg-white p-8 shadow-2xl">
-            <div className="mb-6">
-              <h3 className="text-xl font-black text-slate-800">当前页面有未保存的修改，确定要离开吗？</h3>
-              <p className="mt-3 text-sm font-medium leading-relaxed text-slate-500">
-                确认离开后，本次未提交的复盘修改会直接放弃。
-              </p>
-            </div>
-            <div className="flex justify-end gap-3">
-              <button
-                onClick={cancelLeave}
-                className="rounded-xl bg-slate-100 px-6 py-3 text-xs font-black uppercase text-slate-600 transition-colors hover:bg-slate-200"
-              >
-                取消
-              </button>
-              <button
-                onClick={confirmLeave}
-                className="rounded-xl bg-brand-600 px-6 py-3 text-xs font-black uppercase text-white shadow-lg shadow-brand-100 transition-colors hover:bg-brand-700"
-              >
-                确认离开
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      {LeaveModal}
 
       {/* Task Modal (Read Only) */}
       <TaskModal

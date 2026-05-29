@@ -1,6 +1,7 @@
 
 import React, { useState, useMemo } from 'react';
 import { useAppStore } from '../store/useAppStore';
+import { useLeaveGuard } from '@/hooks/useLeaveGuard';
 import { useAuthStore } from '../store/useAuthStore';
 import { useAppActions } from '../hooks/useAppActions';
 import { usePermissions } from '../hooks/usePermissions';
@@ -40,6 +41,7 @@ const RoleQueryView: React.FC = () => {
   const isSaving = state.isSaving;
   const showSaveSuccess = state.showSaveSuccess;
   const isDirty = state.isDirty;
+  const { attemptLeave, LeaveModal } = useLeaveGuard(isDirty);
   const setIsDirty = state.setIsDirty;
   const backendError = state.backendError;
   const currentProcessId = state.currentProcessId;
@@ -170,7 +172,7 @@ const RoleQueryView: React.FC = () => {
             ) : filteredRoles.map(role => (
               <button 
                 key={role} 
-                onClick={() => { setSelectedRole(role); setShowMembersModal(false); }}
+                onClick={() => attemptLeave(() => { setSelectedRole(role); setShowMembersModal(false); })}
                 className={`w-full text-left px-4 py-3 rounded-2xl flex items-center justify-between group transition-all ${selectedRole === role ? 'bg-brand-600 text-white shadow-lg' : 'hover:bg-slate-50 text-slate-600'}`}
               >
                 <div className="flex items-center gap-3 overflow-hidden">
@@ -193,7 +195,7 @@ const RoleQueryView: React.FC = () => {
             <div className="flex-1 flex flex-col overflow-hidden animate-in fade-in duration-500">
               <header className="p-4 md:p-8 border-b bg-slate-50/30 shrink-0 flex flex-col md:flex-row justify-between items-start md:items-end gap-4">
                 <div className="flex items-center gap-4">
-                  <button onClick={() => setSelectedRole(null)} className="md:hidden p-2 -ml-2 text-slate-400 hover:text-slate-600">
+                  <button onClick={() => attemptLeave(() => setSelectedRole(null))} className="md:hidden p-2 -ml-2 text-slate-400 hover:text-slate-600">
                     <ChevronRight size={24} className="rotate-180" />
                   </button>
                   <div className="w-14 h-14 bg-brand-50 text-brand-600 rounded-2xl flex items-center justify-center shadow-inner shrink-0"><Briefcase size={28}/></div>
@@ -306,6 +308,7 @@ const RoleQueryView: React.FC = () => {
             </div>
         </div>
       )}
+      {LeaveModal}
     </div>
   );
 };

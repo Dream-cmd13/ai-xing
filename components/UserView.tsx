@@ -1,6 +1,7 @@
 
 import React, { useState, useMemo } from 'react';
 import { useAppStore } from '../store/useAppStore';
+import { useLeaveGuard } from '@/hooks/useLeaveGuard';
 import { useAuthStore } from '../store/useAuthStore';
 import { useAppActions } from '../hooks/useAppActions';
 import { usePermissions } from '../hooks/usePermissions';
@@ -35,6 +36,7 @@ const UserView: React.FC = () => {
   const isSaving = state.isSaving;
   const showSaveSuccess = state.showSaveSuccess;
   const isDirty = state.isDirty;
+  const { attemptLeave, LeaveModal } = useLeaveGuard(isDirty);
   const setIsDirty = state.setIsDirty;
   const backendError = state.backendError;
   const currentProcessId = state.currentProcessId;
@@ -282,7 +284,7 @@ const UserView: React.FC = () => {
     return depts.map(d => (
       <div key={d.id} className="flex flex-col">
         <button
-          onClick={() => setSelectedDeptId(selectedDeptId === d.id ? null : d.id)}
+          onClick={() => attemptLeave(() => setSelectedDeptId(selectedDeptId === d.id ? null : d.id))}
           className={`flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-bold transition-all ${selectedDeptId === d.id ? 'bg-brand-600 text-white shadow-md' : 'text-slate-600 hover:bg-brand-50 hover:text-brand-600'}`}
           style={{ marginLeft: `${depth * 12}px` }}
         >
@@ -335,7 +337,7 @@ const UserView: React.FC = () => {
               <Building2 size={14}/> 部门过滤
             </h3>
             {selectedDeptId && (
-              <button onClick={() => setSelectedDeptId(null)} className="text-[10px] font-bold text-brand-600 hover:underline">清除</button>
+              <button onClick={() => attemptLeave(() => setSelectedDeptId(null))} className="text-[10px] font-bold text-brand-600 hover:underline">清除</button>
             )}
           </div>
           <div className="flex-1 overflow-y-auto pr-2 custom-scrollbar space-y-1">
@@ -559,6 +561,7 @@ const UserView: React.FC = () => {
           </div>
         </div>
       )}
+      {LeaveModal}
     </div>
   );
 };

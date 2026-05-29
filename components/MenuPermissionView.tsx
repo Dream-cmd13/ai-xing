@@ -1,5 +1,6 @@
 import React, { useState, useMemo } from 'react';
-import { useAppStore } from '../store/useAppStore';
+import { useAppStore } from '@/store/useAppStore';
+import { useLeaveGuard } from '@/hooks/useLeaveGuard';
 import { useAuthStore } from '../store/useAuthStore';
 import { useAppActions } from '../hooks/useAppActions';
 import { usePermissions } from '../hooks/usePermissions';
@@ -42,6 +43,7 @@ const MenuPermissionView: React.FC = () => {
   const activeSaveDomains = activeTab === 'roles' ? ['systemRoles'] as const : ['users'] as const;
   const isCurrentTabDirty = activeSaveDomains.some(domain => dirtyDomains.includes(domain));
   const saveButtonLabel = activeTab === 'roles' ? '保存角色权限' : '保存个人权限';
+  const { attemptLeave, LeaveModal } = useLeaveGuard(isCurrentTabDirty);
 
   const roles = state.systemRoles || [];
   const users = state.users || [];
@@ -342,13 +344,13 @@ const MenuPermissionView: React.FC = () => {
       <div className="px-4 md:px-8 pb-4">
         <div className="flex gap-4 border-b border-slate-200">
           <button
-            onClick={() => { setActiveTab('roles'); setEditingRole(null); setEditingUser(null); }}
+            onClick={() => attemptLeave(() => { setActiveTab('roles'); setEditingRole(null); setEditingUser(null); })}
             className={`px-4 md:px-6 py-3 font-bold text-sm border-b-2 transition-colors ${activeTab === 'roles' ? 'border-brand-600 text-brand-600' : 'border-transparent text-slate-500 hover:text-slate-700'}`}
           >
             角色权限
           </button>
           <button
-            onClick={() => { setActiveTab('users'); setEditingRole(null); setEditingUser(null); }}
+            onClick={() => attemptLeave(() => { setActiveTab('users'); setEditingRole(null); setEditingUser(null); })}
             className={`px-4 md:px-6 py-3 font-bold text-sm border-b-2 transition-colors ${activeTab === 'users' ? 'border-brand-600 text-brand-600' : 'border-transparent text-slate-500 hover:text-slate-700'}`}
           >
             个人权限管理
@@ -642,6 +644,7 @@ const MenuPermissionView: React.FC = () => {
           </div>
         </div>
       )}
+      {LeaveModal}
     </div>
   </div>
 );

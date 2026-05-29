@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { useAppStore } from '../store/useAppStore';
+import { useLeaveGuard } from '@/hooks/useLeaveGuard';
 import { useAuthStore } from '../store/useAuthStore';
 import { useAppActions } from '../hooks/useAppActions';
 import { usePermissions } from '../hooks/usePermissions';
@@ -25,6 +26,7 @@ const BusinessDefinitionView: React.FC = () => {
   const isSaving = state.isSaving;
   const showSaveSuccess = state.showSaveSuccess;
   const isDirty = state.isDirty;
+  const { attemptLeave, LeaveModal } = useLeaveGuard(isDirty);
   const dirtyDomains = state.dirtyDomains;
   const setIsDirty = state.setIsDirty;
   const backendError = state.backendError;
@@ -138,7 +140,7 @@ const BusinessDefinitionView: React.FC = () => {
             {businesses.map(b => (
               <div 
                 key={b.id}
-                onClick={() => setActiveBusinessId(b.id)}
+                onClick={() => attemptLeave(() => setActiveBusinessId(b.id))}
                 className={`flex items-center justify-between px-3 py-3 rounded-xl cursor-pointer transition-colors mb-1 ${activeBusinessId === b.id ? 'bg-brand-50 text-brand-600 font-bold' : 'text-slate-600 hover:bg-slate-50'}`}
               >
                 <span className="text-sm truncate">{b.name}</span>
@@ -316,6 +318,7 @@ const BusinessDefinitionView: React.FC = () => {
           </div>
         </div>
       )}
+      {LeaveModal}
     </div>
   );
 };

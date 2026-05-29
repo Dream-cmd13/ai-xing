@@ -43,6 +43,7 @@ export interface AppStoreState extends AppState {
   lastSavedTasks: PADEntry[];
   lastSavedUsers: User[];
   lastSavedSystemRoles: SystemRole[];
+  lastSavedAISettings: AISettings | null;
   lastSavedStrategy: CompanyStrategy | null;
   
   setState: (state: Partial<AppState> | ((state: AppState) => Partial<AppState>)) => void;
@@ -64,6 +65,7 @@ export interface AppStoreState extends AppState {
   setLastSavedTasks: (tasks: PADEntry[]) => void;
   setLastSavedUsers: (users: User[]) => void;
   setLastSavedSystemRoles: (roles: SystemRole[]) => void;
+  setLastSavedAISettings: (settings: AISettings) => void;
   setLastSavedStrategy: (strategy: CompanyStrategy) => void;
   
   // Action wrappers
@@ -109,6 +111,7 @@ export const useAppStore = create<AppStoreState>((set) => ({
   lastSavedTasks: [],
   lastSavedUsers: [],
   lastSavedSystemRoles: [],
+  lastSavedAISettings: null,
   lastSavedStrategy: null,
   
   setState: (newState) => set((state) => {
@@ -151,6 +154,7 @@ export const useAppStore = create<AppStoreState>((set) => ({
   setLastSavedTasks: (lastSavedTasks) => set({ lastSavedTasks }),
   setLastSavedUsers: (lastSavedUsers) => set({ lastSavedUsers }),
   setLastSavedSystemRoles: (lastSavedSystemRoles) => set({ lastSavedSystemRoles }),
+  setLastSavedAISettings: (lastSavedAISettings) => set({ lastSavedAISettings }),
   setLastSavedStrategy: (lastSavedStrategy) => set({ lastSavedStrategy }),
   
   setDepartments: (departments) => set((state) => ({
