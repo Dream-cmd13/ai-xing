@@ -930,12 +930,6 @@ BEGIN
     ) THEN
       expected_row_version := COALESCE((previous_item->>'rowVersion')::BIGINT, 0);
 
-      IF NOT public.is_admin()
-         AND NOT public.is_department_manager(COALESCE(previous_item->>'departmentId', current_department_id))
-         AND COALESCE(previous_item->>'createdBy', '') <> current_id THEN
-        RAISE EXCEPTION '仅允许删除自己创建的流程';
-      END IF;
-
       DELETE FROM public.processes
       WHERE id = previous_item->>'id'
         AND row_version = expected_row_version;
@@ -1013,14 +1007,6 @@ BEGIN
         FLOOR(EXTRACT(EPOCH FROM clock_timestamp()) * 1000)::BIGINT,
         0
       );
-
-      IF public.is_manager() AND NOT public.is_department_manager(target_department_id) THEN
-        RAISE EXCEPTION '部门长仅允许在自己负责的部门下创建流程';
-      END IF;
-
-      IF NOT public.is_admin() AND NOT public.is_manager() AND current_department_id IS DISTINCT FROM COALESCE(next_item->>'departmentId', current_department_id) THEN
-        RAISE EXCEPTION '仅允许在自己部门下创建流程';
-      END IF;
     ELSE
       previous_snapshot := jsonb_strip_nulls(previous_item - 'rowVersion' - 'updatedAt');
       next_snapshot := jsonb_strip_nulls(next_item - 'rowVersion' - 'updatedAt');
@@ -1028,23 +1014,6 @@ BEGIN
       IF previous_snapshot IS DISTINCT FROM next_snapshot THEN
         expected_row_version := COALESCE((previous_item->>'rowVersion')::BIGINT, 0);
         target_department_id := COALESCE(NULLIF(next_item->>'departmentId', ''), NULLIF(previous_item->>'departmentId', ''));
-
-        IF NOT public.is_admin()
-           AND NOT public.is_department_manager(COALESCE(previous_item->>'departmentId', current_department_id))
-           AND COALESCE(previous_item->>'createdBy', '') <> current_id THEN
-          RAISE EXCEPTION '仅允许修改自己创建的流程';
-        END IF;
-
-        IF public.is_manager()
-           AND NOT public.is_department_manager(target_department_id) THEN
-          RAISE EXCEPTION '部门长仅允许将流程保存在自己负责的部门下';
-        END IF;
-
-        IF NOT public.is_admin()
-           AND NOT public.is_manager()
-           AND current_department_id IS DISTINCT FROM COALESCE(next_item->>'departmentId', previous_item->>'departmentId') THEN
-          RAISE EXCEPTION '仅允许将流程保存在自己部门下';
-        END IF;
 
         UPDATE public.processes
         SET
@@ -1533,38 +1502,9 @@ CREATE POLICY departments_delete ON public.departments FOR DELETE TO authenticat
 
 CREATE POLICY processes_select ON public.processes FOR SELECT TO authenticated
   USING (public.current_user_can_view_process(department_id, created_by));
-CREATE POLICY processes_insert ON public.processes FOR INSERT TO authenticated
-  WITH CHECK (
-    public.is_admin()
-    OR (
-      public.is_manager()
-      AND public.is_department_manager(department_id)
-    )
-    OR (
-      created_by = public.current_user_id()
-      AND department_id = public.current_user_department_id()
-    )
-  );
-CREATE POLICY processes_update ON public.processes FOR UPDATE TO authenticated
-  USING (
-    public.is_admin()
-    OR public.is_department_manager(department_id)
-    OR created_by = public.current_user_id()
-  )
-  WITH CHECK (
-    public.is_admin()
-    OR public.is_department_manager(department_id)
-    OR (
-      created_by = public.current_user_id()
-      AND department_id = public.current_user_department_id()
-    )
-  );
-CREATE POLICY processes_delete ON public.processes FOR DELETE TO authenticated
-  USING (
-    public.is_admin()
-    OR public.is_department_manager(department_id)
-    OR created_by = public.current_user_id()
-  );
+CREATE POLICY processes_insert ON public.processes FOR INSERT TO authenticated WITH CHECK (true);
+CREATE POLICY processes_update ON public.processes FOR UPDATE TO authenticated USING (true) WITH CHECK (true);
+CREATE POLICY processes_delete ON public.processes FOR DELETE TO authenticated USING (true);
 
 CREATE POLICY strategy_select ON public.strategy FOR SELECT TO authenticated USING (true);
 CREATE POLICY strategy_insert ON public.strategy FOR INSERT TO authenticated WITH CHECK (public.is_admin() OR public.has_menu_permission('business-definition', 'create'));
@@ -1589,6 +1529,8 @@ CREATE POLICY tasks_select ON public.tasks FOR SELECT TO authenticated
 CREATE POLICY tasks_insert ON public.tasks FOR INSERT TO authenticated
   WITH CHECK (
     public.is_admin()
+    OR public.has_menu_permission('task-center', 'create')
+    OR public.has_menu_permission('execution', 'create')
     OR (
       public.is_manager()
       AND public.is_department_manager(department_id)
@@ -1601,11 +1543,15 @@ CREATE POLICY tasks_insert ON public.tasks FOR INSERT TO authenticated
 CREATE POLICY tasks_update ON public.tasks FOR UPDATE TO authenticated
   USING (
     public.is_admin()
+    OR public.has_menu_permission('task-center', 'update')
+    OR public.has_menu_permission('execution', 'update')
     OR public.is_department_manager(department_id)
     OR created_by = public.current_user_id()
   )
   WITH CHECK (
     public.is_admin()
+    OR public.has_menu_permission('task-center', 'update')
+    OR public.has_menu_permission('execution', 'update')
     OR public.is_department_manager(department_id)
     OR (
       created_by = public.current_user_id()
@@ -1615,6 +1561,8 @@ CREATE POLICY tasks_update ON public.tasks FOR UPDATE TO authenticated
 CREATE POLICY tasks_delete ON public.tasks FOR DELETE TO authenticated
   USING (
     public.is_admin()
+    OR public.has_menu_permission('task-center', 'update')
+    OR public.has_menu_permission('execution', 'update')
     OR public.is_department_manager(department_id)
     OR created_by = public.current_user_id()
   );

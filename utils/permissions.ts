@@ -129,6 +129,7 @@ export const canManageTask = (
   departments: Department[] = []
 ): boolean => {
   if (isAdminUser(currentUser, systemRoles)) return true;
+  if (hasPermission(currentUser, systemRoles, 'task-center', 'update') || hasPermission(currentUser, systemRoles, 'execution', 'update')) return true;
   if (isManagerUser(currentUser) && isManagedDepartment(task.departmentId, currentUser, departments)) return true;
   return task.createdBy === currentUser.id;
 };
@@ -140,6 +141,7 @@ export const canManageProcess = (
   departments: Department[] = []
 ): boolean => {
   if (isAdminUser(currentUser, systemRoles)) return true;
+  if (hasPermission(currentUser, systemRoles, 'process', 'update')) return true;
   if (isManagerUser(currentUser) && isManagedDepartment(process.departmentId, currentUser, departments)) return true;
   return process.createdBy === currentUser.id;
 };
@@ -151,6 +153,7 @@ export const canPersistProcess = (
   departments: Department[] = []
 ): boolean => {
   if (isAdminUser(currentUser, systemRoles)) return true;
+  if (hasPermission(currentUser, systemRoles, 'process', 'create') || hasPermission(currentUser, systemRoles, 'process', 'update')) return true;
   if (!isManagerUser(currentUser)) return false;
   return getManagedDepartmentIds(currentUser, departments).includes(process.departmentId || '');
 };
