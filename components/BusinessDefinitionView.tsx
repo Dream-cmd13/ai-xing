@@ -28,7 +28,6 @@ const BusinessDefinitionView: React.FC = () => {
   const isDirty = state.isDirty;
   const { attemptLeave, LeaveModal } = useLeaveGuard(isDirty);
   const dirtyDomains = state.dirtyDomains;
-  const setIsDirty = state.setIsDirty;
   const backendError = state.backendError;
   const currentProcessId = state.currentProcessId;
   const setCurrentProcessId = state.setCurrentProcessId;
@@ -44,27 +43,33 @@ const BusinessDefinitionView: React.FC = () => {
 
   const handleAddBusiness = () => {
     if (!permissions.create) return;
-    const newBusinessId = `biz-${Date.now()}`;
+    // Use a unique ID combining timestamp + random to avoid collisions on rapid clicks
+    const newBusinessId = `biz-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+    // Read the latest businesses from the store (not the stale closure) for accurate count
+    const latestBusinesses = useAppStore.getState().businesses || [];
     const newBusiness: BusinessDefinition = {
       id: newBusinessId,
-      name: `新事业 ${businesses.length + 1}`,
+      name: `新事业 ${latestBusinesses.length + 1}`,
       businessFormat: '',
       customerPersona: '',
       customerNeeds: '',
       surfaceProductPower: '',
       coreProductPower: ''
     };
-    setBusinesses([...businesses, newBusiness]);
+    setBusinesses([...latestBusinesses, newBusiness]);
     setCreatedBusinessIds([...createdBusinessIds, newBusinessId]);
     setActiveBusinessId(newBusinessId);
-    setIsDirty(true);
+    // setIsDirty is already called inside handleSetBusinesses
   };
 
   const handleUpdateBusiness = (id: string, updates: Partial<BusinessDefinition>) => {
-    const targetBusiness = businesses.find(b => b.id === id);
+    // Always read the latest businesses from the store to avoid stale closure
+    // during rapid input (e.g. IME / fast typing).
+    const latestBusinesses = useAppStore.getState().businesses || [];
+    const targetBusiness = latestBusinesses.find(b => b.id === id);
     if (!targetBusiness || !canEditBusiness(targetBusiness)) return;
-    setBusinesses(businesses.map(b => b.id === id ? { ...b, ...updates } : b));
-    setIsDirty(true);
+    setBusinesses(latestBusinesses.map(b => b.id === id ? { ...b, ...updates } : b));
+    // setIsDirty is already called inside handleSetBusinesses
   };
 
   const handleDeleteBusiness = (id: string) => {
@@ -74,12 +79,14 @@ const BusinessDefinitionView: React.FC = () => {
 
   const confirmDelete = () => {
     if (!pendingDeleteId || !permissions.update) return;
-    const newBusinesses = businesses.filter(b => b.id !== pendingDeleteId);
+    // Read latest businesses from store to avoid stale closure
+    const latestBusinesses = useAppStore.getState().businesses || [];
+    const newBusinesses = latestBusinesses.filter(b => b.id !== pendingDeleteId);
     setBusinesses(newBusinesses);
     if (activeBusinessId === pendingDeleteId) {
       setActiveBusinessId(newBusinesses.length > 0 ? newBusinesses[0].id : null);
     }
-    setIsDirty(true);
+    // setIsDirty is already called inside handleSetBusinesses
     setPendingDeleteId(null);
   };
 

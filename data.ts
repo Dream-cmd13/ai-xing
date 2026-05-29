@@ -43,6 +43,27 @@ const normalizeUserRole = (value: any): UserRole => {
   return 'Employee';
 };
 
+const normalizeStringArray = (value: any): string[] | undefined => {
+  if (Array.isArray(value)) {
+    const items = value.filter((item): item is string => typeof item === 'string' && item.trim().length > 0);
+    return items.length > 0 ? items : undefined;
+  }
+
+  if (typeof value === 'string' && value.trim().length > 0) {
+    return [value];
+  }
+
+  return undefined;
+};
+
+const normalizeObject = <T extends Record<string, any>>(value: any): T | undefined => {
+  if (value && typeof value === 'object' && !Array.isArray(value)) {
+    return value;
+  }
+
+  return undefined;
+};
+
 const mapSettingsRow = (settingsData: any): AISettings => ({
   selectedModelId: settingsData?.ai_settings?.selectedModelId || 'gemini',
   configs: settingsData?.ai_settings?.configs || [
@@ -54,7 +75,7 @@ const mapSettingsRow = (settingsData: any): AISettings => ({
 
 const mapUserRow = (u: any): User => {
   const reviewsMap: Record<string, any[]> = {};
-  if (u.reviews) {
+  if (normalizeObject(u.reviews)) {
     Object.assign(reviewsMap, u.reviews);
   }
 
@@ -65,10 +86,10 @@ const mapUserRow = (u: any): User => {
     name: u.name,
     role: normalizeUserRole(u.role),
     departmentId: u.department_id,
-    padPermissions: u.pad_permissions,
+    padPermissions: normalizeStringArray(u.pad_permissions),
     reviews: reviewsMap,
-    systemRoleIds: u.system_role_ids,
-    customPermissions: u.custom_permissions,
+    systemRoleIds: normalizeStringArray(u.system_role_ids),
+    customPermissions: normalizeObject(u.custom_permissions),
     updatedAt: u.updated_at,
     rowVersion: normalizeRowVersion(u.row_version)
   };

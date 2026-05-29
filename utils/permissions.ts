@@ -5,11 +5,24 @@ export const normalizeUserRole = (role: string | undefined): UserRole => {
   return 'Employee';
 };
 
+const normalizeStringArray = (value: unknown): string[] => {
+  if (Array.isArray(value)) {
+    return value.filter((item): item is string => typeof item === 'string' && item.trim().length > 0);
+  }
+
+  if (typeof value === 'string' && value.trim().length > 0) {
+    return [value];
+  }
+
+  return [];
+};
+
 export const isAdminUser = (user: User, systemRoles: SystemRole[] = []): boolean => {
   if (user.role === 'Admin') return true;
 
-  if (user.systemRoleIds && systemRoles.length > 0) {
-    return user.systemRoleIds.some(roleId => {
+  const systemRoleIds = normalizeStringArray(user.systemRoleIds);
+  if (systemRoleIds.length > 0 && systemRoles.length > 0) {
+    return systemRoleIds.some(roleId => {
       const role = systemRoles.find(r => r.id === roleId);
       return role && (role.name.toLowerCase() === 'admin' || role.id === 'admin');
     });
@@ -95,7 +108,6 @@ const getScopedDepartmentIds = (
   };
 
   addDepartmentScope(currentUser.departmentId);
-  (currentUser.padPermissions || []).forEach(addDepartmentScope);
   scopedRoots.push(...getManagedDepartments(currentUser, departments));
 
   return Array.from(
@@ -129,7 +141,7 @@ export const canViewTask = (task: PADEntry, currentUser: User, users: User[], sy
   
   if (task.createdBy === currentUser.id) return true;
   if (taskDeptId === currentUser.departmentId) return true;
-  if (currentUser.padPermissions && taskDeptId && currentUser.padPermissions.includes(taskDeptId)) return true;
+  if (taskDeptId && normalizeStringArray(currentUser.padPermissions).includes(taskDeptId)) return true;
   
   // Also allow if the user is explicitly involved in the task
   if (task.ownerId === currentUser.id) return true;
@@ -201,13 +213,17 @@ export const hasPermission = (
   if (menuId === 'workbench') return action === 'view';
 
   // Check custom permissions first (override)
-  if (user.customPermissions && user.customPermissions[menuId]) {
-    return user.customPermissions[menuId][action];
+  const customPermissions = user.customPermissions && typeof user.customPermissions === 'object' && !Array.isArray(user.customPermissions)
+    ? user.customPermissions
+    : undefined;
+  if (customPermissions && customPermissions[menuId]) {
+    return customPermissions[menuId][action];
   }
 
   // Check role permissions
-  if (user.systemRoleIds && user.systemRoleIds.length > 0) {
-    for (const roleId of user.systemRoleIds) {
+  const roleIds = normalizeStringArray(user.systemRoleIds);
+  if (roleIds.length > 0) {
+    for (const roleId of roleIds) {
       const role = systemRoles.find(r => r.id === roleId);
       if (role && role.permissions && role.permissions[menuId] && role.permissions[menuId][action]) {
         return true;
@@ -224,9 +240,7 @@ export const getVisibleDepartments = (user: User, allDepartments: Department[], 
 
   const visibleIds = new Set<string>();
   if (user.departmentId) visibleIds.add(user.departmentId);
-  if (user.padPermissions) {
-    (user.padPermissions || []).forEach(id => visibleIds.add(id));
-  }
+  normalizeStringArray(user.padPermissions).forEach(id => visibleIds.add(id));
 
   // Helper to check if a department or any of its ancestors is in visibleIds
   const isVisible = (dept: Department, path: string[] = []): boolean => {
@@ -262,4 +276,13 @@ export const getVisibleDepartments = (user: User, allDepartments: Department[], 
   };
 
   return filterTree(allDepartments);
+};
+
+export const getVisibleDepartmentsForOrg = (
+  user: User,
+  allDepartments: Department[],
+  systemRoles: SystemRole[] = []
+): Department[] => {
+  if (hasPermission(user, systemRoles, 'org', 'view')) return allDepartments;
+  return getVisibleDepartments(user, allDepartments, systemRoles);
 };

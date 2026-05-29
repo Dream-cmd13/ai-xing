@@ -7,7 +7,7 @@ import { usePermissions } from '../hooks/usePermissions';
 
 import { Department, ProcessNode, ProcessDefinition, User, MenuPermission } from '../types';
 import { addDepartment as addDbDepartment, updateDepartment as updateDbDepartment, deleteDepartment as deleteDbDepartment } from '../data';
-import { canManageDepartment } from '../utils/permissions';
+import { canManageDepartment, getVisibleDepartmentsForOrg, isAdminUser } from '../utils/permissions';
 import { 
   Plus, Trash2, Building2, ChevronRight, X, Briefcase, ChevronDown, 
   ExternalLink, Search, User as UserIcon, Check, Minus, Save, WifiOff, CheckCircle, Info, Shield, Users, AlertCircle, Lock, Loader2
@@ -75,6 +75,8 @@ const OrgView: React.FC = () => {
 
   const performDeleteRole = () => {
     if (!pendingDeleteRole) return;
+    const department = findDeptById(departments, pendingDeleteRole.deptId);
+    if (!department || !canEditDepartment(department)) return;
     updateDepartments(updateDeptRecursive(departments, pendingDeleteRole.deptId, dep => ({ ...dep, roles: dep.roles.filter(role => role !== pendingDeleteRole.roleName) })));
     setPendingDeleteRole(null);
   };
@@ -99,6 +101,11 @@ const OrgView: React.FC = () => {
     return false;
   };
 
+  const visibleDepartments = useMemo(() => {
+    if (!currentUser) return [];
+    return getVisibleDepartmentsForOrg(currentUser, departments, state.systemRoles || []);
+  }, [currentUser, departments, state.systemRoles]);
+
   const globalRoles = useMemo(() => {
     const roles = new Set<string>();
     const collect = (depts: Department[]) => {
@@ -107,17 +114,20 @@ const OrgView: React.FC = () => {
         if (d.subDepartments) collect(d.subDepartments);
       });
     };
-    collect(departments);
+    collect(visibleDepartments);
     return Array.from(roles).sort();
-  }, [departments]);
+  }, [visibleDepartments]);
 
   const canCreateDepartment = !!currentUser && permissions.create;
+  const canCreateRootDepartment = !!currentUser && canCreateDepartment && isAdminUser(currentUser, state.systemRoles || []);
+  const canCreateSubDepartment = (department: Department, inheritedPermission = false) =>
+    !!currentUser && canCreateDepartment && (inheritedPermission || canManageDepartment(department, currentUser, state.systemRoles || [], state.departments));
   const canEditDepartment = (department: Department) =>
     !!currentUser && permissions.update && canManageDepartment(department, currentUser, state.systemRoles || [], state.departments);
 
   const canEditDepartmentManager = (department: Department) => canEditDepartment(department);
   const canManageDepartmentStructure = (department: Department, inheritedPermission = false) =>
-    inheritedPermission || canEditDepartment(department);
+    canEditDepartment(department) || canCreateSubDepartment(department, inheritedPermission);
 
   const updateDeptRecursive = (depts: Department[], id: string, updater: (d: Department) => Department): Department[] => {
     return depts.map(d => {
@@ -148,7 +158,7 @@ const OrgView: React.FC = () => {
   };
 
   const addRootDepartment = () => {
-    if (!newRootDeptName.trim()) return;
+    if (!canCreateRootDepartment || !newRootDeptName.trim()) return;
     const newDept: Department = { id: `dept-${Date.now()}`, name: newRootDeptName, roles: [], subDepartments: [], attributes: '', managerName: '', managerUserId: undefined, responsibilities: '' };
     updateDepartments([...departments, newDept]);
     setNewRootDeptName('');
@@ -156,7 +166,8 @@ const OrgView: React.FC = () => {
   };
 
   const addSubDepartment = (parentId: string) => {
-    if (!newSubDeptName.trim()) return;
+    const parentDepartment = findDeptById(departments, parentId);
+    if (!parentDepartment || !canCreateSubDepartment(parentDepartment) || !newSubDeptName.trim()) return;
     const newDept: Department = { id: `dept-${Date.now()}`, name: newSubDeptName, roles: [], subDepartments: [], attributes: '', managerName: '', managerUserId: undefined, responsibilities: '' };
     updateDepartments(updateDeptRecursive(departments, parentId, d => ({ ...d, subDepartments: [...(d.subDepartments || []), newDept] })));
     setNewSubDeptName('');
@@ -164,13 +175,15 @@ const OrgView: React.FC = () => {
   };
 
   const addRoleToDept = (deptId: string, roleName: string) => {
-    if (!roleName.trim()) return;
+    const department = findDeptById(departments, deptId);
+    if (!department || !canEditDepartment(department) || !roleName.trim()) return;
     updateDepartments(updateDeptRecursive(departments, deptId, d => ({ ...d, roles: Array.from(new Set([...d.roles, roleName])) })));
     setNewRoleName('');
   };
 
   const updateRoleName = (deptId: string, oldRoleName: string, newRoleName: string) => {
-    if (!newRoleName.trim() || oldRoleName === newRoleName) {
+    const department = findDeptById(departments, deptId);
+    if (!department || !canEditDepartment(department) || !newRoleName.trim() || oldRoleName === newRoleName) {
       setEditingRole(null);
       return;
     }
@@ -187,6 +200,8 @@ const OrgView: React.FC = () => {
   };
 
   const toggleRoleMember = (deptId: string, roleName: string, userId: string) => {
+    const department = findDeptById(departments, deptId);
+    if (!department || !canEditDepartment(department)) return;
     updateDepartments(updateDeptRecursive(departments, deptId, d => {
       const currentMembers = d.roleMembers?.[roleName] || [];
       const newMembers = currentMembers.includes(userId)
@@ -203,10 +218,14 @@ const OrgView: React.FC = () => {
   };
 
   const updateDeptField = (deptId: string, field: keyof Department, val: string) => {
+    const department = findDeptById(departments, deptId);
+    if (!department || !canEditDepartment(department)) return;
     updateDepartments(updateDeptRecursive(departments, deptId, d => ({ ...d, [field]: val })));
   };
 
   const updateDeptManager = (deptId: string, managerUserId: string) => {
+    const targetDepartment = findDeptById(departments, deptId);
+    if (!targetDepartment || !canEditDepartmentManager(targetDepartment)) return;
     const manager = users.find((user) => user.id === managerUserId);
     updateDepartments(updateDeptRecursive(departments, deptId, (department) => ({
       ...department,
@@ -217,6 +236,9 @@ const OrgView: React.FC = () => {
 
   const performDeleteDept = () => {
     if (!pendingDeleteDept) return;
+    const targetDepartment = findDeptById(departments, pendingDeleteDept.id);
+    const isTopLevelDepartment = departments.some((department) => department.id === pendingDeleteDept.id);
+    if (!targetDepartment || !canEditDepartment(targetDepartment) || (isTopLevelDepartment && (!currentUser || !isAdminUser(currentUser, state.systemRoles || [])))) return;
     // Use the recursive delete function instead of simple filter
     updateDepartments(deleteDeptFromTree(departments, pendingDeleteDept.id));
     setPendingDeleteDept(null);
@@ -225,8 +247,10 @@ const OrgView: React.FC = () => {
   const renderDeptCard = (d: Department, depth = 0, isLast = false, inheritedStructurePermission = false) => {
     if (!matchesSearch(d, searchQuery)) return null;
 
-    const canManageStructure = canManageDepartmentStructure(d, inheritedStructurePermission);
-    const canDeleteDepartmentNode = canManageStructure && (permissions.update || depth > 0);
+    const canCreateChildDepartmentNode = canCreateSubDepartment(d, inheritedStructurePermission);
+    const canEditDepartmentNode = canEditDepartment(d);
+    const canManageStructure = canEditDepartmentNode || canCreateChildDepartmentNode;
+    const canDeleteDepartmentNode = canEditDepartmentNode && (depth > 0 || (!!currentUser && isAdminUser(currentUser, state.systemRoles || [])));
 
     return (
       <div key={d.id} className="relative w-full">
@@ -248,7 +272,7 @@ const OrgView: React.FC = () => {
               </div>
             </div>
             <div className="flex gap-1">
-                  {canManageStructure && (
+                  {canCreateChildDepartmentNode && (
                     <button onClick={() => setAddingToId(addingToId === d.id ? null : d.id)} className="p-2 text-slate-400 hover:text-brand-600 hover:bg-brand-50 rounded-xl" title="添加子部门"><Plus size={16}/></button>
                   )}
                   {canDeleteDepartmentNode && (
@@ -422,7 +446,7 @@ const OrgView: React.FC = () => {
         <div className="flex flex-col md:flex-row gap-4 items-stretch md:items-center w-full md:w-auto">
            <div className="relative w-full md:w-auto"><input className="pl-10 pr-4 py-2.5 bg-slate-50 border rounded-xl text-xs font-bold outline-none focus:border-brand-500 w-full md:w-64 shadow-inner" placeholder="搜索部门..." value={searchQuery} onChange={e=>setSearchQuery(e.target.value)}/><Search size={14} className="absolute left-4 top-3.5 text-slate-300"/></div>
            <div className="flex gap-2 w-full md:w-auto">
-             <button disabled={!canCreateDepartment} onClick={() => setShowAddRootModal(true)} className={`flex-1 md:flex-none justify-center px-6 py-2.5 rounded-xl text-xs font-black uppercase transition-all flex items-center gap-2 border ${canCreateDepartment ? 'bg-slate-100 text-slate-600 hover:bg-slate-200 border-slate-200' : 'bg-slate-100 text-slate-300 border-slate-100 cursor-not-allowed'}`}><Plus size={16}/> 创建根部门</button>
+             <button disabled={!canCreateRootDepartment} onClick={() => setShowAddRootModal(true)} className={`flex-1 md:flex-none justify-center px-6 py-2.5 rounded-xl text-xs font-black uppercase transition-all flex items-center gap-2 border ${canCreateRootDepartment ? 'bg-slate-100 text-slate-600 hover:bg-slate-200 border-slate-200' : 'bg-slate-100 text-slate-300 border-slate-100 cursor-not-allowed'}`}><Plus size={16}/> 创建根部门</button>
              {permissions.update && (
                <button 
                  onClick={onSaveDepartments} 
@@ -438,8 +462,8 @@ const OrgView: React.FC = () => {
       </div>
       <div className="flex-1 overflow-y-auto pr-2 md:pr-4 custom-scrollbar pb-24">
         <div className="flex flex-col gap-8 items-start pl-2 md:pl-4">
-          {departments.map((d, index, arr) => renderDeptCard(d, 0, index === arr.length - 1))}
-          {departments.length > 0 && departments.every(d => !matchesSearch(d, searchQuery)) && (
+          {visibleDepartments.map((d, index, arr) => renderDeptCard(d, 0, index === arr.length - 1))}
+          {visibleDepartments.length > 0 && visibleDepartments.every(d => !matchesSearch(d, searchQuery)) && (
             <div className="w-full py-20 text-center">
               <div className="w-16 h-16 bg-slate-100 rounded-full flex items-center justify-center mx-auto mb-4 text-slate-300">
                 <Search size={32}/>
@@ -447,7 +471,7 @@ const OrgView: React.FC = () => {
               <p className="text-slate-400 font-bold text-sm">未找到匹配的部门</p>
             </div>
           )}
-          {departments.length === 0 && (
+          {visibleDepartments.length === 0 && (
             <div className="w-full py-20 text-center bg-white rounded-[3rem] border-2 border-dashed border-slate-200">
               <div className="w-16 h-16 bg-brand-50 rounded-full flex items-center justify-center mx-auto mb-4 text-brand-600">
                 <Building2 size={32}/>
@@ -455,7 +479,7 @@ const OrgView: React.FC = () => {
               <p className="text-slate-400 font-bold text-sm mb-4">暂无组织架构数据</p>
               <button
                 onClick={() => setShowAddRootModal(true)}
-                disabled={!canCreateDepartment}
+                disabled={!canCreateRootDepartment}
                 className="px-6 py-2 bg-brand-600 text-white rounded-xl font-black text-xs uppercase shadow-lg shadow-brand-100 disabled:opacity-50 disabled:cursor-not-allowed"
               >立即创建根部门</button>
             </div>
@@ -472,7 +496,7 @@ const OrgView: React.FC = () => {
              </div>
              <p className="text-xs text-slate-400 font-bold mb-6">创建一个新的顶级部门节点。创建后请点击页面右上角的保存按钮生效。</p>
              <input autoFocus className="w-full p-4 bg-slate-50 border rounded-2xl mb-6 text-sm font-bold outline-none focus:border-brand-500" placeholder="部门名称..." value={newRootDeptName} onChange={e => setNewRootDeptName(e.target.value)} onKeyDown={e => e.key === 'Enter' && addRootDepartment()} />
-             <button onClick={addRootDepartment} className="w-full py-4 bg-brand-600 text-white rounded-2xl font-black uppercase text-xs tracking-widest shadow-xl hover:bg-brand-700 transition-all">
+             <button onClick={addRootDepartment} disabled={!canCreateRootDepartment} className="w-full py-4 bg-brand-600 text-white rounded-2xl font-black uppercase text-xs tracking-widest shadow-xl hover:bg-brand-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed">
                 立即创建
              </button>
           </div>
