@@ -54,17 +54,19 @@ const findDepartmentById = (
 
 const collectManagedDepartments = (
   departments: Department[] = [],
-  currentUserId: string
+  currentUser: User
 ): Department[] => {
   const matches: Department[] = [];
 
   departments.forEach((department) => {
-    if (department.managerUserId === currentUserId) {
+    const isExplicitManager = department.managerUserId === currentUser.id;
+    const isLegacyOwnDepartmentManager = !department.managerUserId && department.id === currentUser.departmentId;
+    if (isExplicitManager || isLegacyOwnDepartmentManager) {
       matches.push(department);
     }
 
     if (department.subDepartments?.length) {
-      matches.push(...collectManagedDepartments(department.subDepartments, currentUserId));
+      matches.push(...collectManagedDepartments(department.subDepartments, currentUser));
     }
   });
 
@@ -84,7 +86,7 @@ const collectDepartmentIds = (department: Department): string[] => {
 export const getManagedDepartments = (
   currentUser: User,
   departments: Department[] = []
-): Department[] => collectManagedDepartments(departments, currentUser.id);
+): Department[] => collectManagedDepartments(departments, currentUser);
 
 export const getManagedDepartmentIds = (
   currentUser: User,
@@ -141,9 +143,7 @@ export const canManageProcess = (
   departments: Department[] = []
 ): boolean => {
   if (isAdminUser(currentUser, systemRoles)) return true;
-  if (hasPermission(currentUser, systemRoles, 'process', 'update')) return true;
-  if (isManagerUser(currentUser) && isManagedDepartment(process.departmentId, currentUser, departments)) return true;
-  return process.createdBy === currentUser.id;
+  return hasPermission(currentUser, systemRoles, 'process', 'update');
 };
 
 export const canPersistProcess = (

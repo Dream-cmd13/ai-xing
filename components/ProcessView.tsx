@@ -160,25 +160,21 @@ const ProcessView: React.FC = () => {
     return getManagedDepartmentIds(currentUser, departments);
   }, [currentUser, departments]);
   const canCreateProcess = useMemo(() => {
-    if (!currentUser || !permissions.create) return false;
-    if (currentUser.role === 'Admin') return true;
-    return managedDepartmentIds.length > 0;
-  }, [currentUser, managedDepartmentIds.length, permissions.create]);
+    return !!currentUser && !!permissions.create;
+  }, [currentUser, permissions.create]);
   const canEditCurrentProcess = useMemo(() => {
     if (!currentUser || !currentProcess) return false;
     return permissions.update && canManageProcess(currentProcess, currentUser, state.systemRoles || [], departments);
   }, [currentProcess, currentUser, departments, permissions.update, state.systemRoles]);
   const canSaveProcessChanges = useMemo(() => {
     if (!currentUser) return false;
-    if (currentProcess) return (permissions.update || permissions.create) && canPersistProcess(currentProcess, currentUser, state.systemRoles || [], departments);
-    if (currentUser.role === 'Admin') return permissions.update || permissions.create;
-    return (permissions.update || permissions.create) && managedDepartmentIds.length > 0;
-  }, [currentProcess, currentUser, departments, managedDepartmentIds.length, permissions.create, permissions.update, state.systemRoles]);
+    return !!(permissions.update || permissions.create);
+  }, [currentUser, permissions.update, permissions.create]);
   const canManageProcessEntry = useCallback((processId: string) => {
     if (!currentUser) return false;
     const targetProcess = processes.find((process) => process.id === processId);
     if (!targetProcess) return false;
-    return permissions.update && canPersistProcess(targetProcess, currentUser, state.systemRoles || [], departments);
+    return permissions.update && canManageProcess(targetProcess, currentUser, state.systemRoles || [], departments);
   }, [currentUser, departments, permissions.update, processes, state.systemRoles]);
 
   const availableRoles = useMemo(() => {

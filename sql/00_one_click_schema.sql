@@ -158,7 +158,10 @@ WHERE owner_user.name = process_row.owner
 UPDATE public.departments AS department_row
 SET manager_user_id = manager_user.id
 FROM public.users AS manager_user
-WHERE manager_user.name = department_row.manager_name
+WHERE (
+    manager_user.name = department_row.manager_name
+    OR manager_user.username = department_row.manager_name
+  )
   AND department_row.manager_user_id IS NULL;
 
 UPDATE public.users
@@ -453,8 +456,14 @@ BEGIN
   RETURN EXISTS (
     SELECT 1
     FROM public.departments
-    WHERE id = target_department_id
-      AND manager_user_id = public.current_user_id()
+    WHERE manager_user_id = public.current_user_id()
+      AND (
+        id = target_department_id
+        OR public.find_department_in_tree(
+          COALESCE(sub_departments, '[]'::jsonb),
+          target_department_id
+        ) IS NOT NULL
+      )
   ) OR EXISTS (
     SELECT 1
     FROM public.departments
@@ -462,6 +471,41 @@ BEGIN
       public.find_department_in_tree(COALESCE(sub_departments, '[]'::jsonb), target_department_id)->>'managerUserId',
       ''
     ) = public.current_user_id()
+  ) OR (
+    public.is_manager()
+    AND (
+      target_department_id = public.current_user_department_id()
+      OR EXISTS (
+        SELECT 1
+        FROM public.departments
+        WHERE id = public.current_user_department_id()
+          AND public.find_department_in_tree(
+            COALESCE(sub_departments, '[]'::jsonb),
+            target_department_id
+          ) IS NOT NULL
+      )
+      OR EXISTS (
+        SELECT 1
+        FROM public.departments
+        WHERE public.find_department_in_tree(
+          COALESCE(sub_departments, '[]'::jsonb),
+          public.current_user_department_id()
+        ) IS NOT NULL
+        AND (
+          target_department_id = public.current_user_department_id()
+          OR public.find_department_in_tree(
+            COALESCE(
+              public.find_department_in_tree(
+                COALESCE(sub_departments, '[]'::jsonb),
+                public.current_user_department_id()
+              )->'subDepartments',
+              '[]'::jsonb
+            ),
+            target_department_id
+          ) IS NOT NULL
+        )
+      )
+    )
   );
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER STABLE;
@@ -552,13 +596,21 @@ BEGIN
   END IF;
 
   IF p_next_node IS NULL THEN
-    IF COALESCE(p_previous_node->>'managerUserId', '') = COALESCE(p_current_user_id, '') THEN
+    IF COALESCE(p_previous_node->>'managerUserId', '') = COALESCE(p_current_user_id, '')
+       OR (
+         public.is_manager()
+         AND COALESCE(p_previous_node->>'id', '') = public.current_user_department_id()
+       ) THEN
       RETURN NULL;
     END IF;
     RETURN p_previous_node;
   END IF;
 
-  managed_here := COALESCE(p_previous_node->>'managerUserId', '') = COALESCE(p_current_user_id, '');
+  managed_here := COALESCE(p_previous_node->>'managerUserId', '') = COALESCE(p_current_user_id, '')
+    OR (
+      public.is_manager()
+      AND COALESCE(p_previous_node->>'id', '') = public.current_user_department_id()
+    );
 
   IF managed_here THEN
     FOR next_child IN
@@ -839,6 +891,13 @@ BEGIN
              AND NOT public.department_tree_has_manager(
                COALESCE(previous_item->'subDepartments', '[]'::jsonb),
                current_id
+             )
+             AND NOT (
+               previous_item->>'id' = public.current_user_department_id()
+               OR public.find_department_in_tree(
+                 COALESCE(previous_item->'subDepartments', '[]'::jsonb),
+                 public.current_user_department_id()
+               ) IS NOT NULL
              ) THEN
             RAISE EXCEPTION '仅允许修改自己负责的部门';
           END IF;
@@ -1500,8 +1559,7 @@ CREATE POLICY departments_update ON public.departments FOR UPDATE TO authenticat
   WITH CHECK (public.is_admin());
 CREATE POLICY departments_delete ON public.departments FOR DELETE TO authenticated USING (public.is_admin());
 
-CREATE POLICY processes_select ON public.processes FOR SELECT TO authenticated
-  USING (public.current_user_can_view_process(department_id, created_by));
+CREATE POLICY processes_select ON public.processes FOR SELECT TO authenticated USING (true);
 CREATE POLICY processes_insert ON public.processes FOR INSERT TO authenticated WITH CHECK (true);
 CREATE POLICY processes_update ON public.processes FOR UPDATE TO authenticated USING (true) WITH CHECK (true);
 CREATE POLICY processes_delete ON public.processes FOR DELETE TO authenticated USING (true);

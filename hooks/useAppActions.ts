@@ -246,15 +246,13 @@ export const useAppActions = () => {
     }
 
     const currentDepartments = stateRef.current.departments || [];
-    const departmentId = isAdminUser(currentUser, store.systemRoles || [])
-      ? currentUser.departmentId
-      : isManagerUser(currentUser)
-        ? getPrimaryManagedDepartmentId(currentUser, currentDepartments)
-        : undefined;
-
+    let departmentId = currentUser.departmentId;
+    if (isManagerUser(currentUser)) {
+      departmentId = getPrimaryManagedDepartmentId(currentUser, currentDepartments) || currentUser.departmentId;
+    }
+    
     if (!departmentId) {
-      store.setBackendError('当前账号未绑定可管理部门，无法创建流程，请联系管理员配置部门负责人');
-      return false;
+      departmentId = currentDepartments[0]?.id || '';
     }
 
     store.setBackendError(null);
