@@ -358,10 +358,10 @@ const MenuPermissionView: React.FC = () => {
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto p-4 md:p-8 pt-4 custom-scrollbar">
+      <div className="flex-1 min-h-0 overflow-y-auto md:overflow-hidden p-4 md:p-8 pt-4">
         {activeTab === 'roles' && (
-          <div className="flex flex-col md:flex-row gap-4 md:gap-8">
-            <div className={`w-full md:w-1/3 flex flex-col gap-4 ${editingRole ? 'hidden md:flex' : 'flex'}`}>
+          <div className="flex flex-col md:flex-row gap-4 md:gap-8 md:h-full md:min-h-0">
+            <div className={`w-full md:w-1/3 flex flex-col gap-4 md:h-full md:min-h-0 ${editingRole ? 'hidden md:flex' : 'flex'}`}>
               <div className="flex justify-between items-center">
                 <h3 className="font-bold text-slate-800">系统角色</h3>
                 {permissions.create && (
@@ -370,7 +370,7 @@ const MenuPermissionView: React.FC = () => {
                   </button>
                 )}
               </div>
-              <div className="space-y-3">
+              <div className="space-y-3 md:flex-1 md:min-h-0 overflow-y-auto pr-2 custom-scrollbar">
                 {roles.map(role => (
                   <div 
                     key={role.id}
@@ -401,7 +401,7 @@ const MenuPermissionView: React.FC = () => {
               </div>
             </div>
 
-            <div className={`w-full md:w-2/3 bg-white rounded-2xl border border-slate-200 p-4 md:p-6 shadow-sm ${!editingRole ? 'hidden md:block' : 'block'}`}>
+            <div className={`w-full md:w-2/3 bg-white rounded-2xl border border-slate-200 p-4 md:p-6 shadow-sm md:h-full md:min-h-0 md:overflow-y-auto custom-scrollbar ${!editingRole ? 'hidden md:block' : 'block'}`}>
               {editingRole ? (
                 <div className="space-y-6">
                   <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
@@ -459,10 +459,10 @@ const MenuPermissionView: React.FC = () => {
         )}
 
         {activeTab === 'users' && (
-          <div className="flex flex-col md:flex-row gap-4 md:gap-8">
-            <div className={`w-full md:w-1/3 flex flex-col gap-4 ${editingUser ? 'hidden md:flex' : 'flex'}`}>
+          <div className="flex flex-col md:flex-row gap-4 md:gap-8 md:h-full md:min-h-0">
+            <div className={`w-full md:w-1/3 flex flex-col gap-4 md:h-full md:min-h-0 ${editingUser ? 'hidden md:flex' : 'flex'}`}>
               <h3 className="font-bold text-slate-800">用户列表</h3>
-              <div className="space-y-4 overflow-y-auto pr-2 custom-scrollbar">
+              <div className="space-y-4 md:flex-1 md:min-h-0 overflow-y-auto pr-2 custom-scrollbar">
                 {(() => {
                   const renderUserTree = (depts: Department[], depth: number = 0) => {
                     return depts.map(d => {
@@ -536,7 +536,7 @@ const MenuPermissionView: React.FC = () => {
               </div>
             </div>
 
-            <div className={`w-full md:w-2/3 bg-white rounded-2xl border border-slate-200 p-4 md:p-6 shadow-sm ${!editingUser ? 'hidden md:block' : 'block'}`}>
+            <div className={`w-full md:w-2/3 bg-white rounded-2xl border border-slate-200 p-4 md:p-6 shadow-sm md:h-full md:min-h-0 md:overflow-y-auto custom-scrollbar ${!editingUser ? 'hidden md:block' : 'block'}`}>
               {editingUser ? (
                 <div className="space-y-6">
                   <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
