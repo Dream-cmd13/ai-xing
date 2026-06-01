@@ -17,6 +17,8 @@ interface TaskModalProps {
   readOnly?: boolean;
   periodWeeks?: { id: string, label: string }[];
   aiSettings?: AISettings;
+  currentUser?: User;
+  isAdmin?: boolean;
 }
 
 const TaskModal: React.FC<TaskModalProps> = ({
@@ -32,7 +34,9 @@ const TaskModal: React.FC<TaskModalProps> = ({
   mode,
   readOnly = false,
   periodWeeks = [],
-  aiSettings
+  aiSettings,
+  currentUser,
+  isAdmin = false
 }) => {
   const [error, setError] = useState<string | null>(null);
   const [checking, setChecking] = useState(false);
@@ -47,8 +51,12 @@ const TaskModal: React.FC<TaskModalProps> = ({
       });
     };
     collect(departments);
+    // Non-admin users can only select their own department
+    if (!isAdmin && currentUser?.departmentId) {
+      return list.filter(d => d.id === currentUser.departmentId);
+    }
     return list;
-  }, [departments]);
+  }, [departments, isAdmin, currentUser?.departmentId]);
 
   useEffect(() => {
     if (isOpen) {

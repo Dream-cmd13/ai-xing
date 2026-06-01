@@ -158,9 +158,11 @@ export const canManageTask = (
   departments: Department[] = []
 ): boolean => {
   if (isAdminUser(currentUser, systemRoles)) return true;
+  // Task owner can always manage their own task
+  if (task.ownerId === currentUser.id) return true;
+  // Same department members can manage tasks in their department
   if (task.departmentId && currentUser.departmentId && task.departmentId === currentUser.departmentId) return true;
-  if (task.participantIds?.includes(currentUser.id)) return true;
-  if (task.approverIds?.includes(currentUser.id)) return true;
+  // Participants and approvers can only VIEW, not manage
   return false;
 };
 

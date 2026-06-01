@@ -1,4 +1,4 @@
-﻿import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useAppStore } from '../store/useAppStore';
 import { useAuthStore } from '../store/useAuthStore';
 import { useAppActions } from '../hooks/useAppActions';
@@ -14,7 +14,7 @@ import PageToast from './PageToast';
 import TaskModal from './TaskModal';
 import { usePageToast } from '../hooks/usePageToast';
 import { getUserFacingError } from '../utils/userFacingError';
-import { getVisibleDepartments, canManageTask, canViewTask } from '../utils/permissions';
+import { getVisibleDepartments, canManageTask, canViewTask, isAdminUser } from '../utils/permissions';
 import { ensureTaskTargetWeeks } from '../utils/taskPeriods.js';
 
 
@@ -144,7 +144,7 @@ const TaskCenterView: React.FC = () => {
     }
     
     if (isNewTask) {
-      nextTasks = [...nextTasks, ...entriesToAdd];
+      nextTasks = [...entriesToAdd, ...nextTasks];
     } else {
       nextTasks = nextTasks.map(t => t.id === newTask.id ? newTask : t);
     }
@@ -304,6 +304,12 @@ const TaskCenterView: React.FC = () => {
     return !!findDept(currentDept.subDepartments, targetDeptId);
   };
 
+  // Extract creation timestamp from task id (format: task-TIMESTAMP or task-TIMESTAMP-N)
+  const getTaskCreatedAt = (id: string): number => {
+    const match = id.match(/task-(\d+)/);
+    return match ? parseInt(match[1], 10) : 0;
+  };
+
   const filteredTasks = useMemo(() => {
     return allTasks.filter(item => {
       const { entry, owner } = item;
@@ -346,6 +352,14 @@ const TaskCenterView: React.FC = () => {
       }
 
       return true;
+    })
+    // Sort by creation time descending (newest first)
+    .sort((a, b) => {
+      const timeA = getTaskCreatedAt(a.entry.id);
+      const timeB = getTaskCreatedAt(b.entry.id);
+      if (timeB !== timeA) return timeB - timeA;
+      // Fallback: sort by startDate descending
+      return (b.entry.startDate ?? 0) - (a.entry.startDate ?? 0);
     });
   }, [allTasks, filterType, statusFilter, priorityFilter, searchQuery, currentUser, selectedOrgDeptId, departments]);
 
@@ -586,6 +600,8 @@ const TaskCenterView: React.FC = () => {
             : (!permissions.update || !canManageTask(taskModal.data as PADEntry, currentUser, state.systemRoles || [], state.departments))
         }
         aiSettings={state.aiSettings}
+        currentUser={currentUser}
+        isAdmin={isAdminUser(currentUser, state.systemRoles || [])}
       />
     </div>
   );

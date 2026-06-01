@@ -12,7 +12,7 @@ import PageToast from './PageToast';
 import TaskModal from './TaskModal';
 import { ensureTaskTargetWeeks } from '@/utils/taskPeriods.js';
 import { getUserFacingError } from '@/utils/userFacingError';
-import { canManageTask } from '@/utils/permissions';
+import { canManageTask, isAdminUser } from '@/utils/permissions';
 
 const WorkbenchView: React.FC = () => {
   const state = useAppStore();
@@ -131,9 +131,22 @@ const WorkbenchView: React.FC = () => {
     setState
   ]);
 
+  // Extract creation timestamp from task id (format: task-TIMESTAMP or task-TIMESTAMP-N)
+  const getTaskCreatedAt = (id: string): number => {
+    const match = id.match(/task-(\d+)/);
+    return match ? parseInt(match[1], 10) : 0;
+  };
+
   // Helper to get tasks from all PADs
   const allMyTasks = useMemo(() => {
-    return state.tasks.filter(e => e.ownerId === currentUser.id || e.participantIds?.includes(currentUser.id) || e.approverIds?.includes(currentUser.id));
+    return state.tasks
+      .filter(e => e.ownerId === currentUser.id || e.participantIds?.includes(currentUser.id) || e.approverIds?.includes(currentUser.id))
+      .sort((a, b) => {
+        const timeA = getTaskCreatedAt(a.id);
+        const timeB = getTaskCreatedAt(b.id);
+        if (timeB !== timeA) return timeB - timeA;
+        return (b.startDate ?? 0) - (a.startDate ?? 0);
+      });
   }, [state.tasks, currentUser.id]);
 
   const todayTasks = useMemo(() => {
@@ -278,7 +291,7 @@ const WorkbenchView: React.FC = () => {
     }
     
     if (isNewTask) {
-      nextTasks = [...nextTasks, ...entriesToAdd];
+      nextTasks = [...entriesToAdd, ...nextTasks];
     } else {
       nextTasks = nextTasks.map(t => t.id === newTask.id ? newTask : t);
     }
@@ -426,6 +439,8 @@ const WorkbenchView: React.FC = () => {
             : (!taskPermissions.update || !canManageTask(taskModal.data as PADEntry, currentUser, state.systemRoles || [], state.departments))
         }
         aiSettings={state.aiSettings}
+        currentUser={currentUser}
+        isAdmin={isAdminUser(currentUser, state.systemRoles || [])}
       />
     </div>
   );

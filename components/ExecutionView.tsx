@@ -11,7 +11,7 @@ import TaskModal from './TaskModal';
 import { Building2, ChevronDown, ChevronRight, LayoutGrid, Plus, X, Calendar, User as UserIcon, Clock } from 'lucide-react';
 import { usePageToast } from '../hooks/usePageToast';
 import { getUserFacingError } from '../utils/userFacingError';
-import { canManageDepartment, canManageTask, getVisibleDepartments } from '../utils/permissions';
+import { canManageDepartment, canManageTask, getVisibleDepartments, isAdminUser } from '../utils/permissions';
 import { ensureTaskTargetWeeks } from '../utils/taskPeriods.js';
 
 
@@ -281,7 +281,7 @@ const ExecutionView: React.FC = () => {
     }
     
     if (isNewTask) {
-      nextTasks = [...nextTasks, ...entriesToAdd];
+      nextTasks = [...entriesToAdd, ...nextTasks];
     } else {
       nextTasks = nextTasks.map(t => t.id === newTask.id ? newTask : t);
     }
@@ -453,6 +453,8 @@ const ExecutionView: React.FC = () => {
             : (!canEditExecutionTask || !canManageTask(taskModal.data as PADEntry, currentUser, state.systemRoles || [], state.departments))
         }
         periodWeeks={periodWeeks}
+        currentUser={currentUser}
+        isAdmin={isAdminUser(currentUser, state.systemRoles || [])}
       />
     </div>
   );

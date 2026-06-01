@@ -15,7 +15,7 @@ import {
 } from 'lucide-react';
 import { usePageToast } from '../hooks/usePageToast';
 import { getUserFacingError } from '../utils/userFacingError';
-import { canManageTask, getVisibleDepartments, canViewTask } from '../utils/permissions';
+import { canManageTask, getVisibleDepartments, canViewTask, isAdminUser } from '../utils/permissions';
 import { ensureTaskTargetWeeks } from '../utils/taskPeriods.js';
 
 
@@ -75,7 +75,18 @@ const WeeklyView: React.FC = () => {
   }, [clearToast, selectedWeek, selectedOwnerId, activeTab, viewMode]);
 
   const currentTasks = useMemo(() => {
-    return state.tasks.filter(t => t.ownerId === selectedOwnerId && t.targetWeeks?.includes(selectedWeek));
+    const getTaskCreatedAt = (id: string): number => {
+      const match = id.match(/task-(\d+)/);
+      return match ? parseInt(match[1], 10) : 0;
+    };
+    return state.tasks
+      .filter(t => t.ownerId === selectedOwnerId && t.targetWeeks?.includes(selectedWeek))
+      .sort((a, b) => {
+        const timeA = getTaskCreatedAt(a.id);
+        const timeB = getTaskCreatedAt(b.id);
+        if (timeB !== timeA) return timeB - timeA;
+        return (b.startDate ?? 0) - (a.startDate ?? 0);
+      });
   }, [state.tasks, selectedOwnerId, selectedWeek]);
 
   const groupedAvailableKRs = useMemo(() => {
@@ -246,7 +257,7 @@ const WeeklyView: React.FC = () => {
     if (taskModal.index !== null) {
       nextTasks = nextTasks.map(t => t.id === newData.id ? newData : t);
     } else {
-      nextTasks = [...nextTasks, ...entriesToAdd];
+      nextTasks = [...entriesToAdd, ...nextTasks];
     }
 
     try {
@@ -518,6 +529,8 @@ const WeeklyView: React.FC = () => {
             : (!permissions.update || !canManageTask(taskModal.data as PADEntry, currentUser, state.systemRoles || [], state.departments))
         }
         aiSettings={state.aiSettings}
+        currentUser={currentUser}
+        isAdmin={isAdminUser(currentUser, state.systemRoles || [])}
       />
 
       {/* Delete Confirmation Modal */}

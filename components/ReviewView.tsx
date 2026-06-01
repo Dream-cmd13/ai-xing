@@ -11,7 +11,7 @@ import { Calendar, Building2, ClipboardCheck, Save, CheckCircle, Loader2, Target
 import PageToast from './PageToast';
 import TaskModal from './TaskModal';
 import { getUserFacingError } from '../utils/userFacingError';
-import { canManageReview, canManageTask, getVisibleDepartments, canViewTask } from '../utils/permissions';
+import { canManageReview, canManageTask, getVisibleDepartments, canViewTask, isAdminUser } from '../utils/permissions';
 import { isTaskInMonthlyPeriod, isTaskInWeeklyPeriod } from '../utils/taskPeriods.js';
 import { readTaskReviewState, updateTaskReviewState } from '../utils/reviewTaskState.js';
 import { createReviewDraftSnapshot, hasReviewDraftChanges, ReviewDraftSnapshot } from '../utils/reviewDraft';
@@ -1185,6 +1185,8 @@ const ReviewView: React.FC = () => {
         groupedAvailableKRs={groupedAvailableKRs}
         mode={taskModal.mode}
         readOnly={!canManageTask(taskModal.data as PADEntry, currentUser, state.systemRoles || [], state.departments)}
+        currentUser={currentUser}
+        isAdmin={isAdminUser(currentUser, state.systemRoles || [])}
       />
     </div>
   );

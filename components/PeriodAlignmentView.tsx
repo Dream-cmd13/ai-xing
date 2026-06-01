@@ -103,6 +103,11 @@ const PeriodAlignmentView: React.FC<PeriodAlignmentViewProps> = ({
 
   // Pre-group tasks for efficiency
   const tasksByWeekAndKr = useMemo(() => {
+    const getTaskCreatedAt = (id: string): number => {
+      const match = id.match(/task-(\d+)/);
+      return match ? parseInt(match[1], 10) : 0;
+    };
+
     const map: Record<string, Record<string, PADEntry[]>> = {};
 
     state.tasks.forEach(e => {
@@ -117,6 +122,19 @@ const PeriodAlignmentView: React.FC<PeriodAlignmentViewProps> = ({
         });
       }
     });
+
+    // Sort each cell's tasks by creation time descending (newest first)
+    Object.values(map).forEach(weekMap => {
+      Object.keys(weekMap).forEach(krId => {
+        weekMap[krId].sort((a, b) => {
+          const timeA = getTaskCreatedAt(a.id);
+          const timeB = getTaskCreatedAt(b.id);
+          if (timeB !== timeA) return timeB - timeA;
+          return (b.startDate ?? 0) - (a.startDate ?? 0);
+        });
+      });
+    });
+
     return map;
   }, [state.tasks, currentUser, state.users]);
 
