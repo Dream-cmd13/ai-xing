@@ -29,6 +29,8 @@ class Config:
 
     GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
     DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "")
+    DEEPSEEK_BASE_URL = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com/v1").rstrip("/")
+    DEEPSEEK_DEFAULT_MODEL = os.getenv("DEEPSEEK_DEFAULT_MODEL", "deepseek-v4-flash").strip()
     DEFAULT_USER_PASSWORD = os.getenv("DEFAULT_USER_PASSWORD", "888888")
     LLM_PROVIDER_DEFAULT = os.getenv("LLM_PROVIDER_DEFAULT", "gemini").strip().lower()
     CORS_ALLOW_ORIGINS = _parse_csv(os.getenv("CORS_ALLOW_ORIGINS", "*"))

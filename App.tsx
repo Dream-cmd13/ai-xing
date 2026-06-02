@@ -11,7 +11,7 @@ const DEFAULT_AI_SETTINGS = {
   selectedModelId: 'gemini',
   configs: [
     { id: 'gemini', name: 'Gemini 2.5 Flash', type: 'gemini' as const, modelName: 'gemini-2.5-flash' },
-    { id: 'deepseek', name: 'DeepSeek Chat', type: 'deepseek' as const, modelName: 'deepseek-chat' }
+    { id: 'deepseek', name: 'DeepSeek V4 Flash', type: 'deepseek' as const, modelName: 'deepseek-v4-flash' }
   ]
 };
 

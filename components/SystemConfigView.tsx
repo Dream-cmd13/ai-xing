@@ -40,7 +40,7 @@ const SystemConfigView: React.FC = () => {
   const [configs, setConfigs] = useState<AIModelConfig[]>(
     aiSettings?.configs || [
       { id: 'gemini', name: 'Gemini 2.5 Flash', type: 'gemini', modelName: 'gemini-2.5-flash' },
-      { id: 'deepseek', name: 'DeepSeek Chat', type: 'deepseek', modelName: 'deepseek-chat' }
+      { id: 'deepseek', name: 'DeepSeek V4 Flash', type: 'deepseek', modelName: 'deepseek-v4-flash' }
     ]
   );
 
@@ -151,7 +151,7 @@ const SystemConfigView: React.FC = () => {
                               type="text"
                               value={config.modelName || ''}
                               onChange={(e) => handleUpdateConfig(config.id, { modelName: e.target.value })}
-                              placeholder={config.type === 'deepseek' ? 'deepseek-chat' : 'gemini-2.5-flash'}
+                              placeholder={config.type === 'deepseek' ? 'deepseek-v4-flash' : 'gemini-2.5-flash'}
                               className="w-full pl-10 pr-4 py-2 bg-white border border-slate-100 rounded-xl text-xs font-bold outline-none focus:border-brand-500 transition-all"
                             />
                           </div>

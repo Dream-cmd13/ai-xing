@@ -65,7 +65,9 @@ const getSessionToken = async (): Promise<string> => {
 const normalizeErrorMessage = (payload: SuccessEnvelope<unknown> | null, fallback: string): string => {
   if (!payload) return fallback;
   if (typeof payload.error === "string" && payload.error.trim()) return payload.error;
-  if (payload.error?.message) return payload.error.message;
+  if (payload.error && typeof payload.error === "object" && payload.error.message) {
+    return payload.error.message;
+  }
   return fallback;
 };
 

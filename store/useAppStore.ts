@@ -93,7 +93,7 @@ export const useAppStore = create<AppStoreState>((set) => ({
     selectedModelId: 'gemini', 
     configs: [
       { id: 'gemini', name: 'Gemini 2.5 Flash', type: 'gemini', modelName: 'gemini-2.5-flash' },
-      { id: 'deepseek', name: 'DeepSeek Chat', type: 'deepseek', modelName: 'deepseek-chat' }
+      { id: 'deepseek', name: 'DeepSeek V4 Flash', type: 'deepseek', modelName: 'deepseek-v4-flash' }
     ] 
   },
   

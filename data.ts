@@ -66,7 +66,7 @@ const normalizeObject = <T extends Record<string, any>>(value: any): T | undefin
 
 const DEFAULT_AI_CONFIGS: AIModelConfig[] = [
   { id: 'gemini', name: 'Gemini 2.5 Flash', type: 'gemini', modelName: 'gemini-2.5-flash' },
-  { id: 'deepseek', name: 'DeepSeek Chat', type: 'deepseek', modelName: 'deepseek-chat' }
+  { id: 'deepseek', name: 'DeepSeek V4 Flash', type: 'deepseek', modelName: 'deepseek-v4-flash' }
 ];
 
 const sanitizeAIConfigs = (configs: any): AIModelConfig[] => {
@@ -84,14 +84,14 @@ const sanitizeAIConfigs = (configs: any): AIModelConfig[] => {
           typeof config.name === 'string' && config.name.trim()
             ? config.name.trim()
             : type === 'deepseek'
-              ? 'DeepSeek Chat'
+              ? 'DeepSeek V4 Flash'
               : 'Gemini 2.5 Flash',
         type,
         modelName:
           typeof config.modelName === 'string' && config.modelName.trim()
             ? config.modelName.trim()
             : type === 'deepseek'
-              ? 'deepseek-chat'
+              ? 'deepseek-v4-flash'
               : 'gemini-2.5-flash'
       } satisfies AIModelConfig;
     });

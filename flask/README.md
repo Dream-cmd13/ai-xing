@@ -26,6 +26,8 @@ python app.py
 - 按需填写：
   - `GEMINI_API_KEY`
   - `DEEPSEEK_API_KEY`
+  - `DEEPSEEK_BASE_URL`，默认 `https://api.deepseek.com/v1`
+  - `DEEPSEEK_DEFAULT_MODEL`，默认 `deepseek-v4-flash`
 
 ## 接口
 
@@ -39,3 +41,4 @@ python app.py
 - 前端只传 Supabase JWT，不传任何服务端密钥。
 - 管理员接口在服务端校验 `public.is_admin()`。
 - 大模型 API Key 只存在服务端环境变量中。
+- DeepSeek 通过 OpenAI 官方 SDK 调用，并将 `base_url` 指向 `https://api.deepseek.com/v1`。
