@@ -870,7 +870,7 @@ BEGIN
 
   IF EXISTS (
     SELECT 1
-    FROM jsonb_array_elements_text(COALESCE(task_participant_ids, '[]'::jsonb)) AS participant_value(value)
+    FROM public.jsonb_text_values(COALESCE(task_participant_ids, '[]'::jsonb)) AS participant_value(value)
     WHERE participant_value.value = current_id
   ) THEN
     RETURN true;
@@ -878,13 +878,128 @@ BEGIN
 
   IF EXISTS (
     SELECT 1
-    FROM jsonb_array_elements_text(COALESCE(task_approver_ids, '[]'::jsonb)) AS approver_value(value)
+    FROM public.jsonb_text_values(COALESCE(task_approver_ids, '[]'::jsonb)) AS approver_value(value)
     WHERE approver_value.value = current_id
   ) THEN
     RETURN true;
   END IF;
 
   RETURN public.current_user_has_department_visibility(resolved_department_id);
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER STABLE;
+
+CREATE OR REPLACE FUNCTION public.current_user_can_view_task_user(
+  target_user_id TEXT
+)
+RETURNS BOOLEAN AS $$
+BEGIN
+  IF public.is_admin() THEN
+    RETURN true;
+  END IF;
+
+  IF target_user_id IS NULL THEN
+    RETURN false;
+  END IF;
+
+  RETURN EXISTS (
+    SELECT 1
+    FROM public.tasks task_row
+    WHERE public.current_user_can_view_task(
+      task_row.department_id,
+      task_row.created_by,
+      task_row.owner_id,
+      task_row.participant_ids,
+      task_row.approver_ids
+    )
+    AND (
+      task_row.created_by = target_user_id
+      OR task_row.owner_id = target_user_id
+      OR EXISTS (
+        SELECT 1
+        FROM public.jsonb_text_values(COALESCE(task_row.participant_ids, '[]'::jsonb)) AS participant_value(value)
+        WHERE participant_value.value = target_user_id
+      )
+      OR EXISTS (
+        SELECT 1
+        FROM public.jsonb_text_values(COALESCE(task_row.approver_ids, '[]'::jsonb)) AS approver_value(value)
+        WHERE approver_value.value = target_user_id
+      )
+    )
+  );
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER STABLE;
+
+CREATE OR REPLACE FUNCTION public.get_current_user_task_users()
+RETURNS TABLE (
+  id TEXT,
+  auth_id UUID,
+  username TEXT,
+  name TEXT,
+  role TEXT,
+  department_id TEXT,
+  pad_permissions JSONB,
+  reviews JSONB,
+  system_role_ids JSONB,
+  custom_permissions JSONB,
+  updated_at BIGINT,
+  row_version BIGINT
+) AS $$
+BEGIN
+  RETURN QUERY
+  WITH visible_tasks AS (
+    SELECT task_row.*
+    FROM public.tasks task_row
+    WHERE public.current_user_can_view_task(
+      task_row.department_id,
+      task_row.created_by,
+      task_row.owner_id,
+      task_row.participant_ids,
+      task_row.approver_ids
+    )
+  ),
+  related_user_ids AS (
+    SELECT visible_tasks.created_by AS user_id
+    FROM visible_tasks
+    WHERE visible_tasks.created_by IS NOT NULL
+    UNION
+    SELECT visible_tasks.owner_id AS user_id
+    FROM visible_tasks
+    WHERE visible_tasks.owner_id IS NOT NULL
+    UNION
+    SELECT participant_value.value AS user_id
+    FROM visible_tasks
+    CROSS JOIN LATERAL public.jsonb_text_values(COALESCE(visible_tasks.participant_ids, '[]'::jsonb)) AS participant_value(value)
+    UNION
+    SELECT approver_value.value AS user_id
+    FROM visible_tasks
+    CROSS JOIN LATERAL public.jsonb_text_values(COALESCE(visible_tasks.approver_ids, '[]'::jsonb)) AS approver_value(value)
+    UNION
+    SELECT log_item.value->>'userId' AS user_id
+    FROM visible_tasks
+    CROSS JOIN LATERAL jsonb_array_elements(
+      CASE
+        WHEN jsonb_typeof(COALESCE(visible_tasks.logs, '[]'::jsonb)) = 'array'
+        THEN COALESCE(visible_tasks.logs, '[]'::jsonb)
+        ELSE '[]'::jsonb
+      END
+    ) AS log_item(value)
+    WHERE log_item.value->>'userId' IS NOT NULL
+  )
+  SELECT DISTINCT
+    user_row.id,
+    user_row.auth_id,
+    user_row.username,
+    user_row.name,
+    user_row.role,
+    user_row.department_id,
+    user_row.pad_permissions,
+    user_row.reviews,
+    user_row.system_role_ids,
+    user_row.custom_permissions,
+    user_row.updated_at,
+    user_row.row_version
+  FROM public.users user_row
+  JOIN related_user_ids related_user ON related_user.user_id = user_row.id;
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER STABLE;
 
@@ -910,7 +1025,7 @@ BEGIN
 
   IF EXISTS (
     SELECT 1
-    FROM jsonb_array_elements_text(COALESCE(task_participant_ids, '[]'::jsonb)) AS participant_value(value)
+    FROM public.jsonb_text_values(COALESCE(task_participant_ids, '[]'::jsonb)) AS participant_value(value)
     WHERE participant_value.value = current_id
   ) THEN
     RETURN true;
@@ -1753,31 +1868,6 @@ CREATE POLICY users_select ON public.users FOR SELECT TO authenticated
     OR auth_id = auth.uid()
     OR lower(username) = public.current_auth_username()
     OR department_id = public.current_user_department_id()
-    OR EXISTS (
-      SELECT 1
-      FROM public.tasks task_row
-      WHERE public.current_user_can_view_task(
-        task_row.department_id,
-        task_row.created_by,
-        task_row.owner_id,
-        task_row.participant_ids,
-        task_row.approver_ids
-      )
-      AND (
-        task_row.created_by = public.users.id
-        OR task_row.owner_id = public.users.id
-        OR EXISTS (
-          SELECT 1
-          FROM public.jsonb_text_values(COALESCE(task_row.participant_ids, '[]'::jsonb)) AS participant_value(value)
-          WHERE participant_value.value = public.users.id
-        )
-        OR EXISTS (
-          SELECT 1
-          FROM public.jsonb_text_values(COALESCE(task_row.approver_ids, '[]'::jsonb)) AS approver_value(value)
-          WHERE approver_value.value = public.users.id
-        )
-      )
-    )
   );
 CREATE POLICY users_insert ON public.users FOR INSERT TO authenticated
   WITH CHECK (public.is_admin() OR public.has_menu_permission('user', 'create'));

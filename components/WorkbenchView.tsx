@@ -4,7 +4,7 @@ import { useAuthStore } from '@/store/useAuthStore';
 import { useAppActions } from '@/hooks/useAppActions';
 import { usePageToast } from '@/hooks/usePageToast';
 import { usePermissions } from '@/hooks/usePermissions';
-import { getDepartments, getStrategy, getUsers, getWorkbenchTasks } from '@/data';
+import { getCurrentUserTaskUsers, getDepartments, getStrategy, getUsers, getWorkbenchTasks } from '@/data';
 
 import { AppState, PADEntry, OKR, WeeklyPAD, TaskLog } from '@/types';
 import { Calendar, CheckCircle, Clock, Target, ArrowRight, LayoutDashboard, ListTodo, Briefcase, Flag, Loader2 } from 'lucide-react';
@@ -143,7 +143,7 @@ const WorkbenchView: React.FC = () => {
     missingTaskUserFetchKeyRef.current = fetchKey;
 
     let cancelled = false;
-    getUsers()
+    getCurrentUserTaskUsers()
       .then((loadedUsers) => {
         if (cancelled) return;
         const mergedUsersById = new Map(state.users.map(user => [user.id, user]));
