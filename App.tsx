@@ -10,7 +10,8 @@ import { supabase } from '@/supabase';
 const DEFAULT_AI_SETTINGS = {
   selectedModelId: 'gemini',
   configs: [
-    { id: 'gemini', name: 'Gemini 3 Flash Preview', type: 'gemini' as const, apiKey: 'ENV_KEY' }
+    { id: 'gemini', name: 'Gemini 2.5 Flash', type: 'gemini' as const, modelName: 'gemini-2.5-flash' },
+    { id: 'deepseek', name: 'DeepSeek Chat', type: 'deepseek' as const, modelName: 'deepseek-chat' }
   ]
 };
 

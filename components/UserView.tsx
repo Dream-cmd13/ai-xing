@@ -8,7 +8,7 @@ import { usePermissions } from '../hooks/usePermissions';
 
 import { AppState, User, Department, MenuPermission, UserRole } from '../types';
 import { addUser as addDbUser, updateUser as updateDbUser, deleteUser as deleteDbUser } from '../data';
-import { supabase } from '../supabase';
+import { createAdminUser, resetAdminUserPassword } from '../services/backendGateway';
 import { getUserRoleLabel } from '../utils/permissions';
 import { 
   Plus, Trash2, ShieldCheck, User as UserIcon, Key, RotateCcw,
@@ -133,23 +133,16 @@ const UserView: React.FC = () => {
     }
 
     try {
-      const { data, error } = await supabase.functions.invoke('admin-user-manager', {
-        body: {
-          action: 'create_user',
-          username: newUsername,
-          name: newName,
-          role: newRole,
-          departmentId: newDeptId || undefined
-        }
+      const data = await createAdminUser({
+        username: newUsername,
+        name: newName,
+        role: newRole,
+        departmentId: newDeptId || undefined
       });
 
-      if (error || !data?.success) {
-        throw new Error(error?.message || data?.error || '创建用户失败');
-      }
-
       const newUser: User = { 
-        id: data.data.userId, 
-        auth_id: data.data.authId,
+        id: data.userId, 
+        auth_id: data.authId,
         username: newUsername, 
         name: newName, 
         role: newRole,
@@ -179,16 +172,7 @@ const UserView: React.FC = () => {
     }
 
     try {
-      const { data, error } = await supabase.functions.invoke('admin-user-manager', {
-        body: {
-          action: 'reset_password',
-          auth_id: pendingResetUser.auth_id
-        }
-      });
-
-      if (error || !data?.success) {
-        throw new Error(error?.message || data?.error || '重置密码失败');
-      }
+      await resetAdminUserPassword(pendingResetUser.auth_id);
 
       setAlertMessage('密码已重置为 888888');
       setShowAlert(true);

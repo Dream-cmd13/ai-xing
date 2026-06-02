@@ -218,7 +218,7 @@ export interface AIModelConfig {
   id: string;
   name: string;
   type: 'minimax' | 'deepseek' | 'gemini' | 'custom';
-  apiKey: string;
+  apiKey?: string;
   baseUrl?: string;
   modelName?: string;
 }

@@ -5,7 +5,7 @@ import { useAuthStore } from '@/store/useAuthStore';
 import { useAppActions } from '@/hooks/useAppActions';
 import { usePermissions } from '@/hooks/usePermissions';
 
-import { Save, Shield, Cpu, Key, AlertCircle, CheckCircle2, Plus, Trash2, Globe } from 'lucide-react';
+import { Save, Shield, Cpu, AlertCircle, CheckCircle2 } from 'lucide-react';
 import { AISettings, AIModelConfig } from '@/types';
 
 
@@ -39,26 +39,10 @@ const SystemConfigView: React.FC = () => {
   );
   const [configs, setConfigs] = useState<AIModelConfig[]>(
     aiSettings?.configs || [
-      { id: 'gemini', name: 'Gemini 3 Flash Preview', type: 'gemini', apiKey: 'ENV_KEY' }
+      { id: 'gemini', name: 'Gemini 2.5 Flash', type: 'gemini', modelName: 'gemini-2.5-flash' },
+      { id: 'deepseek', name: 'DeepSeek Chat', type: 'deepseek', modelName: 'deepseek-chat' }
     ]
   );
-
-  const handleAddCustom = () => {
-    const newId = `custom-${Date.now()}`;
-    setConfigs([...configs, { 
-      id: newId, 
-      name: '自定义模型', 
-      type: 'custom', 
-      apiKey: '', 
-      baseUrl: '', 
-      modelName: '' 
-    }]);
-  };
-
-  const handleRemove = (id: string) => {
-    setConfigs(configs.filter(c => c.id !== id));
-    if (selectedModelId === id) setSelectedModelId('');
-  };
 
   const handleUpdateConfig = (id: string, updates: Partial<AIModelConfig>) => {
     setConfigs(configs.map(c => c.id === id ? { ...c, ...updates } : c));
@@ -117,12 +101,6 @@ const SystemConfigView: React.FC = () => {
                   <p className="text-slate-400 text-xs font-bold uppercase">AI Model Integration</p>
                 </div>
               </div>
-              <button 
-                onClick={handleAddCustom}
-                className="flex items-center gap-2 bg-slate-100 hover:bg-slate-200 text-slate-600 px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all"
-              >
-                <Plus size={14} /> 添加自定义
-              </button>
             </div>
 
             <div className="space-y-4">
@@ -156,69 +134,28 @@ const SystemConfigView: React.FC = () => {
                             {config.type}
                           </span>
                         </div>
-                        {config.type === 'custom' && (
-                          <button 
-                            onClick={() => handleRemove(config.id)}
-                            className="text-slate-400 hover:text-red-500 transition-colors"
-                          >
-                            <Trash2 size={16} />
-                          </button>
-                        )}
                       </div>
 
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div className="space-y-1">
-                          <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-1">API Key</label>
-                          <div className="relative">
-                            <Key className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-300" size={14} />
-                            <input
-                              type={config.apiKey === 'ENV_KEY' ? 'text' : 'password'}
-                              value={config.apiKey === 'ENV_KEY' ? '使用环境变量 (GEMINI_API_KEY)' : (config.apiKey || '')}
-                              disabled={config.apiKey === 'ENV_KEY'}
-                              onChange={(e) => handleUpdateConfig(config.id, { apiKey: e.target.value })}
-                              placeholder="输入 API 密钥"
-                              className={`w-full pl-10 pr-4 py-2 bg-white border border-slate-100 rounded-xl text-xs font-bold outline-none focus:border-brand-500 transition-all ${config.apiKey === 'ENV_KEY' ? 'text-slate-400 italic' : ''}`}
-                            />
-                            {config.apiKey === 'ENV_KEY' && (
-                              <button 
-                                onClick={() => handleUpdateConfig(config.id, { apiKey: '' })}
-                                className="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] text-brand-600 font-bold hover:underline"
-                              >
-                                自定义
-                              </button>
-                            )}
+                          <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-1">运行方式</label>
+                          <div className="w-full px-4 py-2 bg-slate-50 border border-slate-100 rounded-xl text-xs font-bold text-slate-500">
+                            由后端环境变量安全托管 API Key
                           </div>
                         </div>
-                        {config.type === 'custom' && (
-                          <>
-                            <div className="space-y-1">
-                              <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-1">Base URL</label>
-                              <div className="relative">
-                                <Globe className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-300" size={14} />
-                                <input
-                                  type="text"
-                                  value={config.baseUrl || ''}
-                                  onChange={(e) => handleUpdateConfig(config.id, { baseUrl: e.target.value })}
-                                  placeholder="https://api.openai.com/v1"
-                                  className="w-full pl-10 pr-4 py-2 bg-white border border-slate-100 rounded-xl text-xs font-bold outline-none focus:border-brand-500 transition-all"
-                                />
-                              </div>
-                            </div>
-                            <div className="space-y-1">
-                              <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-1">Model Name</label>
-                              <div className="relative">
-                                <Cpu className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-300" size={14} />
-                                <input
-                                  type="text"
-                                  value={config.modelName || ''}
-                                  onChange={(e) => handleUpdateConfig(config.id, { modelName: e.target.value })}
-                                  placeholder="gpt-3.5-turbo"
-                                  className="w-full pl-10 pr-4 py-2 bg-white border border-slate-100 rounded-xl text-xs font-bold outline-none focus:border-brand-500 transition-all"
-                                />
-                              </div>
-                            </div>
-                          </>
-                        )}
+                        <div className="space-y-1">
+                          <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-1">Model Name</label>
+                          <div className="relative">
+                            <Cpu className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-300" size={14} />
+                            <input
+                              type="text"
+                              value={config.modelName || ''}
+                              onChange={(e) => handleUpdateConfig(config.id, { modelName: e.target.value })}
+                              placeholder={config.type === 'deepseek' ? 'deepseek-chat' : 'gemini-2.5-flash'}
+                              className="w-full pl-10 pr-4 py-2 bg-white border border-slate-100 rounded-xl text-xs font-bold outline-none focus:border-brand-500 transition-all"
+                            />
+                          </div>
+                        </div>
                       </div>
                     </div>
                   </div>
@@ -250,13 +187,13 @@ const SystemConfigView: React.FC = () => {
               <div className="flex gap-3">
                 <div className="w-6 h-6 rounded-full bg-white/10 flex items-center justify-center shrink-0 text-[10px] font-black">2</div>
                 <p className="text-xs text-slate-400 leading-relaxed font-medium">
-                  自定义模型支持 OpenAI 兼容格式的 API 接口。
+                  当前安全后端仅支持 Gemini 与 DeepSeek，两者都通过服务端代理调用。
                 </p>
               </div>
               <div className="flex gap-3">
                 <div className="w-6 h-6 rounded-full bg-white/10 flex items-center justify-center shrink-0 text-[10px] font-black">3</div>
                 <p className="text-xs text-slate-400 leading-relaxed font-medium">
-                  密钥将加密存储在您的企业空间内，仅供系统后端调用使用。
+                  模型密钥不再保存在系统设置或业务表中，只允许配置在后端环境变量里。
                 </p>
               </div>
             </div>
@@ -265,7 +202,7 @@ const SystemConfigView: React.FC = () => {
           <div className="bg-brand-600 rounded-[2rem] p-8 text-white shadow-xl shadow-brand-600/20">
             <h3 className="text-lg font-black mb-2">安全提示</h3>
             <p className="text-xs text-brand-100 leading-relaxed font-medium mb-4">
-              系统设置仅限“系统管理员”角色访问。请妥善保管您的 API 密钥，不要泄露给非授权人员。
+              系统设置仅限“系统管理员”角色访问。前端只负责选择模型与模型名，真实 API Key 必须配置在后端服务环境变量中。
             </p>
             <div className="flex items-center gap-2 text-[10px] font-black uppercase tracking-widest bg-white/20 p-2 rounded-lg w-fit">
               <Shield size={12} /> Administrator Only

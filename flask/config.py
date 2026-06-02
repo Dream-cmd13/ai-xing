@@ -1,0 +1,51 @@
+import os
+from pathlib import Path
+
+from dotenv import load_dotenv
+
+
+BASE_DIR = Path(__file__).resolve().parent
+load_dotenv(BASE_DIR / ".env")
+load_dotenv()
+
+
+def _parse_csv(value: str) -> list[str]:
+    return [item.strip() for item in value.split(",") if item.strip()]
+
+
+class Config:
+    DEBUG = os.getenv("FLASK_DEBUG", "false").lower() == "true"
+    PORT = int(os.getenv("PORT", "5000"))
+
+    SUPABASE_URL = (os.getenv("SUPABASE_URL") or os.getenv("VITE_SUPABASE_URL") or "").rstrip("/")
+    SUPABASE_ANON_KEY = (
+        os.getenv("SUPABASE_ANON_KEY")
+        or os.getenv("SUPABASE_PUBLISHABLE_KEY")
+        or os.getenv("VITE_SUPABASE_PUBLISHABLE_KEY")
+        or os.getenv("VITE_SUPABASE_ANON_KEY")
+        or ""
+    )
+    SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
+
+    GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
+    DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "")
+    DEFAULT_USER_PASSWORD = os.getenv("DEFAULT_USER_PASSWORD", "888888")
+    LLM_PROVIDER_DEFAULT = os.getenv("LLM_PROVIDER_DEFAULT", "gemini").strip().lower()
+    CORS_ALLOW_ORIGINS = _parse_csv(os.getenv("CORS_ALLOW_ORIGINS", "*"))
+
+    @classmethod
+    def validate(cls) -> None:
+        required = {
+            "SUPABASE_URL": cls.SUPABASE_URL,
+            "SUPABASE_ANON_KEY": cls.SUPABASE_ANON_KEY,
+            "SUPABASE_SERVICE_ROLE_KEY": cls.SUPABASE_SERVICE_ROLE_KEY,
+        }
+        missing = [name for name, value in required.items() if not value]
+        if missing:
+            raise RuntimeError(f"Missing required environment variables: {', '.join(missing)}")
+
+        if cls.LLM_PROVIDER_DEFAULT == "gemini" and not cls.GEMINI_API_KEY:
+            raise RuntimeError("Missing required environment variable: GEMINI_API_KEY")
+
+        if cls.LLM_PROVIDER_DEFAULT == "deepseek" and not cls.DEEPSEEK_API_KEY:
+            raise RuntimeError("Missing required environment variable: DEEPSEEK_API_KEY")

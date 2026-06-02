@@ -1,46 +1,39 @@
-import { isSupabaseConfigured, supabase } from "../supabase";
+import { chatWithAI } from "./backendGateway";
 import { AISettings } from "../types";
+
+const resolveSelectedModel = (settings: AISettings | undefined) => {
+  const selectedId = settings?.selectedModelId;
+  const configs = settings?.configs || [];
+  const selectedConfig = configs.find((config) => config.id === selectedId) || configs[0];
+
+  if (!selectedConfig) {
+    throw new Error("未设置可用的大模型，请先在系统设置中选择模型。");
+  }
+
+  if (selectedConfig.type !== "gemini" && selectedConfig.type !== "deepseek") {
+    throw new Error("当前后端仅支持 Gemini 或 DeepSeek 模型。");
+  }
+
+  return {
+    provider: selectedConfig.type,
+    model: selectedConfig.modelName,
+  };
+};
 
 const callAI = async (settings: AISettings | undefined, prompt: string): Promise<string> => {
   try {
-    // Check if Supabase is configured
-    if (!isSupabaseConfigured()) {
-      console.error("Supabase configuration missing. Please set VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY (or VITE_SUPABASE_ANON_KEY) in Settings.");
-      return "AI 调用失败: Supabase 配置缺失。请在系统设置中配置 Supabase URL 和 Anon Key。";
-    }
-
-    // The Edge Function 'ai-chat' handles the Gemini API call securely
-    const { data, error } = await supabase.functions.invoke('ai-chat', {
-      body: { prompt }
-    });
-
-    if (error) {
-      console.error("Supabase Edge Function error:", error);
-      
-      // Handle specific error codes
-      if (error.message?.includes('401')) {
-        return "AI 调用失败: 401 Unauthorized。请确保 Edge Function 部署时使用了 --no-verify-jwt 参数，或者您已通过 Supabase Auth 登录。";
-      }
-      
-      if (error.message?.includes('Failed to send a request')) {
-        return "AI 调用失败: 无法发送请求到 Edge Function。请检查网络连接，或确保函数已正确部署。";
-      }
-
-      return `AI 调用失败: ${error.message || '未知错误'}`;
-    }
-
-    if (!data || !data.reply) {
-      console.error("AI response missing reply field:", data);
+    const { provider, model } = resolveSelectedModel(settings);
+    const result = await chatWithAI({ prompt, provider, model });
+    if (!result.reply) {
+      console.error("AI response missing reply field:", result);
       return "AI 响应异常: 返回数据格式不正确";
     }
-
-    return data.reply;
+    return result.reply;
   } catch (e: any) {
     console.error("AI call failed:", e);
     
-    // Check for network errors
     if (e.message?.includes('Failed to fetch') || e.name === 'TypeError') {
-      return "AI 调用失败: 网络请求被拦截或域名解析失败。请检查代理设置或 Supabase URL 是否正确。";
+      return "AI 调用失败: 网络请求被拦截或后端地址不可达。请检查代理设置或后端服务地址。";
     }
 
     return `AI 调用失败: ${e.message || '未知错误'}`;

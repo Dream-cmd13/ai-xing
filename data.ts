@@ -1,5 +1,5 @@
 
-import { AppState, User, Department, ProcessDefinition, CompanyStrategy, BusinessDefinition, SystemRole, PADEntry, AISettings, UserRole } from "./types";
+import { AppState, User, Department, ProcessDefinition, CompanyStrategy, BusinessDefinition, SystemRole, PADEntry, AIModelConfig, AISettings, UserRole } from "./types";
 import { isSupabaseConfigured, supabase } from "./supabase";
 import { isMissingTaskReviewColumnError, omitTaskReviewColumns, stripTaskReviewFieldsFromSelect } from "./utils/taskSchemaCompat";
 
@@ -64,11 +64,44 @@ const normalizeObject = <T extends Record<string, any>>(value: any): T | undefin
   return undefined;
 };
 
+const DEFAULT_AI_CONFIGS: AIModelConfig[] = [
+  { id: 'gemini', name: 'Gemini 2.5 Flash', type: 'gemini', modelName: 'gemini-2.5-flash' },
+  { id: 'deepseek', name: 'DeepSeek Chat', type: 'deepseek', modelName: 'deepseek-chat' }
+];
+
+const sanitizeAIConfigs = (configs: any): AIModelConfig[] => {
+  if (!Array.isArray(configs)) {
+    return DEFAULT_AI_CONFIGS;
+  }
+
+  const sanitized = configs
+    .filter((config): config is Record<string, any> => Boolean(config && typeof config === 'object'))
+    .map((config) => {
+      const type = config.type === 'deepseek' ? 'deepseek' : 'gemini';
+      return {
+        id: typeof config.id === 'string' && config.id.trim() ? config.id.trim() : type,
+        name:
+          typeof config.name === 'string' && config.name.trim()
+            ? config.name.trim()
+            : type === 'deepseek'
+              ? 'DeepSeek Chat'
+              : 'Gemini 2.5 Flash',
+        type,
+        modelName:
+          typeof config.modelName === 'string' && config.modelName.trim()
+            ? config.modelName.trim()
+            : type === 'deepseek'
+              ? 'deepseek-chat'
+              : 'gemini-2.5-flash'
+      } satisfies AIModelConfig;
+    });
+
+  return sanitized.length > 0 ? sanitized : DEFAULT_AI_CONFIGS;
+};
+
 const mapSettingsRow = (settingsData: any): AISettings => ({
   selectedModelId: settingsData?.ai_settings?.selectedModelId || 'gemini',
-  configs: settingsData?.ai_settings?.configs || [
-    { id: 'gemini', name: 'Gemini 3 Flash Preview', type: 'gemini', apiKey: 'ENV_KEY' }
-  ],
+  configs: sanitizeAIConfigs(settingsData?.ai_settings?.configs),
   updatedAt: settingsData?.updated_at,
   rowVersion: normalizeRowVersion(settingsData?.row_version)
 });
@@ -400,7 +433,7 @@ export const saveAISettings = async (settings: AISettings): Promise<AISettings> 
   const payload = {
     ai_settings: {
       selectedModelId: settings.selectedModelId,
-      configs: settings.configs
+      configs: sanitizeAIConfigs(settings.configs)
     },
     updated_at: nextUpdatedAt,
     row_version: currentRowVersion + 1

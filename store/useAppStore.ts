@@ -92,7 +92,8 @@ export const useAppStore = create<AppStoreState>((set) => ({
   aiSettings: { 
     selectedModelId: 'gemini', 
     configs: [
-      { id: 'gemini', name: 'Gemini 3 Flash Preview', type: 'gemini', apiKey: 'ENV_KEY' }
+      { id: 'gemini', name: 'Gemini 2.5 Flash', type: 'gemini', modelName: 'gemini-2.5-flash' },
+      { id: 'deepseek', name: 'DeepSeek Chat', type: 'deepseek', modelName: 'deepseek-chat' }
     ] 
   },
   
