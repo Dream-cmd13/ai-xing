@@ -4,7 +4,7 @@ import { useAuthStore } from '@/store/useAuthStore';
 import { useAppActions } from '@/hooks/useAppActions';
 import { usePageToast } from '@/hooks/usePageToast';
 import { usePermissions } from '@/hooks/usePermissions';
-import { getDepartments, getStrategy, getWorkbenchTasks } from '@/data';
+import { getCurrentUserTaskUsers, getDepartments, getStrategy, getUsers, getWorkbenchTasks } from '@/data';
 
 import { AppState, PADEntry, OKR, WeeklyPAD, TaskLog } from '@/types';
 import { Calendar, CheckCircle, Clock, Target, ArrowRight, LayoutDashboard, ListTodo, Briefcase, Flag, Loader2 } from 'lucide-react';
@@ -36,6 +36,7 @@ const WorkbenchView: React.FC = () => {
   const setLastSavedDepartments = state.setLastSavedDepartments;
   const setLastSavedStrategy = state.setLastSavedStrategy;
   const setLastSavedTasks = state.setLastSavedTasks;
+  const setLastSavedUsers = state.setLastSavedUsers;
   const setBackendError = state.setBackendError;
   const setIsDirty = state.setIsDirty;
   const backendError = state.backendError;
@@ -54,6 +55,7 @@ const WorkbenchView: React.FC = () => {
   const { toastState, showToast, clearToast } = usePageToast();
   const [isWorkbenchTasksLoading, setIsWorkbenchTasksLoading] = useState(false);
   const backgroundPrefetchVersionRef = useRef(0);
+  const missingTaskUserFetchKeyRef = useRef('');
 
   useEffect(() => {
     if (!currentUser?.id || domainLoadStatus.tasks.loaded) {
@@ -83,6 +85,81 @@ const WorkbenchView: React.FC = () => {
       cancelled = true;
     };
   }, [currentUser?.id, domainLoadStatus.tasks.loaded, setBackendError, setLastSavedTasks, setState]);
+
+  useEffect(() => {
+    if (domainLoadStatus.users.loaded || domainLoadStatus.users.loading) {
+      return;
+    }
+
+    let cancelled = false;
+    setDomainLoadState('users', { loading: true });
+
+    getUsers()
+      .then((loadedUsers) => {
+        if (cancelled) return;
+        setState({ users: loadedUsers });
+        setLastSavedUsers(loadedUsers);
+        setDomainLoadState('users', { loaded: true, loading: false });
+      })
+      .catch((error: any) => {
+        if (cancelled) return;
+        setDomainLoadState('users', { loaded: false, loading: false });
+        setBackendError(getUserFacingError(error, '用户数据加载失败，请稍后重试'));
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    domainLoadStatus.users.loaded,
+    domainLoadStatus.users.loading,
+    setBackendError,
+    setDomainLoadState,
+    setLastSavedUsers,
+    setState
+  ]);
+
+  useEffect(() => {
+    const relatedUserIds = new Set<string>();
+    state.tasks.forEach((task) => {
+      if (task.ownerId) relatedUserIds.add(task.ownerId);
+      if (task.createdBy) relatedUserIds.add(task.createdBy);
+      (task.participantIds || []).forEach(id => relatedUserIds.add(id));
+      (task.approverIds || []).forEach(id => relatedUserIds.add(id));
+      (task.logs || []).forEach(log => relatedUserIds.add(log.userId));
+    });
+
+    const existingUserIds = new Set(state.users.map(user => user.id));
+    const missingUserIds = Array.from(relatedUserIds).filter(id => id && !existingUserIds.has(id)).sort();
+    if (missingUserIds.length === 0) {
+      missingTaskUserFetchKeyRef.current = '';
+      return;
+    }
+
+    const fetchKey = missingUserIds.join('|');
+    if (missingTaskUserFetchKeyRef.current === fetchKey) {
+      return;
+    }
+    missingTaskUserFetchKeyRef.current = fetchKey;
+
+    let cancelled = false;
+    getCurrentUserTaskUsers()
+      .then((loadedUsers) => {
+        if (cancelled) return;
+        const mergedUsersById = new Map(state.users.map(user => [user.id, user]));
+        loadedUsers.forEach(user => mergedUsersById.set(user.id, user));
+        const mergedUsers = Array.from(mergedUsersById.values());
+        setState({ users: mergedUsers });
+        setLastSavedUsers(mergedUsers);
+      })
+      .catch(() => {
+        // The modal still renders stable ID fallbacks when RLS cannot return a user row.
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [state.tasks, state.users, setLastSavedUsers, setState]);
 
   useEffect(() => {
     const shouldLoadDepartments = !domainLoadStatus.departments.loaded && !domainLoadStatus.departments.loading;

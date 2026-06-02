@@ -310,6 +310,18 @@ export const getUsers = async (): Promise<User[]> => {
   }
 };
 
+export const getCurrentUserTaskUsers = async (): Promise<User[]> => {
+  if (!isSupabaseConfigured()) throw new Error("Supabase not configured");
+  try {
+    const { data, error } = await supabase.rpc('get_current_user_task_users');
+    if (error) throw error;
+    return (data || []).map(mapUserRow);
+  } catch (e) {
+    handleSupabaseError(e);
+    throw e;
+  }
+};
+
 export const getDepartments = async (): Promise<Department[]> => {
   if (!isSupabaseConfigured()) throw new Error("Supabase not configured");
   try {
