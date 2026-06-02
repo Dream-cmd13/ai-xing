@@ -26,6 +26,7 @@ const BusinessDefinitionView: React.FC = () => {
   const isSaving = state.isSaving;
   const showSaveSuccess = state.showSaveSuccess;
   const isDirty = state.isDirty;
+  const setIsDirty = state.setIsDirty;
   const { attemptLeave, LeaveModal } = useLeaveGuard(isDirty);
   const dirtyDomains = state.dirtyDomains;
   const backendError = state.backendError;

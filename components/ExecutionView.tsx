@@ -11,7 +11,7 @@ import TaskModal from './TaskModal';
 import { Building2, ChevronDown, ChevronRight, LayoutGrid, Plus, X, Calendar, User as UserIcon, Clock } from 'lucide-react';
 import { usePageToast } from '../hooks/usePageToast';
 import { getUserFacingError } from '../utils/userFacingError';
-import { canManageDepartment, canManageTask, getVisibleDepartments, isAdminUser } from '../utils/permissions';
+import { canManageDepartment, canManageTask, canViewTask, getVisibleDepartments, isAdminUser } from '../utils/permissions';
 import { ensureTaskTargetWeeks } from '../utils/taskPeriods.js';
 
 
@@ -104,7 +104,7 @@ const ExecutionView: React.FC = () => {
     ? canManageDepartment(selectedDepartment, currentUser, state.systemRoles || [], state.departments)
     : false;
   const canCreateExecutionTask = permissions.create && canManageSelectedDepartment;
-  const canEditExecutionTask = permissions.update && canManageSelectedDepartment;
+  const canEditExecutionTask = permissions.update;
 
   const groupedAvailableKRs = useMemo(() => {
     if (!taskModal.weekId) return [];
@@ -189,27 +189,9 @@ const ExecutionView: React.FC = () => {
   };
 
   const handleTaskClick = (weekId: string, task: PADEntry) => {
-    if (!canEditExecutionTask) return;
-    const isOwner = task.ownerId === currentUser.id;
-    const isParticipant = task.participantIds?.includes(currentUser.id);
-    const isApprover = task.approverIds?.includes(currentUser.id);
     const owner = state.users.find(u => u.id === task.ownerId);
 
-    let hasPermission = true;
-    if (!isOwner && !isParticipant && !isApprover) {
-      if (task.visibility === 'private') {
-        hasPermission = false;
-      } else if (task.visibility === 'department') {
-        const targetDeptId = task.departmentId || owner?.departmentId;
-        if (targetDeptId !== currentUser.departmentId && !currentUser.padPermissions?.includes(targetDeptId || '')) {
-          hasPermission = false;
-        }
-      } else if (task.visibility === 'members') {
-        hasPermission = false;
-      }
-    }
-
-    if (!hasPermission) {
+    if (!canViewTask(task, currentUser, state.users, state.systemRoles || [], state.departments)) {
       showToast(`无任务查看权限，如果需要查看任务，请联系任务创建人【${owner?.name || ''}】`, 'info');
       return;
     }
@@ -232,12 +214,17 @@ const ExecutionView: React.FC = () => {
     const targetOwnerId = newTask.ownerId || currentUser.id;
 
     const isNewTask = !state.tasks.some(e => e.id === newTask.id);
+    const oldTask = state.tasks.find(e => e.id === newTask.id);
+    const currentUserIsAdmin = isAdminUser(currentUser, state.systemRoles || []);
     if (isNewTask && !canCreateExecutionTask) return;
-    if (!isNewTask && (!canEditExecutionTask || !canManageTask(newTask, currentUser, state.systemRoles || [], state.departments))) return;
+    if (!isNewTask && (!oldTask || !permissions.update || !canManageTask(oldTask, currentUser, state.systemRoles || [], state.departments))) return;
+    if (!isNewTask && !currentUserIsAdmin && oldTask) {
+      newTask.ownerId = oldTask.ownerId;
+    } else if (isNewTask && !currentUserIsAdmin) {
+      newTask.ownerId = currentUser.id;
+    }
 
     if (!isNewTask) {
-      const oldTask = state.tasks.find(e => e.id === newTask.id);
-
       if (oldTask) {
         const loggableStatuses = ['submitted', 'in-progress', 'paused', 'terminated', 'completed'];
         if (loggableStatuses.includes(oldTask.status)) {
@@ -329,6 +316,11 @@ const ExecutionView: React.FC = () => {
   const handleDeleteTask = async () => {
     if (!taskModal.data.id) return;
     const taskId = taskModal.data.id;
+    const taskToDelete = state.tasks.find(t => t.id === taskId);
+    if (!taskToDelete || !permissions.update || !canManageTask(taskToDelete, currentUser, state.systemRoles || [], state.departments)) {
+      showToast('无权限删除该任务', 'error');
+      return;
+    }
     const updatedTasks = state.tasks.filter(t => t.id !== taskId);
 
     try {
@@ -450,7 +442,7 @@ const ExecutionView: React.FC = () => {
         readOnly={
           taskModal.mode === 'create'
             ? !canCreateExecutionTask
-            : (!canEditExecutionTask || !canManageTask(taskModal.data as PADEntry, currentUser, state.systemRoles || [], state.departments))
+            : (!permissions.update || !canManageTask(taskModal.data as PADEntry, currentUser, state.systemRoles || [], state.departments))
         }
         periodWeeks={periodWeeks}
         currentUser={currentUser}

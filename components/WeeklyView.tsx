@@ -128,6 +128,11 @@ const WeeklyView: React.FC = () => {
     if (deleteConfirmIndex === null) return;
     const taskToDelete = currentTasks[deleteConfirmIndex];
     if (taskToDelete) {
+      if (!permissions.update || !canManageTask(taskToDelete, currentUser, state.systemRoles || [], state.departments)) {
+        showToast('无权限删除该任务', 'error');
+        setDeleteConfirmIndex(null);
+        return;
+      }
       const newTasks = state.tasks.filter(t => t.id !== taskToDelete.id);
       try {
         await persistTaskDeletion(newTasks, [taskToDelete.id]);
@@ -142,6 +147,12 @@ const WeeklyView: React.FC = () => {
   const [taskModal, setTaskModal] = useState<{ isOpen: boolean, index: number | null, mode: 'create' | 'edit', data: Partial<PADEntry> }>({ isOpen: false, index: null, mode: 'create', data: {} });
 
   const handleAddTask = () => {
+    const currentUserIsAdmin = isAdminUser(currentUser, state.systemRoles || []);
+    if (!permissions.create || (!currentUserIsAdmin && selectedOwnerId !== currentUser.id)) {
+      showToast('无权限为其他人创建任务', 'error');
+      return;
+    }
+    const ownerId = currentUserIsAdmin ? selectedOwnerId : currentUser.id;
     setTaskModal({ 
       isOpen: true, 
       index: null, 
@@ -151,8 +162,8 @@ const WeeklyView: React.FC = () => {
         title: '', 
         status: 'draft',
         priority: 'medium',
-        ownerId: selectedOwnerId,
-        departmentId: state.users.find(u => u.id === selectedOwnerId)?.departmentId || currentUser.departmentId,
+        ownerId,
+        departmentId: state.users.find(u => u.id === ownerId)?.departmentId || currentUser.departmentId,
         visibility: 'public',
         targetWeeks: [selectedWeek],
         startDate: Date.now(),
@@ -179,6 +190,10 @@ const WeeklyView: React.FC = () => {
   const deleteTask = async (index: number) => {
     if (currentTasks[index]) {
       const taskToDelete = currentTasks[index];
+      if (!permissions.update || !canManageTask(taskToDelete, currentUser, state.systemRoles || [], state.departments)) {
+        showToast('无权限删除该任务', 'error');
+        return;
+      }
       const newTasks = state.tasks.filter(t => t.id !== taskToDelete.id);
       try {
         await persistTaskDeletion(newTasks, [taskToDelete.id]);
@@ -193,6 +208,10 @@ const WeeklyView: React.FC = () => {
   const handleDeleteTask = async () => {
     if (taskModal.index !== null && currentTasks[taskModal.index]) {
       const taskToDelete = currentTasks[taskModal.index];
+      if (!permissions.update || !canManageTask(taskToDelete, currentUser, state.systemRoles || [], state.departments)) {
+        showToast('无权限删除该任务', 'error');
+        return;
+      }
       const newTasks = state.tasks.filter(t => t.id !== taskToDelete.id);
       try {
         await persistTaskDeletion(newTasks, [taskToDelete.id]);
@@ -210,9 +229,22 @@ const WeeklyView: React.FC = () => {
       { ...taskModal.data, status } as PADEntry,
       selectedWeek
     ) as PADEntry;
+    const oldTask = taskModal.index !== null ? currentTasks[taskModal.index] : undefined;
+    const currentUserIsAdmin = isAdminUser(currentUser, state.systemRoles || []);
+
+    if (taskModal.index !== null) {
+      if (!oldTask || !permissions.update || !canManageTask(oldTask, currentUser, state.systemRoles || [], state.departments)) {
+        showToast('无权限修改该任务', 'error');
+        return;
+      }
+      if (!currentUserIsAdmin) {
+        newData.ownerId = oldTask.ownerId;
+      }
+    } else if (!currentUserIsAdmin) {
+      newData.ownerId = currentUser.id;
+    }
     
     if (taskModal.index !== null) {
-      const oldTask = currentTasks[taskModal.index];
       if (oldTask) {
         const loggableStatuses = ['submitted', 'in-progress', 'paused', 'terminated', 'completed'];
         if (loggableStatuses.includes(oldTask.status)) {
@@ -277,8 +309,8 @@ const WeeklyView: React.FC = () => {
           title: '', 
           status: 'draft',
           priority: 'medium',
-          ownerId: selectedOwnerId,
-          departmentId: state.users.find(u => u.id === selectedOwnerId)?.departmentId || currentUser.departmentId,
+          ownerId: currentUserIsAdmin ? selectedOwnerId : currentUser.id,
+          departmentId: state.users.find(u => u.id === (currentUserIsAdmin ? selectedOwnerId : currentUser.id))?.departmentId || currentUser.departmentId,
           visibility: 'public',
           targetWeeks: [selectedWeek],
           startDate: Date.now(),
@@ -447,7 +479,7 @@ const WeeklyView: React.FC = () => {
           <div className="flex-1 overflow-y-auto p-4 md:p-8 space-y-4 custom-scrollbar bg-[radial-gradient(#e5e7eb_1px,transparent_1px)] [background-size:24px_24px]">
               {(() => {
                 const visibleEntries = currentTasks.map((entry, idx) => ({ entry, idx })).filter(({ entry }) => {
-                  return canViewTask(entry, currentUser, state.users, state.systemRoles || []);
+                  return canViewTask(entry, currentUser, state.users, state.systemRoles || [], state.departments);
                 });
 
                 if (visibleEntries.length === 0) {
@@ -479,7 +511,7 @@ const WeeklyView: React.FC = () => {
                                </span>
                             </div>
                           </div>
-                          {permissions.update && (
+                          {permissions.update && canManageTask(entry, currentUser, state.systemRoles || [], state.departments) && (
                             <button 
                               onClick={(e) => { e.stopPropagation(); setDeleteConfirmIndex(idx); }}
                               className="p-2 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-xl transition-colors opacity-0 group-hover:opacity-100"

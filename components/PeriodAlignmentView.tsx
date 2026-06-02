@@ -111,7 +111,7 @@ const PeriodAlignmentView: React.FC<PeriodAlignmentViewProps> = ({
     const map: Record<string, Record<string, PADEntry[]>> = {};
 
     state.tasks.forEach(e => {
-      if (!canViewTask(e, currentUser, state.users, state.systemRoles || [])) return;
+      if (!canViewTask(e, currentUser, state.users, state.systemRoles || [], state.departments)) return;
 
       if (e.alignedKrId) {
         const weeks = e.targetWeeks && e.targetWeeks.length > 0 ? e.targetWeeks : [];
@@ -136,7 +136,7 @@ const PeriodAlignmentView: React.FC<PeriodAlignmentViewProps> = ({
     });
 
     return map;
-  }, [state.tasks, currentUser, state.users]);
+  }, [state.tasks, currentUser, state.users, state.systemRoles, state.departments]);
 
   // Get tasks for the weeks
   const getTasksForCell = (weekId: string, krId: string) => {
@@ -229,8 +229,8 @@ const PeriodAlignmentView: React.FC<PeriodAlignmentViewProps> = ({
                             {tasks.map(t => (
                               <div 
                                 key={t.id} 
-                                onClick={canEditTask ? () => onTaskClick(w.id, t) : undefined}
-                                className={`bg-white p-2 rounded-lg border shadow-sm text-[10px] font-bold text-slate-700 transition-all ${canEditTask ? 'cursor-pointer' : 'cursor-default'} ${canEditTask ? 'hover:border-brand-300' : ''}`}
+                                onClick={() => onTaskClick(w.id, t)}
+                                className="bg-white p-2 rounded-lg border shadow-sm text-[10px] font-bold text-slate-700 transition-all cursor-pointer hover:border-brand-300"
                               >
                                 <div className="flex items-center gap-1 mb-1">
                                   {t.status === 'completed' ? <CheckCircle size={10} className="text-emerald-500"/> : <Clock size={10} className="text-amber-500"/>}

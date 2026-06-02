@@ -433,12 +433,12 @@ BEGIN
     RETURN true;
   END IF;
 
-  IF public.is_manager() THEN
-    RETURN true;
-  END IF;
-
   IF target_department_id IS NULL THEN
     RETURN false;
+  END IF;
+
+  IF public.is_department_manager(target_department_id) THEN
+    RETURN true;
   END IF;
 
   current_department_id := public.current_user_department_id();
@@ -890,6 +890,7 @@ $$ LANGUAGE plpgsql SECURITY DEFINER STABLE;
 
 CREATE OR REPLACE FUNCTION public.current_user_can_manage_task(
   task_department_id TEXT,
+  task_owner_id TEXT,
   task_participant_ids JSONB,
   task_approver_ids JSONB
 )
@@ -903,8 +904,7 @@ BEGIN
 
   current_id := public.current_user_id();
 
-  IF task_department_id IS NOT NULL
-     AND task_department_id = public.current_user_department_id() THEN
+  IF task_owner_id = current_id THEN
     RETURN true;
   END IF;
 
@@ -916,17 +916,39 @@ BEGIN
     RETURN true;
   END IF;
 
-  IF EXISTS (
-    SELECT 1
-    FROM jsonb_array_elements_text(COALESCE(task_approver_ids, '[]'::jsonb)) AS approver_value(value)
-    WHERE approver_value.value = current_id
-  ) THEN
-    RETURN true;
-  END IF;
-
   RETURN false;
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER STABLE;
+
+CREATE OR REPLACE FUNCTION public.enforce_task_owner_scope()
+RETURNS TRIGGER AS $$
+DECLARE
+  current_id TEXT;
+BEGIN
+  IF public.is_admin() THEN
+    RETURN NEW;
+  END IF;
+
+  current_id := public.current_user_id();
+
+  IF TG_OP = 'INSERT' THEN
+    IF NEW.owner_id IS DISTINCT FROM current_id THEN
+      RAISE EXCEPTION '非管理员不能将任务负责人设置为其他人';
+    END IF;
+  ELSIF TG_OP = 'UPDATE' THEN
+    IF NEW.owner_id IS DISTINCT FROM OLD.owner_id THEN
+      RAISE EXCEPTION '非管理员不能修改任务负责人';
+    END IF;
+  END IF;
+
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+DROP TRIGGER IF EXISTS enforce_task_owner_scope_on_tasks ON public.tasks;
+CREATE TRIGGER enforce_task_owner_scope_on_tasks
+  BEFORE INSERT OR UPDATE ON public.tasks
+  FOR EACH ROW EXECUTE FUNCTION public.enforce_task_owner_scope();
 
 CREATE OR REPLACE FUNCTION public.current_user_can_view_process(
   process_department_id TEXT,
@@ -1858,7 +1880,7 @@ CREATE POLICY tasks_update ON public.tasks FOR UPDATE TO authenticated
         public.has_menu_permission('task-center', 'update')
         OR public.has_menu_permission('execution', 'update')
       )
-      AND public.current_user_can_manage_task(department_id, participant_ids, approver_ids)
+      AND public.current_user_can_manage_task(department_id, owner_id, participant_ids, approver_ids)
     )
   )
   WITH CHECK (
@@ -1868,7 +1890,7 @@ CREATE POLICY tasks_update ON public.tasks FOR UPDATE TO authenticated
         public.has_menu_permission('task-center', 'update')
         OR public.has_menu_permission('execution', 'update')
       )
-      AND public.current_user_can_manage_task(department_id, participant_ids, approver_ids)
+      AND public.current_user_can_manage_task(department_id, owner_id, participant_ids, approver_ids)
     )
   );
 CREATE POLICY tasks_delete ON public.tasks FOR DELETE TO authenticated
@@ -1879,7 +1901,7 @@ CREATE POLICY tasks_delete ON public.tasks FOR DELETE TO authenticated
         public.has_menu_permission('task-center', 'update')
         OR public.has_menu_permission('execution', 'update')
       )
-      AND public.current_user_can_manage_task(department_id, participant_ids, approver_ids)
+      AND public.current_user_can_manage_task(department_id, owner_id, participant_ids, approver_ids)
     )
   );
 
