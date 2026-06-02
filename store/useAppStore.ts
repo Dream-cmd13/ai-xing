@@ -30,6 +30,8 @@ const createInitialDomainLoadStatus = (): Record<AppDomainKey, DomainLoadState> 
 export interface AppStoreState extends AppState {
   isDirty: boolean;
   dirtyDomains: AppDomainKey[];
+  taskLoadMode: 'none' | 'list' | 'full';
+  taskLoadScope: 'none' | 'mine' | 'org' | 'full';
   isSaving: boolean;
   showSaveSuccess: boolean;
   backendError: string | null;
@@ -54,6 +56,8 @@ export interface AppStoreState extends AppState {
   setCurrentProcessId: (id: string | null) => void;
   setIsInitialLoadComplete: (isComplete: boolean) => void;
   setDirtyDomains: (domains: AppDomainKey[]) => void;
+  setTaskLoadMode: (mode: 'none' | 'list' | 'full') => void;
+  setTaskLoadScope: (scope: 'none' | 'mine' | 'org' | 'full') => void;
   markDirtyDomains: (domains: AppDomainKey[]) => void;
   clearDirtyDomains: (domains: AppDomainKey[]) => void;
   setDomainLoadState: (domain: AppDomainKey, state: Partial<DomainLoadState>) => void;
@@ -99,6 +103,8 @@ export const useAppStore = create<AppStoreState>((set) => ({
   
   isDirty: false,
   dirtyDomains: [],
+  taskLoadMode: 'none',
+  taskLoadScope: 'none',
   isSaving: false,
   showSaveSuccess: false,
   backendError: null,
@@ -124,6 +130,8 @@ export const useAppStore = create<AppStoreState>((set) => ({
   }),
   setIsDirty: (isDirty) => set({ isDirty }),
   setDirtyDomains: (dirtyDomains) => set({ dirtyDomains, isDirty: dirtyDomains.length > 0 }),
+  setTaskLoadMode: (taskLoadMode) => set({ taskLoadMode }),
+  setTaskLoadScope: (taskLoadScope) => set({ taskLoadScope }),
   markDirtyDomains: (domains) => set((state) => {
     const dirtyDomains = Array.from(new Set([...state.dirtyDomains, ...domains]));
     return { dirtyDomains, isDirty: dirtyDomains.length > 0 };
@@ -147,7 +155,11 @@ export const useAppStore = create<AppStoreState>((set) => ({
       }
     }
   })),
-  resetDomainLoadState: () => set({ domainLoadStatus: createInitialDomainLoadStatus() }),
+  resetDomainLoadState: () => set({
+    domainLoadStatus: createInitialDomainLoadStatus(),
+    taskLoadMode: 'none',
+    taskLoadScope: 'none'
+  }),
   
   setLastSavedProcesses: (lastSavedProcesses) => set({ lastSavedProcesses }),
   setLastSavedDepartments: (lastSavedDepartments) => set({ lastSavedDepartments }),

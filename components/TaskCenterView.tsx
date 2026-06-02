@@ -16,6 +16,7 @@ import { usePageToast } from '../hooks/usePageToast';
 import { getUserFacingError } from '../utils/userFacingError';
 import { getVisibleDepartments, canManageTask, canViewTask, isAdminUser } from '../utils/permissions';
 import { ensureTaskTargetWeeks } from '../utils/taskPeriods.js';
+import { getCurrentUserTaskUsers, getTaskById, getTaskList } from '../data';
 
 
 
@@ -35,6 +36,24 @@ const TaskCenterView: React.FC = () => {
     persistTaskEntries, persistTaskDeletion
   } = actions;
   const setBackendError = state.setBackendError;
+  const setLastSavedTasks = state.setLastSavedTasks;
+  const setLastSavedUsers = state.setLastSavedUsers;
+  const setTaskLoadMode = state.setTaskLoadMode;
+  const setTaskLoadScope = state.setTaskLoadScope;
+
+  const flatAllDepartments = useMemo(() => {
+    const list: Department[] = [];
+    const collect = (items: Department[]) => {
+      items.forEach((department) => {
+        list.push(department);
+        collect(department.subDepartments || []);
+      });
+    };
+    collect(departments);
+    return list;
+  }, [departments]);
+  const usersById = useMemo(() => new Map(users.map(u => [u.id, u])), [users]);
+  const deptsById = useMemo(() => new Map(flatAllDepartments.map(d => [d.id, d])), [flatAllDepartments]);
 
   const today = useMemo(() => new Date(), []);
   const currentWeekId = useMemo(() => {
@@ -51,28 +70,76 @@ const TaskCenterView: React.FC = () => {
   const [priorityFilter, setPriorityFilter] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [taskModal, setTaskModal] = useState<{ isOpen: boolean, weekId: string | null, padId: string | null, mode: 'create' | 'edit', data: Partial<PADEntry> }>({ isOpen: false, weekId: null, padId: null, mode: 'create', data: {} });
+  const [isOrgTasksLoading, setIsOrgTasksLoading] = useState(false);
   const { toastState, showToast, clearToast } = usePageToast();
 
   useEffect(() => {
     clearToast();
   }, [clearToast, filterType, statusFilter, priorityFilter]);
 
-  const handleTaskClick = (task: PADEntry, padId: string) => {
-    const owner = state.users.find(u => u.id === task.ownerId);
+  const loadOrgTasks = async () => {
+    if (state.taskLoadScope === 'org' || isOrgTasksLoading) return;
+
+    setIsOrgTasksLoading(true);
+    try {
+      const [loadedTasks, taskUsers] = await Promise.all([
+        getTaskList(),
+        getCurrentUserTaskUsers()
+      ]);
+      const currentUsers = useAppStore.getState().users || [];
+      const mergedUsersById = new Map(currentUsers.map(user => [user.id, user]));
+      taskUsers.forEach(user => mergedUsersById.set(user.id, user));
+      const mergedUsers = Array.from(mergedUsersById.values());
+
+      state.setState({ tasks: loadedTasks, users: mergedUsers });
+      setLastSavedTasks(loadedTasks);
+      setLastSavedUsers(mergedUsers);
+      setTaskLoadMode('list');
+      setTaskLoadScope('org');
+    } catch (error: any) {
+      setBackendError(null);
+      showToast(getUserFacingError(error, '组织任务加载失败，请稍后重试'), 'error');
+    } finally {
+      setIsOrgTasksLoading(false);
+    }
+  };
+
+  const handleFilterTypeChange = (nextFilterType: 'my' | 'org') => {
+    setFilterType(nextFilterType);
+    if (nextFilterType === 'org') {
+      void loadOrgTasks();
+    }
+  };
+
+  const handleTaskClick = async (task: PADEntry, padId: string) => {
+    const owner = usersById.get(task.ownerId);
 
     if (!canViewTask(task, currentUser, state.users, state.systemRoles || [], state.departments)) {
       showToast(`无任务查看权限，如果需要查看任务，请联系任务创建人【${owner?.name || ''}】`, 'info');
       return;
     }
 
-    const weekId = task.targetWeeks?.[0] || null;
-    setTaskModal({
-      isOpen: true,
-      weekId,
-      padId: padId,
-      mode: 'edit',
-      data: task
-    });
+    try {
+      const fullTask = await getTaskById(task.id);
+      const currentTasks = useAppStore.getState().tasks || [];
+      const nextTasks = currentTasks.some(item => item.id === fullTask.id)
+        ? currentTasks.map(item => item.id === fullTask.id ? fullTask : item)
+        : [fullTask, ...currentTasks];
+      state.setState({ tasks: nextTasks });
+      setLastSavedTasks(nextTasks);
+
+      const weekId = fullTask.targetWeeks?.[0] || null;
+      setTaskModal({
+        isOpen: true,
+        weekId,
+        padId: padId,
+        mode: 'edit',
+        data: fullTask
+      });
+    } catch (error: any) {
+      setBackendError(null);
+      showToast(getUserFacingError(error, '任务详情加载失败，请稍后重试'), 'error');
+    }
   };
 
   const saveTask = async (status: string = 'draft', keepOpen: boolean = false) => {
@@ -242,8 +309,8 @@ const TaskCenterView: React.FC = () => {
     state.tasks.forEach(entry => {
       if (!canViewTask(entry, currentUser, users, state.systemRoles || [], departments)) return;
 
-      const owner = users.find(u => u.id === entry.ownerId);
-      const dept = departments.find(d => d.id === (entry.departmentId || owner?.departmentId));
+      const owner = usersById.get(entry.ownerId);
+      const dept = deptsById.get(entry.departmentId || owner?.departmentId || '');
       
       tasks.push({
         padId: 'flat', // No longer using padId
@@ -253,7 +320,7 @@ const TaskCenterView: React.FC = () => {
       });
     });
     return tasks;
-  }, [state.tasks, users, departments, currentUser]);
+  }, [state.tasks, users, departments, currentUser, usersById, deptsById]);
 
   const [selectedOrgDeptId, setSelectedOrgDeptId] = useState<string | null>(null);
 
@@ -401,16 +468,17 @@ const TaskCenterView: React.FC = () => {
         <div className="flex items-center gap-4 w-full md:w-auto">
           <div className="flex bg-slate-100 p-1 rounded-2xl w-full md:w-auto">
             <button 
-              onClick={() => setFilterType('my')}
+              onClick={() => handleFilterTypeChange('my')}
               className={`flex-1 md:flex-none px-4 md:px-6 py-2 rounded-xl text-xs font-black uppercase transition-all ${filterType === 'my' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500'}`}
             >
               我的任务
             </button>
             <button 
-              onClick={() => setFilterType('org')}
+              onClick={() => handleFilterTypeChange('org')}
+              disabled={isOrgTasksLoading}
               className={`flex-1 md:flex-none px-4 md:px-6 py-2 rounded-xl text-xs font-black uppercase transition-all ${filterType === 'org' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500'}`}
             >
-              组织任务
+              {isOrgTasksLoading ? '加载中...' : '组织任务'}
             </button>
           </div>
           {permissions.update && (

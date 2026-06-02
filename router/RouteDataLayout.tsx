@@ -7,8 +7,11 @@ import {
   getBusinesses,
   getCurrentUserTaskUsers,
   getDepartments,
+  getMyTaskList,
   getProcesses,
   getStrategy,
+  getTaskList,
+  getTaskUsersForTasks,
   getTasks
 } from '../data';
 import { getRequiredDomains } from '../utils/routeDomains';
@@ -38,7 +41,7 @@ const RouteLoadError: React.FC<{ message: string; onRetry: () => void }> = ({ me
 
 export const RouteDataLayout: React.FC = () => {
   const location = useLocation();
-  const { isAuthenticated } = useAuthStore();
+  const { isAuthenticated, currentUser } = useAuthStore();
   const {
     domainLoadStatus,
     setDomainLoadState,
@@ -49,7 +52,11 @@ export const RouteDataLayout: React.FC = () => {
     setLastSavedProcesses,
     setLastSavedStrategy,
     setLastSavedTasks,
-    setLastSavedUsers
+    setLastSavedUsers,
+    taskLoadMode,
+    setTaskLoadMode,
+    taskLoadScope,
+    setTaskLoadScope
   } = useAppStore();
   const [routeError, setRouteError] = useState<string | null>(null);
   const [retryToken, setRetryToken] = useState(0);
@@ -66,13 +73,19 @@ export const RouteDataLayout: React.FC = () => {
   });
 
   const requiredDomains = useMemo(() => getRequiredDomains(location.pathname), [location.pathname]);
+  const taskRouteIsTaskCenter = location.pathname === '/task-center';
+  const taskRouteNeedsFullData = requiredDomains.includes('tasks') && location.pathname !== '/task-center';
 
   useEffect(() => {
     setRouteError(null);
   }, [location.pathname, retryToken]);
 
   useEffect(() => {
+    const currentUserId = currentUser?.id;
     if (!isAuthenticated || requiredDomains.length === 0 || routeError) {
+      return;
+    }
+    if (taskRouteIsTaskCenter && !currentUserId) {
       return;
     }
 
@@ -82,6 +95,11 @@ export const RouteDataLayout: React.FC = () => {
     const currentDomainLoadStatus = useAppStore.getState().domainLoadStatus;
     const missingDomains = requiredDomains.filter((domain) => {
       const status = currentDomainLoadStatus[domain];
+      if (domain === 'tasks') {
+        const needsTaskCenterLoad = taskRouteIsTaskCenter && taskLoadScope === 'none';
+        const needsTaskLoad = !status.loaded || needsTaskCenterLoad || (taskRouteNeedsFullData && taskLoadMode !== 'full');
+        return needsTaskLoad && !status.loading;
+      }
       return !status.loaded && !status.loading;
     });
     if (missingDomains.length === 0) {
@@ -134,8 +152,13 @@ export const RouteDataLayout: React.FC = () => {
         setDomainLoadState('businesses', { loaded: true });
       },
       tasks: async () => {
-        const tasks = await getTasks();
-        const taskUsers = await getCurrentUserTaskUsers();
+        const loadTasks = taskRouteNeedsFullData ? getTasks : getTaskList;
+        const tasks = taskRouteIsTaskCenter
+          ? await getMyTaskList(currentUserId)
+          : await loadTasks();
+        const taskUsers = taskRouteIsTaskCenter
+          ? await getTaskUsersForTasks(tasks.map(task => task.id))
+          : await getCurrentUserTaskUsers();
         if (routeLoadKeyRef.current !== routeLoadKey) return;
         if (domainRequestVersionRef.current.tasks !== requestVersions.tasks) return;
         const currentUsers = useAppStore.getState().users || [];
@@ -145,6 +168,8 @@ export const RouteDataLayout: React.FC = () => {
         setState({ tasks, users: mergedUsers });
         setLastSavedTasks(tasks);
         setLastSavedUsers(mergedUsers);
+        setTaskLoadMode(taskRouteNeedsFullData ? 'full' : 'list');
+        setTaskLoadScope(taskRouteNeedsFullData ? 'full' : (taskRouteIsTaskCenter ? 'mine' : 'org'));
         setDomainLoadState('tasks', { loaded: true });
       }
     };
@@ -166,6 +191,7 @@ export const RouteDataLayout: React.FC = () => {
   }, [
     location.pathname,
     isAuthenticated,
+    currentUser?.id,
     domainLoadStatus,
     routeError,
     requiredDomains,
@@ -178,6 +204,12 @@ export const RouteDataLayout: React.FC = () => {
     setLastSavedStrategy,
     setLastSavedTasks,
     setLastSavedUsers,
+    setTaskLoadMode,
+    setTaskLoadScope,
+    taskLoadMode,
+    taskLoadScope,
+    taskRouteIsTaskCenter,
+    taskRouteNeedsFullData,
     setState
   ]);
 

@@ -240,7 +240,9 @@ const STRATEGY_SELECT_FIELDS = 'id,mission,vision,customer_issues,employee_issue
 const BUSINESSES_SELECT_FIELDS = 'id,name,business_format,customer_persona,customer_needs,surface_product_power,core_product_power,updated_at,row_version';
 const SYSTEM_ROLES_SELECT_FIELDS = 'id,name,description,permissions,updated_at,row_version';
 const TASKS_SELECT_FIELDS = 'id,created_by,title,status,priority,owner_id,department_id,visibility,aligned_kr_id,target_weeks,start_date,due_date,tags,participant_ids,approver_ids,logs,plan,action,deliverable,task_review,task_review_score,updated_at,row_version';
+const TASKS_LIST_SELECT_FIELDS = 'id,created_by,title,status,priority,owner_id,department_id,visibility,aligned_kr_id,target_weeks,start_date,due_date,tags,participant_ids,approver_ids,updated_at,row_version';
 const TASKS_SELECT_FIELDS_LEGACY = stripTaskReviewFieldsFromSelect(TASKS_SELECT_FIELDS);
+const TASKS_LIST_SELECT_FIELDS_LEGACY = stripTaskReviewFieldsFromSelect(TASKS_LIST_SELECT_FIELDS);
 
 const isIgnoredNoRowsError = (error: any) => error?.code === 'PGRST116';
 const isIgnoredMissingTableError = (error: any) => error?.code === '42P01';
@@ -404,6 +406,97 @@ export const getTasks = async (): Promise<PADEntry[]> => {
 
     if (error && !isIgnoredMissingTableError(error)) throw error;
     return (data || []).map(mapTaskRow);
+  } catch (e) {
+    handleSupabaseError(e);
+    throw e;
+  }
+};
+
+export const getTaskUsersForTasks = async (taskIds: string[]): Promise<User[]> => {
+  if (!isSupabaseConfigured()) throw new Error("Supabase not configured");
+  if (taskIds.length === 0) return [];
+  try {
+    const { data, error } = await supabase.rpc('get_current_user_task_users_for_tasks', {
+      p_task_ids: taskIds
+    });
+    if (error) throw error;
+    return (data || []).map(mapUserRow);
+  } catch (e) {
+    handleSupabaseError(e);
+    throw e;
+  }
+};
+
+export const getTaskList = async (): Promise<PADEntry[]> => {
+  if (!isSupabaseConfigured()) throw new Error("Supabase not configured");
+  try {
+    let data: any[] | null = null;
+    let error: any = null;
+
+    ({ data, error } = await supabase.from('tasks').select(TASKS_LIST_SELECT_FIELDS));
+
+    if (isMissingTaskReviewColumnError(error)) {
+      ({ data, error } = await supabase.from('tasks').select(TASKS_LIST_SELECT_FIELDS_LEGACY));
+    }
+
+    if (error && !isIgnoredMissingTableError(error)) throw error;
+    return (data || []).map(mapTaskRow);
+  } catch (e) {
+    handleSupabaseError(e);
+    throw e;
+  }
+};
+
+export const getMyTaskList = async (userId: string): Promise<PADEntry[]> => {
+  if (!isSupabaseConfigured()) throw new Error("Supabase not configured");
+  try {
+    const memberJson = JSON.stringify([userId]);
+    let data: any[] | null = null;
+    let error: any = null;
+
+    ({ data, error } = await supabase
+      .from('tasks')
+      .select(TASKS_LIST_SELECT_FIELDS)
+      .or(`created_by.eq.${userId},owner_id.eq.${userId},participant_ids.cs.${memberJson},approver_ids.cs.${memberJson}`));
+
+    if (isMissingTaskReviewColumnError(error)) {
+      ({ data, error } = await supabase
+        .from('tasks')
+        .select(TASKS_LIST_SELECT_FIELDS_LEGACY)
+        .or(`created_by.eq.${userId},owner_id.eq.${userId},participant_ids.cs.${memberJson},approver_ids.cs.${memberJson}`));
+    }
+
+    if (error && !isIgnoredMissingTableError(error)) throw error;
+    return (data || []).map(mapTaskRow);
+  } catch (e) {
+    handleSupabaseError(e);
+    throw e;
+  }
+};
+
+export const getTaskById = async (taskId: string): Promise<PADEntry> => {
+  if (!isSupabaseConfigured()) throw new Error("Supabase not configured");
+  try {
+    let data: any | null = null;
+    let error: any = null;
+
+    ({ data, error } = await supabase
+      .from('tasks')
+      .select(TASKS_SELECT_FIELDS)
+      .eq('id', taskId)
+      .maybeSingle());
+
+    if (isMissingTaskReviewColumnError(error)) {
+      ({ data, error } = await supabase
+        .from('tasks')
+        .select(TASKS_SELECT_FIELDS_LEGACY)
+        .eq('id', taskId)
+        .maybeSingle());
+    }
+
+    if (error && !isIgnoredMissingTableError(error)) throw error;
+    if (!data) throw new Error('任务不存在或无权限查看');
+    return mapTaskRow(data);
   } catch (e) {
     handleSupabaseError(e);
     throw e;
