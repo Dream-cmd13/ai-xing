@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { PADEntry, User, Department, AISettings } from '../types';
-import { X, AlertCircle, Wand2, Loader2, Sparkles, CheckCircle, Trash2 } from 'lucide-react';
+import { X, AlertCircle, Wand2, Loader2, Sparkles, CheckCircle, Trash2, Search } from 'lucide-react';
 import { checkPADQuality } from '../services/gemini';
 
 interface TaskModalProps {
@@ -44,6 +44,8 @@ const TaskModal: React.FC<TaskModalProps> = ({
   const [checking, setChecking] = useState(false);
   const [aiResult, setAiResult] = useState<string | null>(null);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [showParticipantPicker, setShowParticipantPicker] = useState(false);
+  const [participantSearchQuery, setParticipantSearchQuery] = useState('');
   const getUserDisplayName = (userId: string): string => {
     const user = users.find(item => item.id === userId);
     return user?.name || `未知用户（${userId}）`;
@@ -66,11 +68,53 @@ const TaskModal: React.FC<TaskModalProps> = ({
     () => (assignableOwners.length > 0 ? assignableOwners : users),
     [assignableOwners, users]
   );
+  const departmentsById = useMemo(
+    () => new Map(flatDepartments.map(department => [department.id, department.name])),
+    [flatDepartments]
+  );
+  const filteredParticipantUsers = useMemo(() => {
+    const keyword = participantSearchQuery.trim().toLowerCase();
+    if (!keyword) {
+      return users;
+    }
+
+    const keywords = keyword.split(/\s+/).filter(Boolean);
+    const getSearchScore = (user: User) => {
+      const departmentName = user.departmentId ? (departmentsById.get(user.departmentId) || '') : '';
+      const haystack = `${user.name} ${user.username} ${departmentName}`.toLowerCase();
+      if (!keywords.every(item => haystack.includes(item))) {
+        return -1;
+      }
+
+      let score = 0;
+      keywords.forEach(item => {
+        if (user.name.toLowerCase() === item) score += 120;
+        else if (user.name.toLowerCase().startsWith(item)) score += 80;
+        else if (user.name.toLowerCase().includes(item)) score += 50;
+
+        if (user.username.toLowerCase() === item) score += 100;
+        else if (user.username.toLowerCase().startsWith(item)) score += 70;
+        else if (user.username.toLowerCase().includes(item)) score += 40;
+
+        if (departmentName.toLowerCase().includes(item)) score += 20;
+      });
+
+      return score;
+    };
+
+    return users
+      .map(user => ({ user, score: getSearchScore(user) }))
+      .filter(item => item.score >= 0)
+      .sort((a, b) => b.score - a.score || a.user.name.localeCompare(b.user.name, 'zh-CN'))
+      .map(item => item.user);
+  }, [participantSearchQuery, users, departmentsById]);
 
   useEffect(() => {
     if (isOpen) {
       setError(null);
       setAiResult(null);
+      setShowParticipantPicker(false);
+      setParticipantSearchQuery('');
     }
   }, [isOpen]);
 
@@ -299,7 +343,7 @@ const TaskModal: React.FC<TaskModalProps> = ({
           <div className="flex gap-4">
             <div className="flex-1 space-y-2">
               <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">参与人</label>
-              <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl min-h-[42px] flex flex-wrap gap-2">
+              <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl min-h-[42px] flex flex-wrap gap-2 relative">
                 {(data.participantIds || []).map(uid => {
                   return (
                     <span key={uid} className="bg-white border border-slate-200 text-slate-600 px-2 py-1 rounded-lg text-[10px] font-bold flex items-center gap-1">
@@ -308,19 +352,67 @@ const TaskModal: React.FC<TaskModalProps> = ({
                     </span>
                   );
                 })}
-                <select 
-                  disabled={readOnly}
-                  className="bg-transparent text-xs font-bold outline-none text-slate-400 w-24 disabled:opacity-50"
-                  value=""
-                  onChange={e => {
-                    if (e.target.value && !(data.participantIds || []).includes(e.target.value)) {
-                      setData({ ...data, participantIds: [...(data.participantIds || []), e.target.value] });
-                    }
-                  }}
-                >
-                  <option value="">+ 添加</option>
-                  {users.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
-                </select>
+                {!readOnly && (
+                  <button
+                    type="button"
+                    onClick={() => setShowParticipantPicker(prev => !prev)}
+                    className="bg-transparent text-xs font-bold outline-none text-slate-400 px-1 py-1"
+                  >
+                    + 添加
+                  </button>
+                )}
+                {showParticipantPicker && !readOnly && (
+                  <div className="absolute left-0 top-full mt-2 w-full rounded-xl border border-slate-200 bg-white shadow-lg p-3 z-20">
+                    <div className="relative mb-3">
+                      <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                      <input
+                        type="text"
+                        value={participantSearchQuery}
+                        onChange={e => setParticipantSearchQuery(e.target.value)}
+                        placeholder="搜索姓名、账号、部门..."
+                        className="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-600 outline-none focus:border-brand-500"
+                      />
+                    </div>
+                    <div className="max-h-48 overflow-y-auto custom-scrollbar space-y-2">
+                      {filteredParticipantUsers.map(u => {
+                        const checked = (data.participantIds || []).includes(u.id);
+                        return (
+                          <label key={u.id} className="flex items-center gap-2 text-xs font-bold text-slate-600 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={() => {
+                                const currentParticipantIds = data.participantIds || [];
+                                const nextParticipantIds = checked
+                                  ? currentParticipantIds.filter(id => id !== u.id)
+                                  : [...currentParticipantIds, u.id];
+                                setData({ ...data, participantIds: nextParticipantIds });
+                              }}
+                            />
+                            <span>{u.name}</span>
+                          </label>
+                        );
+                      })}
+                      {filteredParticipantUsers.length === 0 && (
+                        <div className="py-6 text-center text-xs font-bold text-slate-400">
+                          没有匹配到可选参与人
+                        </div>
+                      )}
+                    </div>
+                    <div className="flex justify-end pt-3">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowParticipantPicker(false);
+                          setParticipantSearchQuery('');
+                        }}
+                        className="px-3 py-1.5 bg-slate-100 text-slate-600 rounded-lg text-[10px] font-black uppercase hover:bg-slate-200"
+                      >
+                        完成
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
             <div className="flex-1 space-y-2">
