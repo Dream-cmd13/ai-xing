@@ -1753,6 +1753,31 @@ CREATE POLICY users_select ON public.users FOR SELECT TO authenticated
     OR auth_id = auth.uid()
     OR lower(username) = public.current_auth_username()
     OR department_id = public.current_user_department_id()
+    OR EXISTS (
+      SELECT 1
+      FROM public.tasks task_row
+      WHERE public.current_user_can_view_task(
+        task_row.department_id,
+        task_row.created_by,
+        task_row.owner_id,
+        task_row.participant_ids,
+        task_row.approver_ids
+      )
+      AND (
+        task_row.created_by = public.users.id
+        OR task_row.owner_id = public.users.id
+        OR EXISTS (
+          SELECT 1
+          FROM public.jsonb_text_values(COALESCE(task_row.participant_ids, '[]'::jsonb)) AS participant_value(value)
+          WHERE participant_value.value = public.users.id
+        )
+        OR EXISTS (
+          SELECT 1
+          FROM public.jsonb_text_values(COALESCE(task_row.approver_ids, '[]'::jsonb)) AS approver_value(value)
+          WHERE approver_value.value = public.users.id
+        )
+      )
+    )
   );
 CREATE POLICY users_insert ON public.users FOR INSERT TO authenticated
   WITH CHECK (public.is_admin() OR public.has_menu_permission('user', 'create'));

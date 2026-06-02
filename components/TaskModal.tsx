@@ -42,6 +42,10 @@ const TaskModal: React.FC<TaskModalProps> = ({
   const [checking, setChecking] = useState(false);
   const [aiResult, setAiResult] = useState<string | null>(null);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const getUserDisplayName = (userId: string): string => {
+    const user = users.find(item => item.id === userId);
+    return user?.name || `未知用户（${userId}）`;
+  };
   const flatDepartments = useMemo(() => {
     const list: Department[] = [];
     const collect = (items: Department[]) => {
@@ -264,10 +268,9 @@ const TaskModal: React.FC<TaskModalProps> = ({
               <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">参与人</label>
               <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl min-h-[42px] flex flex-wrap gap-2">
                 {(data.participantIds || []).map(uid => {
-                  const u = users.find(user => user.id === uid);
                   return (
                     <span key={uid} className="bg-white border border-slate-200 text-slate-600 px-2 py-1 rounded-lg text-[10px] font-bold flex items-center gap-1">
-                      {u?.name}
+                      {getUserDisplayName(uid)}
                       {!readOnly && <button onClick={() => setData({ ...data, participantIds: (data.participantIds || []).filter(id => id !== uid) })}><X size={10}/></button>}
                     </span>
                   );
@@ -291,10 +294,9 @@ const TaskModal: React.FC<TaskModalProps> = ({
               <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">审批人</label>
               <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl min-h-[42px] flex flex-wrap gap-2">
                 {(data.approverIds || []).map(uid => {
-                  const u = users.find(user => user.id === uid);
                   return (
                     <span key={uid} className="bg-white border border-slate-200 text-slate-600 px-2 py-1 rounded-lg text-[10px] font-bold flex items-center gap-1">
-                      {u?.name}
+                      {getUserDisplayName(uid)}
                       {!readOnly && <button onClick={() => setData({ ...data, approverIds: (data.approverIds || []).filter(id => id !== uid) })}><X size={10}/></button>}
                     </span>
                   );
@@ -339,6 +341,9 @@ const TaskModal: React.FC<TaskModalProps> = ({
                   if (error) setError(null);
                 }}
               >
+                {data.ownerId && !users.some(u => u.id === data.ownerId) && (
+                  <option value={data.ownerId}>{getUserDisplayName(data.ownerId)}</option>
+                )}
                 {users.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
               </select>
             </div>
@@ -440,15 +445,14 @@ const TaskModal: React.FC<TaskModalProps> = ({
               <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">修改日志</label>
               <div className="bg-slate-50 rounded-xl p-4 space-y-3 max-h-40 overflow-y-auto custom-scrollbar">
                 {data.logs.map(log => {
-                  const user = users.find(u => u.id === log.userId);
                   return (
                     <div key={log.id} className="flex gap-3 text-xs">
                       <div className="w-6 h-6 rounded-full bg-brand-100 text-brand-700 flex items-center justify-center font-bold shrink-0">
-                        {user?.name?.charAt(0) || '?'}
+                        {getUserDisplayName(log.userId).charAt(0) || '?'}
                       </div>
                       <div>
                         <div className="flex items-center gap-2">
-                          <span className="font-bold text-slate-700">{user?.name || '未知用户'}</span>
+                          <span className="font-bold text-slate-700">{getUserDisplayName(log.userId)}</span>
                           <span className="text-slate-400 text-[10px]">{new Date(log.timestamp).toLocaleString()}</span>
                         </div>
                         <p className="text-slate-600 mt-0.5">{log.details}</p>
