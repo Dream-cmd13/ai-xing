@@ -5,6 +5,7 @@ import { useAuthStore } from '../store/useAuthStore';
 import { AppDomainKey, useAppStore } from '../store/useAppStore';
 import {
   getBusinesses,
+  getCurrentUserTaskUsers,
   getDepartments,
   getProcesses,
   getStrategy,
@@ -47,7 +48,8 @@ export const RouteDataLayout: React.FC = () => {
     setLastSavedDepartments,
     setLastSavedProcesses,
     setLastSavedStrategy,
-    setLastSavedTasks
+    setLastSavedTasks,
+    setLastSavedUsers
   } = useAppStore();
   const [routeError, setRouteError] = useState<string | null>(null);
   const [retryToken, setRetryToken] = useState(0);
@@ -133,10 +135,16 @@ export const RouteDataLayout: React.FC = () => {
       },
       tasks: async () => {
         const tasks = await getTasks();
+        const taskUsers = await getCurrentUserTaskUsers();
         if (routeLoadKeyRef.current !== routeLoadKey) return;
         if (domainRequestVersionRef.current.tasks !== requestVersions.tasks) return;
-        setState({ tasks });
+        const currentUsers = useAppStore.getState().users || [];
+        const mergedUsersById = new Map(currentUsers.map(user => [user.id, user]));
+        taskUsers.forEach(user => mergedUsersById.set(user.id, user));
+        const mergedUsers = Array.from(mergedUsersById.values());
+        setState({ tasks, users: mergedUsers });
         setLastSavedTasks(tasks);
+        setLastSavedUsers(mergedUsers);
         setDomainLoadState('tasks', { loaded: true });
       }
     };
@@ -169,6 +177,7 @@ export const RouteDataLayout: React.FC = () => {
     setLastSavedProcesses,
     setLastSavedStrategy,
     setLastSavedTasks,
+    setLastSavedUsers,
     setState
   ]);
 
