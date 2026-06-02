@@ -12,7 +12,7 @@ import PageToast from './PageToast';
 import TaskModal from './TaskModal';
 import { ensureTaskTargetWeeks } from '@/utils/taskPeriods.js';
 import { getUserFacingError } from '@/utils/userFacingError';
-import { canManageTask, isAdminUser } from '@/utils/permissions';
+import { canManageTask, canViewTask, isAdminUser } from '@/utils/permissions';
 
 const WorkbenchView: React.FC = () => {
   const state = useAppStore();
@@ -203,23 +203,9 @@ const WorkbenchView: React.FC = () => {
   }, [state.strategy.companyOKRs, state.departments, taskModal.weekId]);
 
   const handleTaskClick = (task: PADEntry) => {
-    const isOwner = task.ownerId === currentUser.id;
-    const isParticipant = task.participantIds?.includes(currentUser.id);
-    const isApprover = task.approverIds?.includes(currentUser.id);
     const owner = state.users.find(u => u.id === task.ownerId);
 
-    let hasPermission = true;
-    if (!isOwner && !isParticipant && !isApprover) {
-      if (task.visibility === 'private') {
-        hasPermission = false;
-      } else if (task.visibility === 'department' && owner?.departmentId !== currentUser.departmentId && !currentUser.padPermissions?.includes(owner?.departmentId || '')) {
-        hasPermission = false;
-      } else if (task.visibility === 'members') {
-        hasPermission = false;
-      }
-    }
-
-    if (!hasPermission) {
+    if (!canViewTask(task, currentUser, state.users, state.systemRoles || [], state.departments)) {
       showToast(`无任务查看权限，如果需要查看任务，请联系任务创建人【${owner?.name || ''}】`, 'info');
       return;
     }
@@ -243,10 +229,22 @@ const WorkbenchView: React.FC = () => {
     ) as PADEntry;
 
     const isNewTask = !state.tasks.some(e => e.id === newTask.id);
+    const oldTask = state.tasks.find(e => e.id === newTask.id);
+    const currentUserIsAdmin = isAdminUser(currentUser, state.systemRoles || []);
 
     if (!isNewTask) {
-      const oldTask = state.tasks.find(e => e.id === newTask.id);
+      if (!oldTask || !taskPermissions.update || !canManageTask(oldTask, currentUser, state.systemRoles || [], state.departments)) {
+        showToast('无权限修改该任务', 'error');
+        return;
+      }
+      if (!currentUserIsAdmin) {
+        newTask.ownerId = oldTask.ownerId;
+      }
+    } else if (!currentUserIsAdmin) {
+      newTask.ownerId = currentUser.id;
+    }
 
+    if (!isNewTask) {
       if (oldTask) {
         const loggableStatuses = ['submitted', 'in-progress', 'paused', 'terminated', 'completed'];
         if (loggableStatuses.includes(oldTask.status)) {
@@ -298,6 +296,7 @@ const WorkbenchView: React.FC = () => {
 
     try {
       await persistTaskEntries(nextTasks, entriesToAdd, isNewTask ? 'create' : 'update');
+      showToast('任务已保存', 'success');
     } catch (error: any) {
       showToast(getUserFacingError(error, '任务保存失败，请稍后重试'), 'error');
       return;
@@ -332,6 +331,11 @@ const WorkbenchView: React.FC = () => {
   const deleteTask = async () => {
     if (!taskModal.data.id) return;
     const taskId = taskModal.data.id;
+    const taskToDelete = state.tasks.find(t => t.id === taskId);
+    if (!taskToDelete || !taskPermissions.update || !canManageTask(taskToDelete, currentUser, state.systemRoles || [], state.departments)) {
+      showToast('无权限删除该任务', 'error');
+      return;
+    }
     const nextTasks = state.tasks.filter(t => t.id !== taskId);
 
     try {

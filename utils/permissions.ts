@@ -135,13 +135,14 @@ export const getPrimaryManagedDepartmentId = (
 ): string | undefined => getManagedDepartmentIds(currentUser, departments)[0];
 
 export const canViewTask = (task: PADEntry, currentUser: User, users: User[], systemRoles: SystemRole[] = [], departments: Department[] = []): boolean => {
-  if (isAdminUser(currentUser, systemRoles) || isManagerUser(currentUser)) return true;
+  if (isAdminUser(currentUser, systemRoles)) return true;
 
   const taskDeptId = task.departmentId || users.find(u => u.id === task.ownerId)?.departmentId;
   
   if (task.createdBy === currentUser.id) return true;
   if (taskDeptId === currentUser.departmentId) return true;
   if (taskDeptId && normalizeStringArray(currentUser.padPermissions).includes(taskDeptId)) return true;
+  if (taskDeptId && getScopedDepartmentIds(currentUser, departments).includes(taskDeptId)) return true;
   
   // Also allow if the user is explicitly involved in the task
   if (task.ownerId === currentUser.id) return true;
@@ -158,11 +159,8 @@ export const canManageTask = (
   departments: Department[] = []
 ): boolean => {
   if (isAdminUser(currentUser, systemRoles)) return true;
-  // Task owner can always manage their own task
   if (task.ownerId === currentUser.id) return true;
-  // Same department members can manage tasks in their department
-  if (task.departmentId && currentUser.departmentId && task.departmentId === currentUser.departmentId) return true;
-  // Participants and approvers can only VIEW, not manage
+  if (task.participantIds?.includes(currentUser.id)) return true;
   return false;
 };
 
@@ -238,11 +236,12 @@ export const hasPermission = (
 };
 
 export const getVisibleDepartments = (user: User, allDepartments: Department[], systemRoles: SystemRole[] = []): Department[] => {
-  if (isAdminUser(user, systemRoles) || isManagerUser(user)) return allDepartments;
+  if (isAdminUser(user, systemRoles)) return allDepartments;
 
   const visibleIds = new Set<string>();
   if (user.departmentId) visibleIds.add(user.departmentId);
   normalizeStringArray(user.padPermissions).forEach(id => visibleIds.add(id));
+  getScopedDepartmentIds(user, allDepartments).forEach(id => visibleIds.add(id));
 
   // Helper to check if a department or any of its ancestors is in visibleIds
   const isVisible = (dept: Department, path: string[] = []): boolean => {

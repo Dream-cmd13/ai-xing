@@ -58,26 +58,9 @@ const TaskCenterView: React.FC = () => {
   }, [clearToast, filterType, statusFilter, priorityFilter]);
 
   const handleTaskClick = (task: PADEntry, padId: string) => {
-    const isOwner = task.ownerId === currentUser.id;
-    const isParticipant = task.participantIds?.includes(currentUser.id);
-    const isApprover = task.approverIds?.includes(currentUser.id);
     const owner = state.users.find(u => u.id === task.ownerId);
 
-    let hasPermission = true;
-    if (!isOwner && !isParticipant && !isApprover) {
-      if (task.visibility === 'private') {
-        hasPermission = false;
-      } else if (task.visibility === 'department') {
-        const targetDeptId = task.departmentId || owner?.departmentId;
-        if (targetDeptId !== currentUser.departmentId && !currentUser.padPermissions?.includes(targetDeptId || '')) {
-          hasPermission = false;
-        }
-      } else if (task.visibility === 'members') {
-        hasPermission = false;
-      }
-    }
-
-    if (!hasPermission) {
+    if (!canViewTask(task, currentUser, state.users, state.systemRoles || [], state.departments)) {
       showToast(`无任务查看权限，如果需要查看任务，请联系任务创建人【${owner?.name || ''}】`, 'info');
       return;
     }
@@ -98,10 +81,22 @@ const TaskCenterView: React.FC = () => {
       taskModal.weekId
     ) as PADEntry;
     const isNewTask = !state.tasks.some(e => e.id === newTask.id);
+    const oldTask = state.tasks.find(e => e.id === newTask.id);
+    const currentUserIsAdmin = isAdminUser(currentUser, state.systemRoles || []);
 
     if (!isNewTask) {
-      const oldTask = state.tasks.find(e => e.id === newTask.id);
+      if (!oldTask || !permissions.update || !canManageTask(oldTask, currentUser, state.systemRoles || [], state.departments)) {
+        showToast('无权限修改该任务', 'error');
+        return;
+      }
+      if (!currentUserIsAdmin) {
+        newTask.ownerId = oldTask.ownerId;
+      }
+    } else if (!currentUserIsAdmin) {
+      newTask.ownerId = currentUser.id;
+    }
 
+    if (!isNewTask) {
       if (oldTask) {
         const loggableStatuses = ['submitted', 'in-progress', 'paused', 'terminated', 'completed'];
         if (loggableStatuses.includes(oldTask.status)) {
@@ -190,6 +185,11 @@ const TaskCenterView: React.FC = () => {
   const deleteTask = async () => {
     if (!taskModal.data.id) return;
     const taskId = taskModal.data.id;
+    const taskToDelete = state.tasks.find(t => t.id === taskId);
+    if (!taskToDelete || !permissions.update || !canManageTask(taskToDelete, currentUser, state.systemRoles || [], state.departments)) {
+      showToast('无权限删除该任务', 'error');
+      return;
+    }
     const nextTasks = state.tasks.filter(t => t.id !== taskId);
 
     try {
@@ -240,7 +240,7 @@ const TaskCenterView: React.FC = () => {
     const tasks: { padId: string, entry: PADEntry, owner: User | undefined, dept: Department | undefined }[] = [];
     
     state.tasks.forEach(entry => {
-      if (!canViewTask(entry, currentUser, users, state.systemRoles || [])) return;
+      if (!canViewTask(entry, currentUser, users, state.systemRoles || [], departments)) return;
 
       const owner = users.find(u => u.id === entry.ownerId);
       const dept = departments.find(d => d.id === (entry.departmentId || owner?.departmentId));
@@ -318,7 +318,8 @@ const TaskCenterView: React.FC = () => {
       if (filterType === 'my') {
         const isOwner = owner?.id === currentUser.id;
         const isParticipant = entry.participantIds?.includes(currentUser.id);
-        if (!isOwner && !isParticipant) return false;
+        const isApprover = entry.approverIds?.includes(currentUser.id);
+        if (!isOwner && !isParticipant && !isApprover) return false;
       } else if (filterType === 'org') {
         // Org tasks filtering
         const isSelf = owner?.id === currentUser.id;

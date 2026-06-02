@@ -2,6 +2,8 @@ import { MutableRefObject, useCallback } from 'react';
 import { addTask as addDbTask, updateTask as updateDbTask, deleteTask as deleteDbTask } from '@/data';
 import { AppStoreState, useAppStore } from '@/store/useAppStore';
 import { PADEntry, User } from '@/types';
+import { isAdminUser } from '@/utils/permissions';
+import { prepareTaskForPersistence } from '@/utils/taskPersistence.js';
 import { removeTasksById, upsertTasksById } from '@/utils/taskSyncState.js';
 import { getUserFacingError } from '@/utils/userFacingError';
 
@@ -46,15 +48,10 @@ export const useTaskActions = ({
     const previousTasks = stateRef.current.tasks || [];
     const previousLastSavedTasks = stateRef.current.lastSavedTasks || [];
     const previousDirtyDomains = [...store.dirtyDomains];
+    const currentUserIsAdmin = isAdminUser(currentUser, store.systemRoles || []);
     const normalizedEntries = entriesToPersist.map((entry) => {
       const previousTask = previousLastSavedTasks.find((task) => task.id === entry.id);
-      return {
-        ...entry,
-        createdBy: mode === 'create'
-          ? currentUser.id
-          : entry.createdBy ?? previousTask?.createdBy ?? currentUser.id,
-        departmentId: entry.departmentId ?? previousTask?.departmentId ?? currentUser.departmentId
-      };
+      return prepareTaskForPersistence(entry, previousTask, currentUser, mode, currentUserIsAdmin);
     });
     const optimisticTaskMap = new Map(normalizedEntries.map((entry) => [entry.id, entry]));
     const nextOptimisticTasks = optimisticTasks.map((task) => optimisticTaskMap.get(task.id) ?? task);

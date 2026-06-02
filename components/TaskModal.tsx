@@ -84,6 +84,7 @@ const TaskModal: React.FC<TaskModalProps> = ({
 
   if (!isOpen) return null;
   const isEditing = mode === 'edit';
+  const canEditOwner = isAdmin;
 
   const handleSave = (status: string, keepOpen?: boolean) => {
     // Validation
@@ -330,7 +331,7 @@ const TaskModal: React.FC<TaskModalProps> = ({
             <div className="flex-1 space-y-2">
               <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">负责人</label>
               <select 
-                disabled={readOnly}
+                disabled={readOnly || !canEditOwner}
                 className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold outline-none disabled:opacity-50"
                 value={data.ownerId || ''}
                 onChange={e => {

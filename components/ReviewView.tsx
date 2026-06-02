@@ -122,6 +122,11 @@ const ReviewView: React.FC = () => {
 
   const handleDeleteTask = async () => {
     if (!taskModal.data.id) return;
+    const taskToDelete = state.tasks.find(t => t.id === taskModal.data.id);
+    if (!taskToDelete || !canManageTask(taskToDelete, currentUser, state.systemRoles || [], state.departments)) {
+      showToast('无权限删除该任务', 'error');
+      return;
+    }
     try {
       const updatedTasks = state.tasks.filter(t => t.id !== taskModal.data.id);
       await persistTaskDeletion(updatedTasks, [taskModal.data.id]);
@@ -134,6 +139,15 @@ const ReviewView: React.FC = () => {
 
   const saveTask = async (status: string, keepOpen: boolean = false) => {
     const task = { ...taskModal.data, status } as PADEntry;
+    const oldTask = state.tasks.find(t => t.id === task.id);
+    const currentUserIsAdmin = isAdminUser(currentUser, state.systemRoles || []);
+    if (!oldTask || !canManageTask(oldTask, currentUser, state.systemRoles || [], state.departments)) {
+      showToast('无权限修改该任务', 'error');
+      return;
+    }
+    if (!currentUserIsAdmin) {
+      task.ownerId = oldTask.ownerId;
+    }
     try {
       const updatedTasks = state.tasks.map(t => t.id === task.id ? task : t);
       await persistTaskEntries(updatedTasks, [task], 'update');
@@ -147,7 +161,7 @@ const ReviewView: React.FC = () => {
   };
 
   const handleTaskClick = (task: PADEntry) => {
-    if (!canViewTask(task, currentUser, state.users, state.systemRoles || [])) {
+    if (!canViewTask(task, currentUser, state.users, state.systemRoles || [], state.departments)) {
       const owner = state.users.find(u => u.id === task.ownerId);
       showToast(`无任务查看权限，如果需要查看任务，请联系任务创建人【${owner?.name || ''}】`, 'info');
       return;
@@ -482,7 +496,7 @@ const ReviewView: React.FC = () => {
           : false;
       
       if (!inPeriod) return;
-      if (!canViewTask(task, currentUser, state.users, state.systemRoles || [])) return;
+      if (!canViewTask(task, currentUser, state.users, state.systemRoles || [], state.departments)) return;
       
       const taskDeptId = task.departmentId || state.users.find(u => u.id === task.ownerId)?.departmentId;
       if (taskDeptId === selectedDeptId && !seen.has(task.id)) {
