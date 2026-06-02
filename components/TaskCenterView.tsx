@@ -16,7 +16,7 @@ import { usePageToast } from '../hooks/usePageToast';
 import { getUserFacingError } from '../utils/userFacingError';
 import { getVisibleDepartments, canManageTask, canViewTask, isAdminUser } from '../utils/permissions';
 import { ensureTaskTargetWeeks } from '../utils/taskPeriods.js';
-import { getCurrentUserTaskUsers, getTaskById, getTaskList } from '../data';
+import { getTaskById, getTaskList, getTaskUsersForTasks } from '../data';
 
 
 
@@ -82,10 +82,10 @@ const TaskCenterView: React.FC = () => {
 
     setIsOrgTasksLoading(true);
     try {
-      const [loadedTasks, taskUsers] = await Promise.all([
-        getTaskList(),
-        getCurrentUserTaskUsers()
-      ]);
+      const loadedTasks = await getTaskList();
+      const taskUsers = loadedTasks.length > 0
+        ? await getTaskUsersForTasks(loadedTasks.map(task => task.id))
+        : [];
       const currentUsers = useAppStore.getState().users || [];
       const mergedUsersById = new Map(currentUsers.map(user => [user.id, user]));
       taskUsers.forEach(user => mergedUsersById.set(user.id, user));

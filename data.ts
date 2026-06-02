@@ -252,6 +252,10 @@ export interface TaskListPage {
 
 const isIgnoredNoRowsError = (error: any) => error?.code === 'PGRST116';
 const isIgnoredMissingTableError = (error: any) => error?.code === '42P01';
+const isIgnoredMissingFunctionError = (error: any) =>
+  error?.code === 'PGRST202' ||
+  error?.code === '42883' ||
+  error?.message?.includes('Could not find the function');
 
 const buildTaskListPage = (rows: any[], offset: number, limit: number): TaskListPage => {
   const pageRows = rows.slice(0, limit);
@@ -413,7 +417,11 @@ export const getTasks = async (): Promise<PADEntry[]> => {
     let data: any[] | null = null;
     let error: any = null;
 
-    ({ data, error } = await supabase.from('tasks').select(TASKS_SELECT_FIELDS));
+    ({ data, error } = await supabase.rpc('get_visible_tasks_full'));
+
+    if (isIgnoredMissingFunctionError(error)) {
+      ({ data, error } = await supabase.from('tasks').select(TASKS_SELECT_FIELDS));
+    }
 
     if (isMissingTaskReviewColumnError(error)) {
       ({ data, error } = await supabase.from('tasks').select(TASKS_SELECT_FIELDS_LEGACY));
@@ -453,11 +461,18 @@ export const getTaskListPage = async (offset = 0, limit = TASK_LIST_PAGE_SIZE): 
     let data: any[] | null = null;
     let error: any = null;
 
-    ({ data, error } = await supabase
-      .from('tasks')
-      .select(TASKS_LIST_SELECT_FIELDS)
-      .order('updated_at', { ascending: false })
-      .range(offset, offset + limit));
+    ({ data, error } = await supabase.rpc('get_visible_task_list_page', {
+      p_offset: offset,
+      p_limit: limit + 1
+    }));
+
+    if (isIgnoredMissingFunctionError(error)) {
+      ({ data, error } = await supabase
+        .from('tasks')
+        .select(TASKS_LIST_SELECT_FIELDS)
+        .order('updated_at', { ascending: false })
+        .range(offset, offset + limit));
+    }
 
     if (isMissingTaskReviewColumnError(error)) {
       ({ data, error } = await supabase
@@ -480,21 +495,31 @@ export const getMyTaskList = async (userId: string): Promise<PADEntry[]> => {
   return page.tasks;
 };
 
-export const getMyTaskListPage = async (userId: string, offset = 0, limit = TASK_LIST_PAGE_SIZE): Promise<TaskListPage> => {
+export const getMyTaskListPage = async (_userId: string, offset = 0, limit = TASK_LIST_PAGE_SIZE): Promise<TaskListPage> => {
   if (!isSupabaseConfigured()) throw new Error("Supabase not configured");
   try {
-    const memberJson = JSON.stringify([userId]);
     let data: any[] | null = null;
     let error: any = null;
 
-    ({ data, error } = await supabase
-      .from('tasks')
-      .select(TASKS_LIST_SELECT_FIELDS)
-      .or(`created_by.eq.${userId},owner_id.eq.${userId},participant_ids.cs.${memberJson},approver_ids.cs.${memberJson}`)
-      .order('updated_at', { ascending: false })
-      .range(offset, offset + limit));
+    ({ data, error } = await supabase.rpc('get_my_task_list_page', {
+      p_offset: offset,
+      p_limit: limit + 1
+    }));
+
+    if (isIgnoredMissingFunctionError(error)) {
+      const userId = _userId;
+      const memberJson = JSON.stringify([userId]);
+      ({ data, error } = await supabase
+        .from('tasks')
+        .select(TASKS_LIST_SELECT_FIELDS)
+        .or(`created_by.eq.${userId},owner_id.eq.${userId},participant_ids.cs.${memberJson},approver_ids.cs.${memberJson}`)
+        .order('updated_at', { ascending: false })
+        .range(offset, offset + limit));
+    }
 
     if (isMissingTaskReviewColumnError(error)) {
+      const userId = _userId;
+      const memberJson = JSON.stringify([userId]);
       ({ data, error } = await supabase
         .from('tasks')
         .select(TASKS_LIST_SELECT_FIELDS_LEGACY)
@@ -540,19 +565,26 @@ export const getTaskById = async (taskId: string): Promise<PADEntry> => {
   }
 };
 
-export const getWorkbenchTasks = async (userId: string): Promise<PADEntry[]> => {
+export const getWorkbenchTasks = async (_userId: string): Promise<PADEntry[]> => {
   if (!isSupabaseConfigured()) throw new Error("Supabase not configured");
   try {
-    const memberJson = JSON.stringify([userId]);
     let data: any[] | null = null;
     let error: any = null;
 
-    ({ data, error } = await supabase
-      .from('tasks')
-      .select(TASKS_SELECT_FIELDS)
-      .or(`owner_id.eq.${userId},participant_ids.cs.${memberJson},approver_ids.cs.${memberJson}`));
+    ({ data, error } = await supabase.rpc('get_my_workbench_tasks'));
+
+    if (isIgnoredMissingFunctionError(error)) {
+      const userId = _userId;
+      const memberJson = JSON.stringify([userId]);
+      ({ data, error } = await supabase
+        .from('tasks')
+        .select(TASKS_SELECT_FIELDS)
+        .or(`owner_id.eq.${userId},participant_ids.cs.${memberJson},approver_ids.cs.${memberJson}`));
+    }
 
     if (isMissingTaskReviewColumnError(error)) {
+      const userId = _userId;
+      const memberJson = JSON.stringify([userId]);
       ({ data, error } = await supabase
         .from('tasks')
         .select(TASKS_SELECT_FIELDS_LEGACY)

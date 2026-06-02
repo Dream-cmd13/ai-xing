@@ -5,7 +5,6 @@ import { useAuthStore } from '../store/useAuthStore';
 import { AppDomainKey, useAppStore } from '../store/useAppStore';
 import {
   getBusinesses,
-  getCurrentUserTaskUsers,
   getDepartments,
   getMyTaskListPage,
   getProcesses,
@@ -154,25 +153,24 @@ export const RouteDataLayout: React.FC = () => {
       },
       tasks: async () => {
         const loadTasks = taskRouteNeedsFullData ? getTasks : getTaskList;
-        const taskPage = taskRouteIsTaskCenter
-          ? await getMyTaskListPage(currentUserId)
-          : null;
+        const taskPage = taskRouteIsTaskCenter ? await getMyTaskListPage(currentUserId) : null;
+        const loadedTasks = taskPage ? taskPage.tasks : await loadTasks();
+        const loadedTaskUsers = loadedTasks.length > 0
+          ? await getTaskUsersForTasks(loadedTasks.map(task => task.id))
+          : [];
         const taskResult = taskPage
           ? {
-            tasks: taskPage.tasks,
-            taskUsers: await getTaskUsersForTasks(taskPage.tasks.map(task => task.id)),
+            tasks: loadedTasks,
+            taskUsers: loadedTaskUsers,
             nextOffset: taskPage.nextOffset,
             hasMore: taskPage.hasMore
           }
-          : await Promise.all([
-            loadTasks(),
-            getCurrentUserTaskUsers()
-          ]).then(([loadedTasks, taskUsers]) => ({
+          : {
             tasks: loadedTasks,
-            taskUsers,
+            taskUsers: loadedTaskUsers,
             nextOffset: loadedTasks.length,
             hasMore: false
-          }));
+          };
         const tasks = taskResult.tasks;
         const taskUsers = taskResult.taskUsers;
         if (routeLoadKeyRef.current !== routeLoadKey) return;
