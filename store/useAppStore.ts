@@ -32,6 +32,8 @@ export interface AppStoreState extends AppState {
   dirtyDomains: AppDomainKey[];
   taskLoadMode: 'none' | 'list' | 'full';
   taskLoadScope: 'none' | 'mine' | 'org' | 'full';
+  taskListOffset: number;
+  taskListHasMore: boolean;
   isSaving: boolean;
   showSaveSuccess: boolean;
   backendError: string | null;
@@ -58,6 +60,7 @@ export interface AppStoreState extends AppState {
   setDirtyDomains: (domains: AppDomainKey[]) => void;
   setTaskLoadMode: (mode: 'none' | 'list' | 'full') => void;
   setTaskLoadScope: (scope: 'none' | 'mine' | 'org' | 'full') => void;
+  setTaskListPagination: (pagination: { offset: number; hasMore: boolean }) => void;
   markDirtyDomains: (domains: AppDomainKey[]) => void;
   clearDirtyDomains: (domains: AppDomainKey[]) => void;
   setDomainLoadState: (domain: AppDomainKey, state: Partial<DomainLoadState>) => void;
@@ -105,6 +108,8 @@ export const useAppStore = create<AppStoreState>((set) => ({
   dirtyDomains: [],
   taskLoadMode: 'none',
   taskLoadScope: 'none',
+  taskListOffset: 0,
+  taskListHasMore: false,
   isSaving: false,
   showSaveSuccess: false,
   backendError: null,
@@ -132,6 +137,7 @@ export const useAppStore = create<AppStoreState>((set) => ({
   setDirtyDomains: (dirtyDomains) => set({ dirtyDomains, isDirty: dirtyDomains.length > 0 }),
   setTaskLoadMode: (taskLoadMode) => set({ taskLoadMode }),
   setTaskLoadScope: (taskLoadScope) => set({ taskLoadScope }),
+  setTaskListPagination: ({ offset, hasMore }) => set({ taskListOffset: offset, taskListHasMore: hasMore }),
   markDirtyDomains: (domains) => set((state) => {
     const dirtyDomains = Array.from(new Set([...state.dirtyDomains, ...domains]));
     return { dirtyDomains, isDirty: dirtyDomains.length > 0 };
@@ -158,7 +164,9 @@ export const useAppStore = create<AppStoreState>((set) => ({
   resetDomainLoadState: () => set({
     domainLoadStatus: createInitialDomainLoadStatus(),
     taskLoadMode: 'none',
-    taskLoadScope: 'none'
+    taskLoadScope: 'none',
+    taskListOffset: 0,
+    taskListHasMore: false
   }),
   
   setLastSavedProcesses: (lastSavedProcesses) => set({ lastSavedProcesses }),

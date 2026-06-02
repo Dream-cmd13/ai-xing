@@ -363,22 +363,7 @@ const TaskModal: React.FC<TaskModalProps> = ({
             </div>
           </div>
 
-          <div className="flex gap-4">
-            <div className="flex-1 space-y-2">
-              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">可见范围</label>
-              <select 
-                disabled={readOnly}
-                className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold outline-none disabled:opacity-50"
-                value={data.visibility || 'public'}
-                onChange={e => setData({ ...data, visibility: e.target.value as any })}
-              >
-                <option value="public">全公司可见</option>
-                <option value="department">本部门可见</option>
-                <option value="members">仅任务成员可见</option>
-                <option value="private">仅自己可见</option>
-              </select>
-            </div>
-          </div>
+
 
           <div className="space-y-2">
             <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">执行周期 (可多选)</label>

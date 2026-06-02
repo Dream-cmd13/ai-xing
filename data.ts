@@ -215,7 +215,6 @@ const mapTaskRow = (t: any): PADEntry => ({
   priority: t.priority,
   ownerId: t.owner_id,
   departmentId: t.department_id,
-  visibility: t.visibility,
   alignedKrId: t.aligned_kr_id,
   targetWeeks: t.target_weeks || [],
   startDate: t.start_date,
@@ -239,13 +238,29 @@ const PROCESSES_SELECT_FIELDS = 'id,department_id,created_by,name,category,level
 const STRATEGY_SELECT_FIELDS = 'id,mission,vision,customer_issues,employee_issues,company_okrs,updated_at,row_version';
 const BUSINESSES_SELECT_FIELDS = 'id,name,business_format,customer_persona,customer_needs,surface_product_power,core_product_power,updated_at,row_version';
 const SYSTEM_ROLES_SELECT_FIELDS = 'id,name,description,permissions,updated_at,row_version';
-const TASKS_SELECT_FIELDS = 'id,created_by,title,status,priority,owner_id,department_id,visibility,aligned_kr_id,target_weeks,start_date,due_date,tags,participant_ids,approver_ids,logs,plan,action,deliverable,task_review,task_review_score,updated_at,row_version';
-const TASKS_LIST_SELECT_FIELDS = 'id,created_by,title,status,priority,owner_id,department_id,visibility,aligned_kr_id,target_weeks,start_date,due_date,tags,participant_ids,approver_ids,updated_at,row_version';
+const TASKS_SELECT_FIELDS = 'id,created_by,title,status,priority,owner_id,department_id,aligned_kr_id,target_weeks,start_date,due_date,tags,participant_ids,approver_ids,logs,plan,action,deliverable,task_review,task_review_score,updated_at,row_version';
+const TASKS_LIST_SELECT_FIELDS = 'id,created_by,title,status,priority,owner_id,department_id,aligned_kr_id,target_weeks,start_date,due_date,tags,participant_ids,approver_ids,updated_at,row_version';
 const TASKS_SELECT_FIELDS_LEGACY = stripTaskReviewFieldsFromSelect(TASKS_SELECT_FIELDS);
 const TASKS_LIST_SELECT_FIELDS_LEGACY = stripTaskReviewFieldsFromSelect(TASKS_LIST_SELECT_FIELDS);
+export const TASK_LIST_PAGE_SIZE = 100;
+
+export interface TaskListPage {
+  tasks: PADEntry[];
+  nextOffset: number;
+  hasMore: boolean;
+}
 
 const isIgnoredNoRowsError = (error: any) => error?.code === 'PGRST116';
 const isIgnoredMissingTableError = (error: any) => error?.code === '42P01';
+
+const buildTaskListPage = (rows: any[], offset: number, limit: number): TaskListPage => {
+  const pageRows = rows.slice(0, limit);
+  return {
+    tasks: pageRows.map(mapTaskRow),
+    nextOffset: offset + pageRows.length,
+    hasMore: rows.length > limit
+  };
+};
 
 const buildDefaultStrategy = (): CompanyStrategy => ({
   mission: '',
@@ -428,19 +443,32 @@ export const getTaskUsersForTasks = async (taskIds: string[]): Promise<User[]> =
 };
 
 export const getTaskList = async (): Promise<PADEntry[]> => {
+  const page = await getTaskListPage();
+  return page.tasks;
+};
+
+export const getTaskListPage = async (offset = 0, limit = TASK_LIST_PAGE_SIZE): Promise<TaskListPage> => {
   if (!isSupabaseConfigured()) throw new Error("Supabase not configured");
   try {
     let data: any[] | null = null;
     let error: any = null;
 
-    ({ data, error } = await supabase.from('tasks').select(TASKS_LIST_SELECT_FIELDS));
+    ({ data, error } = await supabase
+      .from('tasks')
+      .select(TASKS_LIST_SELECT_FIELDS)
+      .order('updated_at', { ascending: false })
+      .range(offset, offset + limit));
 
     if (isMissingTaskReviewColumnError(error)) {
-      ({ data, error } = await supabase.from('tasks').select(TASKS_LIST_SELECT_FIELDS_LEGACY));
+      ({ data, error } = await supabase
+        .from('tasks')
+        .select(TASKS_LIST_SELECT_FIELDS_LEGACY)
+        .order('updated_at', { ascending: false })
+        .range(offset, offset + limit));
     }
 
     if (error && !isIgnoredMissingTableError(error)) throw error;
-    return (data || []).map(mapTaskRow);
+    return buildTaskListPage(data || [], offset, limit);
   } catch (e) {
     handleSupabaseError(e);
     throw e;
@@ -448,6 +476,11 @@ export const getTaskList = async (): Promise<PADEntry[]> => {
 };
 
 export const getMyTaskList = async (userId: string): Promise<PADEntry[]> => {
+  const page = await getMyTaskListPage(userId);
+  return page.tasks;
+};
+
+export const getMyTaskListPage = async (userId: string, offset = 0, limit = TASK_LIST_PAGE_SIZE): Promise<TaskListPage> => {
   if (!isSupabaseConfigured()) throw new Error("Supabase not configured");
   try {
     const memberJson = JSON.stringify([userId]);
@@ -457,17 +490,21 @@ export const getMyTaskList = async (userId: string): Promise<PADEntry[]> => {
     ({ data, error } = await supabase
       .from('tasks')
       .select(TASKS_LIST_SELECT_FIELDS)
-      .or(`created_by.eq.${userId},owner_id.eq.${userId},participant_ids.cs.${memberJson},approver_ids.cs.${memberJson}`));
+      .or(`created_by.eq.${userId},owner_id.eq.${userId},participant_ids.cs.${memberJson},approver_ids.cs.${memberJson}`)
+      .order('updated_at', { ascending: false })
+      .range(offset, offset + limit));
 
     if (isMissingTaskReviewColumnError(error)) {
       ({ data, error } = await supabase
         .from('tasks')
         .select(TASKS_LIST_SELECT_FIELDS_LEGACY)
-        .or(`created_by.eq.${userId},owner_id.eq.${userId},participant_ids.cs.${memberJson},approver_ids.cs.${memberJson}`));
+        .or(`created_by.eq.${userId},owner_id.eq.${userId},participant_ids.cs.${memberJson},approver_ids.cs.${memberJson}`)
+        .order('updated_at', { ascending: false })
+        .range(offset, offset + limit));
     }
 
     if (error && !isIgnoredMissingTableError(error)) throw error;
-    return (data || []).map(mapTaskRow);
+    return buildTaskListPage(data || [], offset, limit);
   } catch (e) {
     handleSupabaseError(e);
     throw e;
@@ -1238,7 +1275,6 @@ export const addTask = async (task: PADEntry): Promise<PADEntry> => {
       status: task.status || 'draft',
       priority: task.priority || 'medium',
       owner_id: task.ownerId || null,
-      visibility: task.visibility || 'public',
       aligned_kr_id: task.alignedKrId || null,
       target_weeks: task.targetWeeks || [],
       start_date: task.startDate || null,
@@ -1287,7 +1323,6 @@ export const updateTask = async (taskId: string, task: Partial<PADEntry>): Promi
     if (task.status !== undefined) taskData.status = task.status;
     if (task.priority !== undefined) taskData.priority = task.priority;
     if (task.ownerId !== undefined) taskData.owner_id = task.ownerId;
-    if (task.visibility !== undefined) taskData.visibility = task.visibility;
     if (task.alignedKrId !== undefined) taskData.aligned_kr_id = task.alignedKrId;
     if (task.targetWeeks !== undefined) taskData.target_weeks = task.targetWeeks;
     if (task.startDate !== undefined) taskData.start_date = task.startDate;

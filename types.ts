@@ -179,7 +179,6 @@ export interface PADEntry {
   startDate?: number;
   dueDate?: number;
   tags?: string[];
-  visibility: 'public' | 'members' | 'department' | 'private';
   alignedKrId?: string; 
   targetWeeks?: string[]; // New: support multi-week tasks
   logs?: TaskLog[];

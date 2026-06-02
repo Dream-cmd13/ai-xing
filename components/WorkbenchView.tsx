@@ -331,7 +331,6 @@ const WorkbenchView: React.FC = () => {
           if (oldTask.priority !== newTask.priority) changes.push('优先级');
           if (oldTask.startDate !== newTask.startDate || oldTask.dueDate !== newTask.dueDate) changes.push('时间');
           if (oldTask.ownerId !== newTask.ownerId) changes.push('负责人');
-          if (oldTask.visibility !== newTask.visibility) changes.push('可见性');
           
           if (changes.length > 0) {
             const log: TaskLog = {
@@ -391,7 +390,6 @@ const WorkbenchView: React.FC = () => {
           priority: 'medium',
           ownerId: currentUser.id,
           departmentId: currentUser.departmentId,
-          visibility: 'public',
           targetWeeks: taskModal.weekId ? [taskModal.weekId] : [],
           startDate: Date.now(),
           dueDate: Date.now() + 86400000,

@@ -164,7 +164,6 @@ const WeeklyView: React.FC = () => {
         priority: 'medium',
         ownerId,
         departmentId: state.users.find(u => u.id === ownerId)?.departmentId || currentUser.departmentId,
-        visibility: 'public',
         targetWeeks: [selectedWeek],
         startDate: Date.now(),
         dueDate: Date.now() + 86400000,
@@ -254,7 +253,6 @@ const WeeklyView: React.FC = () => {
           if (oldTask.priority !== newData.priority) changes.push('优先级');
           if (oldTask.startDate !== newData.startDate || oldTask.dueDate !== newData.dueDate) changes.push('时间');
           if (oldTask.ownerId !== newData.ownerId) changes.push('负责人');
-          if (oldTask.visibility !== newData.visibility) changes.push('可见性');
           
           if (changes.length > 0) {
             const log: TaskLog = {
@@ -311,7 +309,6 @@ const WeeklyView: React.FC = () => {
           priority: 'medium',
           ownerId: currentUserIsAdmin ? selectedOwnerId : currentUser.id,
           departmentId: state.users.find(u => u.id === (currentUserIsAdmin ? selectedOwnerId : currentUser.id))?.departmentId || currentUser.departmentId,
-          visibility: 'public',
           targetWeeks: [selectedWeek],
           startDate: Date.now(),
           dueDate: Date.now() + 86400000,

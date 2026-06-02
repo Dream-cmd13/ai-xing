@@ -7,7 +7,7 @@ import {
   getBusinesses,
   getCurrentUserTaskUsers,
   getDepartments,
-  getMyTaskList,
+  getMyTaskListPage,
   getProcesses,
   getStrategy,
   getTaskList,
@@ -56,7 +56,8 @@ export const RouteDataLayout: React.FC = () => {
     taskLoadMode,
     setTaskLoadMode,
     taskLoadScope,
-    setTaskLoadScope
+    setTaskLoadScope,
+    setTaskListPagination
   } = useAppStore();
   const [routeError, setRouteError] = useState<string | null>(null);
   const [retryToken, setRetryToken] = useState(0);
@@ -153,12 +154,27 @@ export const RouteDataLayout: React.FC = () => {
       },
       tasks: async () => {
         const loadTasks = taskRouteNeedsFullData ? getTasks : getTaskList;
-        const tasks = taskRouteIsTaskCenter
-          ? await getMyTaskList(currentUserId)
-          : await loadTasks();
-        const taskUsers = taskRouteIsTaskCenter
-          ? await getTaskUsersForTasks(tasks.map(task => task.id))
-          : await getCurrentUserTaskUsers();
+        const taskPage = taskRouteIsTaskCenter
+          ? await getMyTaskListPage(currentUserId)
+          : null;
+        const taskResult = taskPage
+          ? {
+            tasks: taskPage.tasks,
+            taskUsers: await getTaskUsersForTasks(taskPage.tasks.map(task => task.id)),
+            nextOffset: taskPage.nextOffset,
+            hasMore: taskPage.hasMore
+          }
+          : await Promise.all([
+            loadTasks(),
+            getCurrentUserTaskUsers()
+          ]).then(([loadedTasks, taskUsers]) => ({
+            tasks: loadedTasks,
+            taskUsers,
+            nextOffset: loadedTasks.length,
+            hasMore: false
+          }));
+        const tasks = taskResult.tasks;
+        const taskUsers = taskResult.taskUsers;
         if (routeLoadKeyRef.current !== routeLoadKey) return;
         if (domainRequestVersionRef.current.tasks !== requestVersions.tasks) return;
         const currentUsers = useAppStore.getState().users || [];
@@ -170,6 +186,10 @@ export const RouteDataLayout: React.FC = () => {
         setLastSavedUsers(mergedUsers);
         setTaskLoadMode(taskRouteNeedsFullData ? 'full' : 'list');
         setTaskLoadScope(taskRouteNeedsFullData ? 'full' : (taskRouteIsTaskCenter ? 'mine' : 'org'));
+        setTaskListPagination({
+          offset: taskResult.nextOffset,
+          hasMore: taskResult.hasMore
+        });
         setDomainLoadState('tasks', { loaded: true });
       }
     };
@@ -206,6 +226,7 @@ export const RouteDataLayout: React.FC = () => {
     setLastSavedUsers,
     setTaskLoadMode,
     setTaskLoadScope,
+    setTaskListPagination,
     taskLoadMode,
     taskLoadScope,
     taskRouteIsTaskCenter,

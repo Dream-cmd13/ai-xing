@@ -91,7 +91,6 @@ CREATE TABLE IF NOT EXISTS public.tasks (
   status TEXT NOT NULL,
   priority TEXT NOT NULL,
   owner_id TEXT NOT NULL,
-  visibility TEXT NOT NULL,
   aligned_kr_id TEXT,
   target_weeks JSONB,
   start_date BIGINT,
@@ -181,6 +180,7 @@ ALTER TABLE public.tasks ADD COLUMN IF NOT EXISTS task_review TEXT;
 ALTER TABLE public.tasks ADD COLUMN IF NOT EXISTS task_review_score INTEGER;
 ALTER TABLE public.tasks ADD COLUMN IF NOT EXISTS updated_at BIGINT NOT NULL DEFAULT 0;
 ALTER TABLE public.tasks ADD COLUMN IF NOT EXISTS row_version BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE public.tasks DROP COLUMN IF EXISTS visibility;
 
 UPDATE public.tasks
 SET created_by = owner_id
