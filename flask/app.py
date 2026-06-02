@@ -69,6 +69,21 @@ def create_app() -> Flask:
             500,
         )
 
+    @app.errorhandler(Exception)
+    def handle_unexpected_error(error: Exception):
+        return (
+            jsonify(
+                {
+                    "success": False,
+                    "error": {
+                        "code": "UNEXPECTED_ERROR",
+                        "message": str(error) or "服务端发生未预期错误。",
+                    },
+                }
+            ),
+            500,
+        )
+
     return app
 
 

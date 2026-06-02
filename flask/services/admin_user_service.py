@@ -11,8 +11,11 @@ def _ensure_ok(response, default_message: str) -> dict:
     payload = response.json() if response.content else {}
     if response.status_code >= 400:
         message = payload.get("msg") or payload.get("message") or payload.get("error_description")
-        if not message and isinstance(payload.get("error"), dict):
-            message = payload["error"].get("message")
+        error_value = payload.get("error")
+        if not message and isinstance(error_value, dict):
+            message = error_value.get("message")
+        if not message and isinstance(error_value, str):
+            message = error_value
         raise RuntimeError(message or default_message)
     return payload
 
@@ -76,7 +79,7 @@ def create_user(username: str, name: str, role: str, department_id: str | None =
         },
     )
     auth_payload = _ensure_ok(auth_response, "创建认证账号失败。")
-    auth_user = auth_payload.get("user") or {}
+    auth_user = auth_payload.get("user") if isinstance(auth_payload.get("user"), dict) else auth_payload
     auth_id = auth_user.get("id")
     if not auth_id:
         raise RuntimeError("创建认证账号失败，未返回用户标识。")
