@@ -19,6 +19,7 @@ interface TaskModalProps {
   aiSettings?: AISettings;
   currentUser?: User;
   isAdmin?: boolean;
+  assignableOwners?: User[];
 }
 
 const TaskModal: React.FC<TaskModalProps> = ({
@@ -36,7 +37,8 @@ const TaskModal: React.FC<TaskModalProps> = ({
   periodWeeks = [],
   aiSettings,
   currentUser,
-  isAdmin = false
+  isAdmin = false,
+  assignableOwners = users
 }) => {
   const [error, setError] = useState<string | null>(null);
   const [checking, setChecking] = useState(false);
@@ -55,12 +57,15 @@ const TaskModal: React.FC<TaskModalProps> = ({
       });
     };
     collect(departments);
-    // Non-admin users can only select their own department
-    if (!isAdmin && currentUser?.departmentId) {
+    if (mode === 'create' && !isAdmin && currentUser?.departmentId) {
       return list.filter(d => d.id === currentUser.departmentId);
     }
     return list;
-  }, [departments, isAdmin, currentUser?.departmentId]);
+  }, [departments, mode, isAdmin, currentUser?.departmentId]);
+  const availableOwners = useMemo(
+    () => (assignableOwners.length > 0 ? assignableOwners : users),
+    [assignableOwners, users]
+  );
 
   useEffect(() => {
     if (isOpen) {
@@ -68,6 +73,33 @@ const TaskModal: React.FC<TaskModalProps> = ({
       setAiResult(null);
     }
   }, [isOpen]);
+
+  useEffect(() => {
+    if (!isOpen || mode !== 'create' || isAdmin || !currentUser?.departmentId) {
+      return;
+    }
+
+    const nextOwnerId = data.ownerId && availableOwners.some(user => user.id === data.ownerId)
+      ? data.ownerId
+      : currentUser.id;
+
+    if (data.departmentId !== currentUser.departmentId || data.ownerId !== nextOwnerId) {
+      setData({
+        ...data,
+        ownerId: nextOwnerId,
+        departmentId: currentUser.departmentId
+      });
+    }
+  }, [
+    isOpen,
+    mode,
+    isAdmin,
+    currentUser?.id,
+    currentUser?.departmentId,
+    data,
+    availableOwners,
+    setData
+  ]);
 
   const runAiCheck = async () => {
     if (!data.title) {
@@ -88,7 +120,8 @@ const TaskModal: React.FC<TaskModalProps> = ({
 
   if (!isOpen) return null;
   const isEditing = mode === 'edit';
-  const canEditOwner = isAdmin;
+  const canEditOwner = isEditing ? isAdmin : availableOwners.length > 1;
+  const isDepartmentReadOnly = readOnly || (mode === 'create' && !isAdmin);
 
   const handleSave = (status: string, keepOpen?: boolean) => {
     // Validation
@@ -341,16 +374,16 @@ const TaskModal: React.FC<TaskModalProps> = ({
                   if (error) setError(null);
                 }}
               >
-                {data.ownerId && !users.some(u => u.id === data.ownerId) && (
+                {data.ownerId && !availableOwners.some(u => u.id === data.ownerId) && (
                   <option value={data.ownerId}>{getUserDisplayName(data.ownerId)}</option>
                 )}
-                {users.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
+                {availableOwners.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
               </select>
             </div>
             <div className="flex-1 space-y-2">
               <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">所属部门</label>
               <select 
-                disabled={readOnly}
+                disabled={isDepartmentReadOnly}
                 className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold outline-none disabled:opacity-50"
                 value={data.departmentId || ''}
                 onChange={e => setData({ ...data, departmentId: e.target.value })}

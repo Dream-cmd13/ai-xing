@@ -12,7 +12,7 @@ import PageToast from './PageToast';
 import TaskModal from './TaskModal';
 import { ensureTaskTargetWeeks } from '@/utils/taskPeriods.js';
 import { getUserFacingError } from '@/utils/userFacingError';
-import { canManageTask, canViewTask, isAdminUser } from '@/utils/permissions';
+import { canAssignTaskOwner, canManageTask, canViewTask, getAssignableTaskOwners, isAdminUser } from '@/utils/permissions';
 
 const WorkbenchView: React.FC = () => {
   const state = useAppStore();
@@ -56,6 +56,10 @@ const WorkbenchView: React.FC = () => {
   const [isWorkbenchTasksLoading, setIsWorkbenchTasksLoading] = useState(false);
   const backgroundPrefetchVersionRef = useRef(0);
   const missingTaskUserFetchKeyRef = useRef('');
+  const assignableTaskOwners = useMemo(
+    () => getAssignableTaskOwners(currentUser, state.users, state.systemRoles || []),
+    [currentUser, state.users, state.systemRoles]
+  );
 
   useEffect(() => {
     if (!currentUser?.id || domainLoadStatus.tasks.loaded) {
@@ -318,7 +322,10 @@ const WorkbenchView: React.FC = () => {
         newTask.ownerId = oldTask.ownerId;
       }
     } else if (!currentUserIsAdmin) {
-      newTask.ownerId = currentUser.id;
+      if (!canAssignTaskOwner(currentUser, state.users, newTask.ownerId, state.systemRoles || [])) {
+        newTask.ownerId = currentUser.id;
+      }
+      newTask.departmentId = currentUser.departmentId;
     }
 
     if (!isNewTask) {
@@ -520,6 +527,7 @@ const WorkbenchView: React.FC = () => {
         aiSettings={state.aiSettings}
         currentUser={currentUser}
         isAdmin={isAdminUser(currentUser, state.systemRoles || [])}
+        assignableOwners={assignableTaskOwners}
       />
     </div>
   );

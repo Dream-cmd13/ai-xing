@@ -15,7 +15,7 @@ import {
 } from 'lucide-react';
 import { usePageToast } from '../hooks/usePageToast';
 import { getUserFacingError } from '../utils/userFacingError';
-import { canManageTask, getVisibleDepartments, canViewTask, isAdminUser } from '../utils/permissions';
+import { canAssignTaskOwner, canManageTask, canViewTask, getAssignableTaskOwners, getVisibleDepartments, isAdminUser } from '../utils/permissions';
 import { ensureTaskTargetWeeks } from '../utils/taskPeriods.js';
 
 
@@ -88,6 +88,14 @@ const WeeklyView: React.FC = () => {
         return (b.startDate ?? 0) - (a.startDate ?? 0);
       });
   }, [state.tasks, selectedOwnerId, selectedWeek]);
+  const assignableTaskOwners = useMemo(
+    () => getAssignableTaskOwners(currentUser, state.users, state.systemRoles || []),
+    [currentUser, state.users, state.systemRoles]
+  );
+  const canCreateForSelectedOwner = useMemo(
+    () => assignableTaskOwners.some(user => user.id === selectedOwnerId),
+    [assignableTaskOwners, selectedOwnerId]
+  );
 
   const groupedAvailableKRs = useMemo(() => {
     const groups: { label: string, options: { id: string, name: string }[] }[] = [];
@@ -148,11 +156,13 @@ const WeeklyView: React.FC = () => {
 
   const handleAddTask = () => {
     const currentUserIsAdmin = isAdminUser(currentUser, state.systemRoles || []);
-    if (!permissions.create || (!currentUserIsAdmin && selectedOwnerId !== currentUser.id)) {
+    if (!permissions.create || (!currentUserIsAdmin && !canCreateForSelectedOwner)) {
       showToast('无权限为其他人创建任务', 'error');
       return;
     }
-    const ownerId = currentUserIsAdmin ? selectedOwnerId : currentUser.id;
+    const ownerId = currentUserIsAdmin
+      ? selectedOwnerId
+      : (canCreateForSelectedOwner ? selectedOwnerId : currentUser.id);
     setTaskModal({ 
       isOpen: true, 
       index: null, 
@@ -240,7 +250,10 @@ const WeeklyView: React.FC = () => {
         newData.ownerId = oldTask.ownerId;
       }
     } else if (!currentUserIsAdmin) {
-      newData.ownerId = currentUser.id;
+      if (!canAssignTaskOwner(currentUser, state.users, newData.ownerId, state.systemRoles || [])) {
+        newData.ownerId = currentUser.id;
+      }
+      newData.departmentId = currentUser.departmentId;
     }
     
     if (taskModal.index !== null) {
@@ -307,8 +320,12 @@ const WeeklyView: React.FC = () => {
           title: '', 
           status: 'draft',
           priority: 'medium',
-          ownerId: currentUserIsAdmin ? selectedOwnerId : currentUser.id,
-          departmentId: state.users.find(u => u.id === (currentUserIsAdmin ? selectedOwnerId : currentUser.id))?.departmentId || currentUser.departmentId,
+          ownerId: currentUserIsAdmin
+            ? selectedOwnerId
+            : (canCreateForSelectedOwner ? selectedOwnerId : currentUser.id),
+          departmentId: currentUserIsAdmin
+            ? state.users.find(u => u.id === selectedOwnerId)?.departmentId || currentUser.departmentId
+            : currentUser.departmentId,
           targetWeeks: [selectedWeek],
           startDate: Date.now(),
           dueDate: Date.now() + 86400000,
@@ -467,7 +484,7 @@ const WeeklyView: React.FC = () => {
                </div>
              </div>
              <div className="flex items-center gap-3 w-full md:w-auto">
-               {permissions.create && selectedOwnerId === currentUser.id && (
+               {permissions.create && (currentUser.id === selectedOwnerId || canCreateForSelectedOwner) && (
                  <button onClick={handleAddTask} className="w-full md:w-auto px-6 py-3 bg-slate-900 text-white rounded-2xl text-xs font-black uppercase shadow-xl hover:bg-brand-600 transition-all flex items-center justify-center gap-2"><Plus size={16}/> 新增任务项</button>
                )}
              </div>
@@ -560,6 +577,7 @@ const WeeklyView: React.FC = () => {
         aiSettings={state.aiSettings}
         currentUser={currentUser}
         isAdmin={isAdminUser(currentUser, state.systemRoles || [])}
+        assignableOwners={assignableTaskOwners}
       />
 
       {/* Delete Confirmation Modal */}

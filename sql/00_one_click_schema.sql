@@ -1110,16 +1110,32 @@ CREATE OR REPLACE FUNCTION public.enforce_task_owner_scope()
 RETURNS TRIGGER AS $$
 DECLARE
   current_id TEXT;
+  current_department_id TEXT;
+  owner_department_id TEXT;
 BEGIN
   IF public.is_admin() THEN
     RETURN NEW;
   END IF;
 
   current_id := public.current_user_id();
+  current_department_id := public.current_user_department_id();
 
   IF TG_OP = 'INSERT' THEN
-    IF NEW.owner_id IS DISTINCT FROM current_id THEN
-      RAISE EXCEPTION '非管理员不能将任务负责人设置为其他人';
+    IF NEW.department_id IS DISTINCT FROM current_department_id THEN
+      RAISE EXCEPTION '非管理员创建任务时所属部门必须是当前用户所在部门';
+    END IF;
+
+    IF public.is_manager() THEN
+      SELECT department_id
+      INTO owner_department_id
+      FROM public.users
+      WHERE id = NEW.owner_id;
+
+      IF owner_department_id IS DISTINCT FROM current_department_id THEN
+        RAISE EXCEPTION '部门长只能将任务负责人设置为本部门成员';
+      END IF;
+    ELSIF NEW.owner_id IS DISTINCT FROM current_id THEN
+      RAISE EXCEPTION '普通员工只能将自己设为任务负责人';
     END IF;
   ELSIF TG_OP = 'UPDATE' THEN
     IF NEW.owner_id IS DISTINCT FROM OLD.owner_id THEN

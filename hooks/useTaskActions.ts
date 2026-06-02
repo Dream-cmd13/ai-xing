@@ -51,7 +51,15 @@ export const useTaskActions = ({
     const currentUserIsAdmin = isAdminUser(currentUser, store.systemRoles || []);
     const normalizedEntries = entriesToPersist.map((entry) => {
       const previousTask = previousLastSavedTasks.find((task) => task.id === entry.id);
-      return prepareTaskForPersistence(entry, previousTask, currentUser, mode, currentUserIsAdmin);
+      return prepareTaskForPersistence(
+        entry,
+        previousTask,
+        currentUser,
+        store.users || [],
+        store.systemRoles || [],
+        mode,
+        currentUserIsAdmin
+      );
     });
     const optimisticTaskMap = new Map(normalizedEntries.map((entry) => [entry.id, entry]));
     const nextOptimisticTasks = optimisticTasks.map((task) => optimisticTaskMap.get(task.id) ?? task);

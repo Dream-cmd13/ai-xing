@@ -14,7 +14,7 @@ import PageToast from './PageToast';
 import TaskModal from './TaskModal';
 import { usePageToast } from '../hooks/usePageToast';
 import { getUserFacingError } from '../utils/userFacingError';
-import { getVisibleDepartments, canManageTask, canViewTask, isAdminUser } from '../utils/permissions';
+import { canAssignTaskOwner, canManageTask, canViewTask, getAssignableTaskOwners, getVisibleDepartments, isAdminUser } from '../utils/permissions';
 import { ensureTaskTargetWeeks } from '../utils/taskPeriods.js';
 import { getTaskById, getTaskList, getTaskUsersForTasks } from '../data';
 
@@ -54,6 +54,10 @@ const TaskCenterView: React.FC = () => {
   }, [departments]);
   const usersById = useMemo(() => new Map(users.map(u => [u.id, u])), [users]);
   const deptsById = useMemo(() => new Map(flatAllDepartments.map(d => [d.id, d])), [flatAllDepartments]);
+  const assignableTaskOwners = useMemo(
+    () => getAssignableTaskOwners(currentUser, users, state.systemRoles || []),
+    [currentUser, users, state.systemRoles]
+  );
 
   const today = useMemo(() => new Date(), []);
   const currentWeekId = useMemo(() => {
@@ -160,7 +164,10 @@ const TaskCenterView: React.FC = () => {
         newTask.ownerId = oldTask.ownerId;
       }
     } else if (!currentUserIsAdmin) {
-      newTask.ownerId = currentUser.id;
+      if (!canAssignTaskOwner(currentUser, state.users, newTask.ownerId, state.systemRoles || [])) {
+        newTask.ownerId = currentUser.id;
+      }
+      newTask.departmentId = currentUser.departmentId;
     }
 
     if (!isNewTask) {
@@ -668,6 +675,7 @@ const TaskCenterView: React.FC = () => {
         aiSettings={state.aiSettings}
         currentUser={currentUser}
         isAdmin={isAdminUser(currentUser, state.systemRoles || [])}
+        assignableOwners={assignableTaskOwners}
       />
     </div>
   );

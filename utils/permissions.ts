@@ -33,6 +33,38 @@ export const isAdminUser = (user: User, systemRoles: SystemRole[] = []): boolean
 
 export const isManagerUser = (user: User): boolean => normalizeUserRole(user.role) === 'Manager';
 
+export const getAssignableTaskOwners = (
+  currentUser: User,
+  users: User[],
+  systemRoles: SystemRole[] = []
+): User[] => {
+  if (isAdminUser(currentUser, systemRoles)) {
+    return users;
+  }
+
+  if (isManagerUser(currentUser) && currentUser.departmentId) {
+    const sameDepartmentUsers = users.filter(user => user.departmentId === currentUser.departmentId);
+    if (sameDepartmentUsers.some(user => user.id === currentUser.id)) {
+      return sameDepartmentUsers;
+    }
+    return [currentUser, ...sameDepartmentUsers];
+  }
+
+  return users.some(user => user.id === currentUser.id)
+    ? users.filter(user => user.id === currentUser.id)
+    : [currentUser];
+};
+
+export const canAssignTaskOwner = (
+  currentUser: User,
+  users: User[],
+  targetOwnerId: string | undefined,
+  systemRoles: SystemRole[] = []
+): boolean => {
+  if (!targetOwnerId) return false;
+  return getAssignableTaskOwners(currentUser, users, systemRoles).some(user => user.id === targetOwnerId);
+};
+
 export const getUserRoleLabel = (role: UserRole): string => {
   switch (role) {
     case 'Admin':

@@ -11,7 +11,7 @@ import TaskModal from './TaskModal';
 import { Building2, ChevronDown, ChevronRight, LayoutGrid, Plus, X, Calendar, User as UserIcon, Clock } from 'lucide-react';
 import { usePageToast } from '../hooks/usePageToast';
 import { getUserFacingError } from '../utils/userFacingError';
-import { canManageDepartment, canManageTask, canViewTask, getVisibleDepartments, isAdminUser } from '../utils/permissions';
+import { canAssignTaskOwner, canManageDepartment, canManageTask, canViewTask, getAssignableTaskOwners, getVisibleDepartments, isAdminUser } from '../utils/permissions';
 import { ensureTaskTargetWeeks } from '../utils/taskPeriods.js';
 
 
@@ -95,6 +95,14 @@ const ExecutionView: React.FC = () => {
     collect(visibleDepartments);
     return list;
   }, [visibleDepartments]);
+  const currentUserIsAdmin = useMemo(
+    () => isAdminUser(currentUser, state.systemRoles || []),
+    [currentUser, state.systemRoles]
+  );
+  const assignableTaskOwners = useMemo(
+    () => getAssignableTaskOwners(currentUser, state.users, state.systemRoles || []),
+    [currentUser, state.users, state.systemRoles]
+  );
 
   const selectedDepartment = useMemo(
     () => flatDepts.find(d => d.id === selectedDeptId) || null,
@@ -103,7 +111,11 @@ const ExecutionView: React.FC = () => {
   const canManageSelectedDepartment = selectedDepartment
     ? canManageDepartment(selectedDepartment, currentUser, state.systemRoles || [], state.departments)
     : false;
-  const canCreateExecutionTask = permissions.create && canManageSelectedDepartment;
+  const canCreateExecutionTask = permissions.create && (
+    currentUserIsAdmin
+      ? canManageSelectedDepartment
+      : selectedDeptId === currentUser.departmentId
+  );
   const canEditExecutionTask = permissions.update;
 
   const groupedAvailableKRs = useMemo(() => {
@@ -175,7 +187,7 @@ const ExecutionView: React.FC = () => {
         status: 'draft',
         priority: 'medium',
         ownerId: currentUser.id,
-        departmentId: selectedDeptId || currentUser.departmentId,
+        departmentId: currentUserIsAdmin ? (selectedDeptId || currentUser.departmentId) : currentUser.departmentId,
         alignedKrId: alignedKrId,
         targetWeeks: [weekId],
         startDate: Date.now(),
@@ -214,13 +226,15 @@ const ExecutionView: React.FC = () => {
 
     const isNewTask = !state.tasks.some(e => e.id === newTask.id);
     const oldTask = state.tasks.find(e => e.id === newTask.id);
-    const currentUserIsAdmin = isAdminUser(currentUser, state.systemRoles || []);
     if (isNewTask && !canCreateExecutionTask) return;
     if (!isNewTask && (!oldTask || !permissions.update || !canManageTask(oldTask, currentUser, state.systemRoles || [], state.departments))) return;
     if (!isNewTask && !currentUserIsAdmin && oldTask) {
       newTask.ownerId = oldTask.ownerId;
     } else if (isNewTask && !currentUserIsAdmin) {
-      newTask.ownerId = currentUser.id;
+      if (!canAssignTaskOwner(currentUser, state.users, newTask.ownerId, state.systemRoles || [])) {
+        newTask.ownerId = currentUser.id;
+      }
+      newTask.departmentId = currentUser.departmentId;
     }
 
     if (!isNewTask) {
@@ -295,7 +309,7 @@ const ExecutionView: React.FC = () => {
           status: 'draft',
           priority: 'medium',
           ownerId: currentUser.id,
-          departmentId: selectedDeptId || currentUser.departmentId,
+          departmentId: currentUserIsAdmin ? (selectedDeptId || currentUser.departmentId) : currentUser.departmentId,
           alignedKrId: taskModal.data.alignedKrId,
           targetWeeks: taskModal.weekId ? [taskModal.weekId] : [],
           startDate: Date.now(),
@@ -443,7 +457,8 @@ const ExecutionView: React.FC = () => {
         }
         periodWeeks={periodWeeks}
         currentUser={currentUser}
-        isAdmin={isAdminUser(currentUser, state.systemRoles || [])}
+        isAdmin={currentUserIsAdmin}
+        assignableOwners={assignableTaskOwners}
       />
     </div>
   );
