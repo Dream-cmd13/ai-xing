@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { PADEntry, User, Department, AISettings } from '../types';
 import { X, AlertCircle, Wand2, Loader2, Sparkles, CheckCircle, Trash2, Search } from 'lucide-react';
 import { checkPADQuality } from '../services/gemini';
+import { getTaskCandidateUsers } from '../data';
 
 interface TaskModalProps {
   isOpen: boolean;
@@ -46,8 +47,14 @@ const TaskModal: React.FC<TaskModalProps> = ({
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [showParticipantPicker, setShowParticipantPicker] = useState(false);
   const [participantSearchQuery, setParticipantSearchQuery] = useState('');
+  const [taskCandidateUsers, setTaskCandidateUsers] = useState<User[]>([]);
+  const selectableUsers = useMemo(() => {
+    const mergedUsersById = new Map(users.map(user => [user.id, user]));
+    taskCandidateUsers.forEach(user => mergedUsersById.set(user.id, user));
+    return Array.from(mergedUsersById.values());
+  }, [users, taskCandidateUsers]);
   const getUserDisplayName = (userId: string): string => {
-    const user = users.find(item => item.id === userId);
+    const user = selectableUsers.find(item => item.id === userId);
     return user?.name || `未知用户（${userId}）`;
   };
   const allDepartments = useMemo(() => {
@@ -78,7 +85,7 @@ const TaskModal: React.FC<TaskModalProps> = ({
   const filteredParticipantUsers = useMemo(() => {
     const keyword = participantSearchQuery.trim().toLowerCase();
     if (!keyword) {
-      return users;
+      return selectableUsers;
     }
 
     const keywords = keyword.split(/\s+/).filter(Boolean);
@@ -105,12 +112,12 @@ const TaskModal: React.FC<TaskModalProps> = ({
       return score;
     };
 
-    return users
+    return selectableUsers
       .map(user => ({ user, score: getSearchScore(user) }))
       .filter(item => item.score >= 0)
       .sort((a, b) => b.score - a.score || a.user.name.localeCompare(b.user.name, 'zh-CN'))
       .map(item => item.user);
-  }, [participantSearchQuery, users, departmentsById]);
+  }, [participantSearchQuery, selectableUsers, departmentsById]);
 
   useEffect(() => {
     if (isOpen) {
@@ -120,6 +127,27 @@ const TaskModal: React.FC<TaskModalProps> = ({
       setParticipantSearchQuery('');
     }
   }, [isOpen]);
+
+  useEffect(() => {
+    if (!isOpen || readOnly) {
+      return;
+    }
+
+    let cancelled = false;
+    getTaskCandidateUsers()
+      .then((loadedUsers) => {
+        if (cancelled) return;
+        setTaskCandidateUsers(loadedUsers);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setTaskCandidateUsers([]);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isOpen, readOnly]);
 
   useEffect(() => {
     if (!isOpen || mode !== 'create' || isAdmin || !currentUser?.departmentId) {
@@ -440,7 +468,7 @@ const TaskModal: React.FC<TaskModalProps> = ({
                   }}
                 >
                   <option value="">+ 添加</option>
-                  {users.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
+                  {selectableUsers.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
                 </select>
               </div>
             </div>

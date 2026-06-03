@@ -346,6 +346,26 @@ export const getCurrentUserTaskUsers = async (): Promise<User[]> => {
   }
 };
 
+export const getTaskCandidateUsers = async (): Promise<User[]> => {
+  if (!isSupabaseConfigured()) throw new Error("Supabase not configured");
+  try {
+    let data: any[] | null = null;
+    let error: any = null;
+
+    ({ data, error } = await supabase.rpc('get_task_candidate_users'));
+
+    if (isIgnoredMissingFunctionError(error)) {
+      ({ data, error } = await supabase.from('users').select(USERS_SELECT_FIELDS));
+    }
+
+    if (error && !isIgnoredMissingTableError(error)) throw error;
+    return (data || []).map(mapUserRow);
+  } catch (e) {
+    handleSupabaseError(e);
+    throw e;
+  }
+};
+
 export const getDepartments = async (): Promise<Department[]> => {
   if (!isSupabaseConfigured()) throw new Error("Supabase not configured");
   try {
