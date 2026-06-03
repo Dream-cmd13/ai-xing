@@ -29,6 +29,9 @@ const buildConflictError = (entityLabel: string) =>
 const buildDeleteConflictError = (entityLabel: string) =>
   new Error(`${entityLabel}已被其他人修改或删除，请先刷新最新数据后再重试。`);
 
+const buildPermissionError = (entityLabel: string) =>
+  new Error(`您暂无权限保存${entityLabel}，请联系管理员检查权限配置。`);
+
 const buildDuplicateCreateError = (entityLabel: string) =>
   new Error(`${entityLabel}创建失败，可能是重复提交或记录已存在。`);
 
@@ -814,7 +817,23 @@ export const updateStrategy = async (strategy: Partial<CompanyStrategy>): Promis
       .maybeSingle();
 
     if (error) throw error;
-    if (!data) throw buildConflictError('战略');
+    if (!data) {
+      const latest = await supabase
+        .from('strategy')
+        .select('id,row_version')
+        .eq('id', 'default')
+        .maybeSingle();
+
+      if (latest.error) throw latest.error;
+      if (!latest.data) throw buildDeleteConflictError('战略');
+
+      const latestRowVersion = normalizeRowVersion(latest.data.row_version);
+      if (latestRowVersion !== currentRowVersion) {
+        throw buildConflictError('战略');
+      }
+
+      throw buildPermissionError('战略');
+    }
     return mapStrategyRow(data);
   } catch (e) {
     handleSupabaseError(e);

@@ -10,6 +10,16 @@ const getErrorMessageText = (error: unknown): string => {
 export const getUserFacingError = (error: unknown, fallback = '操作失败，请稍后重试'): string => {
   const rawMessage = getErrorMessageText(error).trim();
   if (!rawMessage) return fallback;
+  if (
+    rawMessage.includes('无权限') ||
+    rawMessage.includes('权限不足') ||
+    rawMessage.includes('没有权限') ||
+    rawMessage.includes('禁止访问') ||
+    rawMessage.includes('禁止操作')
+  ) {
+    return '您暂无权限执行该操作，请联系管理员检查权限配置';
+  }
+
   if (/[\u4e00-\u9fff]/.test(rawMessage)) return rawMessage;
 
   const lowerMessage = rawMessage.toLowerCase();
