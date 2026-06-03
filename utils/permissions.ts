@@ -244,27 +244,20 @@ export const hasPermission = (
   if (isAdminUser(user, systemRoles)) return true;
   if (menuId === 'workbench') return action === 'view';
 
-  // Check custom permissions first (override)
+  // Personal permissions are additive to role permissions.
   const customPermissions = user.customPermissions && typeof user.customPermissions === 'object' && !Array.isArray(user.customPermissions)
     ? user.customPermissions
     : undefined;
-  if (customPermissions && customPermissions[menuId]) {
-    return customPermissions[menuId][action];
-  }
+  const customAllowed = !!customPermissions?.[menuId]?.[action];
 
-  // Check role permissions
+  // Any assigned role can grant the requested action.
   const roleIds = normalizeStringArray(user.systemRoleIds);
-  if (roleIds.length > 0) {
-    for (const roleId of roleIds) {
-      const role = systemRoles.find(r => r.id === roleId);
-      if (role && role.permissions && role.permissions[menuId] && role.permissions[menuId][action]) {
-        return true;
-      }
-    }
-  }
+  const roleAllowed = roleIds.some(roleId => {
+    const role = systemRoles.find(r => r.id === roleId);
+    return !!role?.permissions?.[menuId]?.[action];
+  });
 
-  // Default to false if no permission is found
-  return false;
+  return customAllowed || roleAllowed;
 };
 
 export const getVisibleDepartments = (user: User, allDepartments: Department[], systemRoles: SystemRole[] = []): Department[] => {

@@ -215,7 +215,7 @@ const MenuPermissionView: React.FC = () => {
                   <tr key={item.id} className={`border-b border-slate-100 last:border-0 hover:bg-slate-50 transition-colors ${hasCustom ? 'bg-brand-50/30' : ''}`}>
                     <td className="p-4 font-medium text-slate-700 pl-8">
                       {item.label}
-                      {hasCustom && <span className="ml-2 text-[9px] bg-brand-100 text-brand-600 px-1.5 py-0.5 rounded-md font-bold">已覆盖</span>}
+                      {hasCustom && <span className="ml-2 text-[9px] bg-brand-100 text-brand-600 px-1.5 py-0.5 rounded-md font-bold">已设置</span>}
                     </td>
                     <td className="p-4 text-center">
                       <input 
@@ -260,7 +260,7 @@ const MenuPermissionView: React.FC = () => {
                             disabled={!permissions.update}
                             className="text-[10px] font-bold text-slate-400 hover:text-red-500 transition-colors disabled:opacity-50"
                           >
-                            清除覆盖
+                            清除设置
                           </button>
                         )}
                       </td>
@@ -599,7 +599,7 @@ const MenuPermissionView: React.FC = () => {
                       </div>
 
                       <div className="overflow-x-auto">
-                        <label className="block text-xs font-bold text-slate-500 mb-3">个人特殊权限 (将覆盖角色权限)</label>
+                        <label className="block text-xs font-bold text-slate-500 mb-3">个人附加权限 (与角色权限叠加)</label>
                         <div className="min-w-[500px]">
                           {renderPermissionTable(editingUser.customPermissions || {}, 'user')}
                         </div>
