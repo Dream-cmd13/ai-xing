@@ -10,6 +10,7 @@ import { AppState, Department, ReviewEntry, ObjectiveReview, User, PADEntry, Men
 import { Calendar, Building2, ClipboardCheck, Save, CheckCircle, Loader2, Target, TrendingUp, MessageSquare, FileText, Lock, Download, RefreshCw, ChevronLeft, ChevronRight, PieChart } from 'lucide-react';
 import PageToast from './PageToast';
 import TaskModal from './TaskModal';
+import { getTaskById } from '../data';
 import { getUserFacingError } from '../utils/userFacingError';
 import { canManageReview, canManageTask, getVisibleDepartments, canViewTask, isAdminUser } from '../utils/permissions';
 import { isTaskInMonthlyPeriod, isTaskInWeeklyPeriod } from '../utils/taskPeriods.js';
@@ -367,22 +368,51 @@ const ReviewView: React.FC = () => {
     };
 
     const syncedDeptTasks = syncTaskReviewsToTasks(deptTasks, okrReviews);
-    const changedTaskMap = new Map(
-      syncedDeptTasks
-        .filter((task) => {
-          const currentTask = state.tasks.find((entry) => entry.id === task.id);
-          if (!currentTask) return false;
-          return (currentTask.taskReview || '') !== (task.taskReview || '')
-            || (currentTask.taskReviewScore ?? 0) !== (task.taskReviewScore ?? 0);
-        })
-        .map((task) => [task.id, task])
-    );
-
-    const nextAllTasks = changedTaskMap.size > 0
-      ? state.tasks.map((task) => changedTaskMap.get(task.id) ?? task)
-      : state.tasks;
+    const syncedTaskMap = new Map(syncedDeptTasks.map((task) => [task.id, task]));
+    const candidateTaskIds = syncedDeptTasks
+      .filter((task) => {
+        const currentTask = state.tasks.find((entry) => entry.id === task.id);
+        if (!currentTask) return false;
+        return (currentTask.taskReview || '') !== (task.taskReview || '')
+          || (currentTask.taskReviewScore ?? 0) !== (task.taskReviewScore ?? 0);
+      })
+      .map((task) => task.id);
 
     try {
+      const latestChangedTasks = candidateTaskIds.length > 0
+        ? await Promise.all(candidateTaskIds.map(async (taskId) => {
+            try {
+              return await getTaskById(taskId);
+            } catch {
+              return state.tasks.find((entry) => entry.id === taskId) || syncedTaskMap.get(taskId)!;
+            }
+          }))
+        : [];
+
+      const changedTaskMap = new Map(
+        latestChangedTasks
+          .map((latestTask) => {
+            const syncedTask = syncedTaskMap.get(latestTask.id);
+            if (!syncedTask) return null;
+
+            const nextTask = {
+              ...latestTask,
+              taskReview: syncedTask.taskReview || '',
+              taskReviewScore: syncedTask.taskReviewScore ?? 0
+            };
+
+            const hasChanged = (latestTask.taskReview || '') !== (nextTask.taskReview || '')
+              || (latestTask.taskReviewScore ?? 0) !== (nextTask.taskReviewScore ?? 0);
+
+            return hasChanged ? [latestTask.id, nextTask] as [string, PADEntry] : null;
+          })
+          .filter((entry): entry is [string, PADEntry] => Boolean(entry))
+      );
+
+      const nextAllTasks = changedTaskMap.size > 0
+        ? state.tasks.map((task) => changedTaskMap.get(task.id) ?? task)
+        : state.tasks;
+
       if (changedTaskMap.size > 0) {
         await persistTaskEntries(nextAllTasks, Array.from(changedTaskMap.values()), 'update');
       }
