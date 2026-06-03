@@ -50,7 +50,7 @@ const TaskModal: React.FC<TaskModalProps> = ({
     const user = users.find(item => item.id === userId);
     return user?.name || `未知用户（${userId}）`;
   };
-  const flatDepartments = useMemo(() => {
+  const allDepartments = useMemo(() => {
     const list: Department[] = [];
     const collect = (items: Department[]) => {
       items.forEach((department) => {
@@ -59,18 +59,21 @@ const TaskModal: React.FC<TaskModalProps> = ({
       });
     };
     collect(departments);
-    if (mode === 'create' && !isAdmin && currentUser?.departmentId) {
-      return list.filter(d => d.id === currentUser.departmentId);
-    }
     return list;
-  }, [departments, mode, isAdmin, currentUser?.departmentId]);
+  }, [departments]);
+  const flatDepartments = useMemo(() => {
+    if (mode === 'create' && !isAdmin && currentUser?.departmentId) {
+      return allDepartments.filter(d => d.id === currentUser.departmentId);
+    }
+    return allDepartments;
+  }, [allDepartments, mode, isAdmin, currentUser?.departmentId]);
   const availableOwners = useMemo(
     () => (assignableOwners.length > 0 ? assignableOwners : users),
     [assignableOwners, users]
   );
   const departmentsById = useMemo(
-    () => new Map(flatDepartments.map(department => [department.id, department.name])),
-    [flatDepartments]
+    () => new Map(allDepartments.map(department => [department.id, department.name])),
+    [allDepartments]
   );
   const filteredParticipantUsers = useMemo(() => {
     const keyword = participantSearchQuery.trim().toLowerCase();
@@ -165,7 +168,7 @@ const TaskModal: React.FC<TaskModalProps> = ({
   if (!isOpen) return null;
   const isEditing = mode === 'edit';
   const canEditOwner = isEditing ? isAdmin : availableOwners.length > 1;
-  const isDepartmentReadOnly = readOnly || (mode === 'create' && !isAdmin);
+  const isDepartmentReadOnly = readOnly || mode === 'edit' || (mode === 'create' && !isAdmin);
 
   const handleSave = (status: string, keepOpen?: boolean) => {
     // Validation
