@@ -20,6 +20,9 @@ CREATE TABLE IF NOT EXISTS public.users (
   system_role_ids JSONB,
   custom_permissions JSONB,
   auth_id UUID UNIQUE,
+  created_by TEXT,
+  created_at BIGINT NOT NULL DEFAULT 0,
+  updated_by TEXT,
   updated_at BIGINT NOT NULL DEFAULT 0,
   row_version BIGINT NOT NULL DEFAULT 0
 );
@@ -36,6 +39,9 @@ CREATE TABLE IF NOT EXISTS public.departments (
   sub_departments JSONB,
   okrs JSONB,
   reviews JSONB,
+  created_by TEXT,
+  created_at BIGINT NOT NULL DEFAULT 0,
+  updated_by TEXT,
   updated_at BIGINT NOT NULL DEFAULT 0,
   row_version BIGINT NOT NULL DEFAULT 0
 );
@@ -44,6 +50,7 @@ CREATE TABLE IF NOT EXISTS public.processes (
   id TEXT PRIMARY KEY,
   department_id TEXT,
   created_by TEXT,
+  created_at BIGINT NOT NULL DEFAULT 0,
   name TEXT NOT NULL,
   category TEXT NOT NULL,
   level INTEGER NOT NULL,
@@ -56,7 +63,8 @@ CREATE TABLE IF NOT EXISTS public.processes (
   nodes JSONB,
   links JSONB,
   history JSONB,
-  updated_at BIGINT NOT NULL,
+  updated_by TEXT,
+  updated_at BIGINT NOT NULL DEFAULT 0,
   row_version BIGINT NOT NULL DEFAULT 0
 );
 
@@ -67,6 +75,9 @@ CREATE TABLE IF NOT EXISTS public.strategy (
   customer_issues TEXT,
   employee_issues TEXT,
   company_okrs JSONB,
+  created_by TEXT,
+  created_at BIGINT NOT NULL DEFAULT 0,
+  updated_by TEXT,
   updated_at BIGINT NOT NULL DEFAULT 0,
   row_version BIGINT NOT NULL DEFAULT 0
 );
@@ -79,7 +90,10 @@ CREATE TABLE IF NOT EXISTS public.businesses (
   customer_needs TEXT,
   surface_product_power TEXT,
   core_product_power TEXT,
-  updated_at BIGINT NOT NULL,
+  created_by TEXT,
+  created_at BIGINT NOT NULL DEFAULT 0,
+  updated_by TEXT,
+  updated_at BIGINT NOT NULL DEFAULT 0,
   row_version BIGINT NOT NULL DEFAULT 0
 );
 
@@ -87,6 +101,7 @@ CREATE TABLE IF NOT EXISTS public.tasks (
   id TEXT PRIMARY KEY,
   department_id TEXT,
   created_by TEXT,
+  created_at BIGINT NOT NULL DEFAULT 0,
   title TEXT NOT NULL,
   status TEXT NOT NULL,
   priority TEXT NOT NULL,
@@ -106,6 +121,7 @@ CREATE TABLE IF NOT EXISTS public.tasks (
   task_review_score INTEGER,
   pad_id TEXT,
   version TEXT,
+  updated_by TEXT,
   updated_at BIGINT NOT NULL DEFAULT 0,
   row_version BIGINT NOT NULL DEFAULT 0
 );
@@ -115,6 +131,9 @@ CREATE TABLE IF NOT EXISTS public.system_roles (
   name TEXT NOT NULL,
   description TEXT,
   permissions JSONB NOT NULL,
+  created_by TEXT,
+  created_at BIGINT NOT NULL DEFAULT 0,
+  updated_by TEXT,
   updated_at BIGINT NOT NULL DEFAULT 0,
   row_version BIGINT NOT NULL DEFAULT 0
 );
@@ -122,6 +141,9 @@ CREATE TABLE IF NOT EXISTS public.system_roles (
 CREATE TABLE IF NOT EXISTS public.settings (
   id TEXT PRIMARY KEY DEFAULT 'default',
   ai_settings JSONB,
+  created_by TEXT,
+  created_at BIGINT NOT NULL DEFAULT 0,
+  updated_by TEXT,
   updated_at BIGINT NOT NULL DEFAULT 0,
   row_version BIGINT NOT NULL DEFAULT 0
 );
@@ -134,16 +156,25 @@ CREATE TABLE IF NOT EXISTS public.settings (
 ALTER TABLE public.users DROP COLUMN IF EXISTS ent_name;
 ALTER TABLE public.users DROP COLUMN IF EXISTS password;
 ALTER TABLE public.users ADD COLUMN IF NOT EXISTS auth_id UUID UNIQUE;
+ALTER TABLE public.users ADD COLUMN IF NOT EXISTS created_by TEXT;
+ALTER TABLE public.users ADD COLUMN IF NOT EXISTS created_at BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE public.users ADD COLUMN IF NOT EXISTS updated_by TEXT;
 ALTER TABLE public.users ADD COLUMN IF NOT EXISTS updated_at BIGINT NOT NULL DEFAULT 0;
 ALTER TABLE public.users ADD COLUMN IF NOT EXISTS row_version BIGINT NOT NULL DEFAULT 0;
 
 ALTER TABLE public.departments DROP COLUMN IF EXISTS ent_name;
+ALTER TABLE public.departments ADD COLUMN IF NOT EXISTS created_by TEXT;
+ALTER TABLE public.departments ADD COLUMN IF NOT EXISTS created_at BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE public.departments ADD COLUMN IF NOT EXISTS updated_by TEXT;
 ALTER TABLE public.departments ADD COLUMN IF NOT EXISTS updated_at BIGINT NOT NULL DEFAULT 0;
 ALTER TABLE public.departments ADD COLUMN IF NOT EXISTS row_version BIGINT NOT NULL DEFAULT 0;
 ALTER TABLE public.departments ADD COLUMN IF NOT EXISTS manager_user_id TEXT;
 ALTER TABLE public.processes DROP COLUMN IF EXISTS ent_name;
 ALTER TABLE public.processes ADD COLUMN IF NOT EXISTS department_id TEXT;
 ALTER TABLE public.processes ADD COLUMN IF NOT EXISTS created_by TEXT;
+ALTER TABLE public.processes ADD COLUMN IF NOT EXISTS created_at BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE public.processes ADD COLUMN IF NOT EXISTS updated_by TEXT;
+ALTER TABLE public.processes ADD COLUMN IF NOT EXISTS updated_at BIGINT NOT NULL DEFAULT 0;
 ALTER TABLE public.processes ADD COLUMN IF NOT EXISTS row_version BIGINT NOT NULL DEFAULT 0;
 
 UPDATE public.processes AS process_row
@@ -167,8 +198,15 @@ UPDATE public.users
 SET role = 'Employee'
 WHERE role = 'User';
 ALTER TABLE public.businesses DROP COLUMN IF EXISTS ent_name;
+ALTER TABLE public.businesses ADD COLUMN IF NOT EXISTS created_by TEXT;
+ALTER TABLE public.businesses ADD COLUMN IF NOT EXISTS created_at BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE public.businesses ADD COLUMN IF NOT EXISTS updated_by TEXT;
+ALTER TABLE public.businesses ADD COLUMN IF NOT EXISTS updated_at BIGINT NOT NULL DEFAULT 0;
 ALTER TABLE public.businesses ADD COLUMN IF NOT EXISTS row_version BIGINT NOT NULL DEFAULT 0;
 ALTER TABLE public.system_roles DROP COLUMN IF EXISTS ent_name;
+ALTER TABLE public.system_roles ADD COLUMN IF NOT EXISTS created_by TEXT;
+ALTER TABLE public.system_roles ADD COLUMN IF NOT EXISTS created_at BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE public.system_roles ADD COLUMN IF NOT EXISTS updated_by TEXT;
 ALTER TABLE public.system_roles ADD COLUMN IF NOT EXISTS updated_at BIGINT NOT NULL DEFAULT 0;
 ALTER TABLE public.system_roles ADD COLUMN IF NOT EXISTS row_version BIGINT NOT NULL DEFAULT 0;
 
@@ -176,8 +214,10 @@ ALTER TABLE public.tasks DROP COLUMN IF EXISTS ent_name;
 ALTER TABLE public.tasks ADD COLUMN IF NOT EXISTS pad_id TEXT;
 ALTER TABLE public.tasks ADD COLUMN IF NOT EXISTS version TEXT;
 ALTER TABLE public.tasks ADD COLUMN IF NOT EXISTS created_by TEXT;
+ALTER TABLE public.tasks ADD COLUMN IF NOT EXISTS created_at BIGINT NOT NULL DEFAULT 0;
 ALTER TABLE public.tasks ADD COLUMN IF NOT EXISTS task_review TEXT;
 ALTER TABLE public.tasks ADD COLUMN IF NOT EXISTS task_review_score INTEGER;
+ALTER TABLE public.tasks ADD COLUMN IF NOT EXISTS updated_by TEXT;
 ALTER TABLE public.tasks ADD COLUMN IF NOT EXISTS updated_at BIGINT NOT NULL DEFAULT 0;
 ALTER TABLE public.tasks ADD COLUMN IF NOT EXISTS row_version BIGINT NOT NULL DEFAULT 0;
 ALTER TABLE public.tasks DROP COLUMN IF EXISTS visibility;
@@ -200,6 +240,9 @@ BEGIN
 END $$;
 
 ALTER TABLE public.strategy ADD COLUMN IF NOT EXISTS id TEXT;
+ALTER TABLE public.strategy ADD COLUMN IF NOT EXISTS created_by TEXT;
+ALTER TABLE public.strategy ADD COLUMN IF NOT EXISTS created_at BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE public.strategy ADD COLUMN IF NOT EXISTS updated_by TEXT;
 ALTER TABLE public.strategy ADD COLUMN IF NOT EXISTS updated_at BIGINT NOT NULL DEFAULT 0;
 ALTER TABLE public.strategy ADD COLUMN IF NOT EXISTS row_version BIGINT NOT NULL DEFAULT 0;
 
@@ -220,8 +263,99 @@ BEGIN
 END $$;
 
 ALTER TABLE public.strategy ALTER COLUMN id SET DEFAULT 'default';
+ALTER TABLE public.settings ADD COLUMN IF NOT EXISTS created_by TEXT;
+ALTER TABLE public.settings ADD COLUMN IF NOT EXISTS created_at BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE public.settings ADD COLUMN IF NOT EXISTS updated_by TEXT;
 ALTER TABLE public.settings ADD COLUMN IF NOT EXISTS updated_at BIGINT NOT NULL DEFAULT 0;
 ALTER TABLE public.settings ADD COLUMN IF NOT EXISTS row_version BIGINT NOT NULL DEFAULT 0;
+
+UPDATE public.users
+SET
+  created_at = CASE
+    WHEN COALESCE(created_at, 0) > 0 THEN created_at
+    WHEN COALESCE(updated_at, 0) > 0 THEN updated_at
+    ELSE FLOOR(EXTRACT(EPOCH FROM clock_timestamp()) * 1000)::BIGINT
+  END,
+  updated_by = COALESCE(updated_by, created_by)
+WHERE COALESCE(created_at, 0) = 0
+   OR updated_by IS NULL;
+
+UPDATE public.departments
+SET
+  created_at = CASE
+    WHEN COALESCE(created_at, 0) > 0 THEN created_at
+    WHEN COALESCE(updated_at, 0) > 0 THEN updated_at
+    ELSE FLOOR(EXTRACT(EPOCH FROM clock_timestamp()) * 1000)::BIGINT
+  END,
+  updated_by = COALESCE(updated_by, created_by)
+WHERE COALESCE(created_at, 0) = 0
+   OR updated_by IS NULL;
+
+UPDATE public.processes
+SET
+  created_at = CASE
+    WHEN COALESCE(created_at, 0) > 0 THEN created_at
+    WHEN COALESCE(updated_at, 0) > 0 THEN updated_at
+    ELSE FLOOR(EXTRACT(EPOCH FROM clock_timestamp()) * 1000)::BIGINT
+  END,
+  updated_by = COALESCE(updated_by, created_by)
+WHERE COALESCE(created_at, 0) = 0
+   OR updated_by IS NULL;
+
+UPDATE public.strategy
+SET
+  created_at = CASE
+    WHEN COALESCE(created_at, 0) > 0 THEN created_at
+    WHEN COALESCE(updated_at, 0) > 0 THEN updated_at
+    ELSE FLOOR(EXTRACT(EPOCH FROM clock_timestamp()) * 1000)::BIGINT
+  END,
+  updated_by = COALESCE(updated_by, created_by)
+WHERE COALESCE(created_at, 0) = 0
+   OR updated_by IS NULL;
+
+UPDATE public.businesses
+SET
+  created_at = CASE
+    WHEN COALESCE(created_at, 0) > 0 THEN created_at
+    WHEN COALESCE(updated_at, 0) > 0 THEN updated_at
+    ELSE FLOOR(EXTRACT(EPOCH FROM clock_timestamp()) * 1000)::BIGINT
+  END,
+  updated_by = COALESCE(updated_by, created_by)
+WHERE COALESCE(created_at, 0) = 0
+   OR updated_by IS NULL;
+
+UPDATE public.tasks
+SET
+  created_at = CASE
+    WHEN COALESCE(created_at, 0) > 0 THEN created_at
+    WHEN COALESCE(updated_at, 0) > 0 THEN updated_at
+    ELSE FLOOR(EXTRACT(EPOCH FROM clock_timestamp()) * 1000)::BIGINT
+  END,
+  updated_by = COALESCE(updated_by, created_by)
+WHERE COALESCE(created_at, 0) = 0
+   OR updated_by IS NULL;
+
+UPDATE public.system_roles
+SET
+  created_at = CASE
+    WHEN COALESCE(created_at, 0) > 0 THEN created_at
+    WHEN COALESCE(updated_at, 0) > 0 THEN updated_at
+    ELSE FLOOR(EXTRACT(EPOCH FROM clock_timestamp()) * 1000)::BIGINT
+  END,
+  updated_by = COALESCE(updated_by, created_by)
+WHERE COALESCE(created_at, 0) = 0
+   OR updated_by IS NULL;
+
+UPDATE public.settings
+SET
+  created_at = CASE
+    WHEN COALESCE(created_at, 0) > 0 THEN created_at
+    WHEN COALESCE(updated_at, 0) > 0 THEN updated_at
+    ELSE FLOOR(EXTRACT(EPOCH FROM clock_timestamp()) * 1000)::BIGINT
+  END,
+  updated_by = COALESCE(updated_by, created_by)
+WHERE COALESCE(created_at, 0) = 0
+   OR updated_by IS NULL;
 
 -- Remove old enterprises table if present
 DROP TABLE IF EXISTS public.enterprises CASCADE;
@@ -334,6 +468,132 @@ RETURNS TEXT AS $$
   ORDER BY CASE WHEN auth_id = auth.uid() THEN 0 ELSE 1 END
   LIMIT 1;
 $$ LANGUAGE sql SECURITY DEFINER STABLE;
+
+CREATE OR REPLACE FUNCTION public.audit_now_ms()
+RETURNS BIGINT AS $$
+  SELECT FLOOR(EXTRACT(EPOCH FROM clock_timestamp()) * 1000)::BIGINT;
+$$ LANGUAGE sql VOLATILE;
+
+CREATE OR REPLACE FUNCTION public.audit_actor_user_id()
+RETURNS TEXT AS $$
+  SELECT public.current_user_id();
+$$ LANGUAGE sql SECURITY DEFINER STABLE;
+
+CREATE OR REPLACE FUNCTION public.apply_standard_audit_fields()
+RETURNS TRIGGER AS $$
+DECLARE
+  actor_id TEXT;
+  audit_now BIGINT;
+BEGIN
+  actor_id := public.audit_actor_user_id();
+  audit_now := public.audit_now_ms();
+
+  IF TG_OP = 'INSERT' THEN
+    NEW.created_at := audit_now;
+    NEW.updated_at := audit_now;
+
+    IF actor_id IS NOT NULL THEN
+      NEW.created_by := actor_id;
+      NEW.updated_by := actor_id;
+    ELSE
+      NEW.created_by := NULLIF(NEW.created_by, '');
+      NEW.updated_by := COALESCE(NULLIF(NEW.updated_by, ''), NULLIF(NEW.created_by, ''));
+    END IF;
+  ELSE
+    NEW.created_by := OLD.created_by;
+    NEW.created_at := COALESCE(NULLIF(OLD.created_at, 0), audit_now);
+    NEW.updated_at := audit_now;
+
+    IF actor_id IS NOT NULL THEN
+      NEW.updated_by := actor_id;
+    ELSE
+      NEW.updated_by := COALESCE(OLD.updated_by, OLD.created_by);
+    END IF;
+  END IF;
+
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+ALTER TABLE public.users ALTER COLUMN created_by SET DEFAULT public.audit_actor_user_id();
+ALTER TABLE public.users ALTER COLUMN created_at SET DEFAULT public.audit_now_ms();
+ALTER TABLE public.users ALTER COLUMN updated_by SET DEFAULT public.audit_actor_user_id();
+ALTER TABLE public.users ALTER COLUMN updated_at SET DEFAULT public.audit_now_ms();
+
+ALTER TABLE public.departments ALTER COLUMN created_by SET DEFAULT public.audit_actor_user_id();
+ALTER TABLE public.departments ALTER COLUMN created_at SET DEFAULT public.audit_now_ms();
+ALTER TABLE public.departments ALTER COLUMN updated_by SET DEFAULT public.audit_actor_user_id();
+ALTER TABLE public.departments ALTER COLUMN updated_at SET DEFAULT public.audit_now_ms();
+
+ALTER TABLE public.processes ALTER COLUMN created_by SET DEFAULT public.audit_actor_user_id();
+ALTER TABLE public.processes ALTER COLUMN created_at SET DEFAULT public.audit_now_ms();
+ALTER TABLE public.processes ALTER COLUMN updated_by SET DEFAULT public.audit_actor_user_id();
+ALTER TABLE public.processes ALTER COLUMN updated_at SET DEFAULT public.audit_now_ms();
+
+ALTER TABLE public.strategy ALTER COLUMN created_by SET DEFAULT public.audit_actor_user_id();
+ALTER TABLE public.strategy ALTER COLUMN created_at SET DEFAULT public.audit_now_ms();
+ALTER TABLE public.strategy ALTER COLUMN updated_by SET DEFAULT public.audit_actor_user_id();
+ALTER TABLE public.strategy ALTER COLUMN updated_at SET DEFAULT public.audit_now_ms();
+
+ALTER TABLE public.businesses ALTER COLUMN created_by SET DEFAULT public.audit_actor_user_id();
+ALTER TABLE public.businesses ALTER COLUMN created_at SET DEFAULT public.audit_now_ms();
+ALTER TABLE public.businesses ALTER COLUMN updated_by SET DEFAULT public.audit_actor_user_id();
+ALTER TABLE public.businesses ALTER COLUMN updated_at SET DEFAULT public.audit_now_ms();
+
+ALTER TABLE public.tasks ALTER COLUMN created_by SET DEFAULT public.audit_actor_user_id();
+ALTER TABLE public.tasks ALTER COLUMN created_at SET DEFAULT public.audit_now_ms();
+ALTER TABLE public.tasks ALTER COLUMN updated_by SET DEFAULT public.audit_actor_user_id();
+ALTER TABLE public.tasks ALTER COLUMN updated_at SET DEFAULT public.audit_now_ms();
+
+ALTER TABLE public.system_roles ALTER COLUMN created_by SET DEFAULT public.audit_actor_user_id();
+ALTER TABLE public.system_roles ALTER COLUMN created_at SET DEFAULT public.audit_now_ms();
+ALTER TABLE public.system_roles ALTER COLUMN updated_by SET DEFAULT public.audit_actor_user_id();
+ALTER TABLE public.system_roles ALTER COLUMN updated_at SET DEFAULT public.audit_now_ms();
+
+ALTER TABLE public.settings ALTER COLUMN created_by SET DEFAULT public.audit_actor_user_id();
+ALTER TABLE public.settings ALTER COLUMN created_at SET DEFAULT public.audit_now_ms();
+ALTER TABLE public.settings ALTER COLUMN updated_by SET DEFAULT public.audit_actor_user_id();
+ALTER TABLE public.settings ALTER COLUMN updated_at SET DEFAULT public.audit_now_ms();
+
+DROP TRIGGER IF EXISTS apply_standard_audit_fields_on_users ON public.users;
+CREATE TRIGGER apply_standard_audit_fields_on_users
+  BEFORE INSERT OR UPDATE ON public.users
+  FOR EACH ROW EXECUTE FUNCTION public.apply_standard_audit_fields();
+
+DROP TRIGGER IF EXISTS apply_standard_audit_fields_on_departments ON public.departments;
+CREATE TRIGGER apply_standard_audit_fields_on_departments
+  BEFORE INSERT OR UPDATE ON public.departments
+  FOR EACH ROW EXECUTE FUNCTION public.apply_standard_audit_fields();
+
+DROP TRIGGER IF EXISTS apply_standard_audit_fields_on_processes ON public.processes;
+CREATE TRIGGER apply_standard_audit_fields_on_processes
+  BEFORE INSERT OR UPDATE ON public.processes
+  FOR EACH ROW EXECUTE FUNCTION public.apply_standard_audit_fields();
+
+DROP TRIGGER IF EXISTS apply_standard_audit_fields_on_strategy ON public.strategy;
+CREATE TRIGGER apply_standard_audit_fields_on_strategy
+  BEFORE INSERT OR UPDATE ON public.strategy
+  FOR EACH ROW EXECUTE FUNCTION public.apply_standard_audit_fields();
+
+DROP TRIGGER IF EXISTS apply_standard_audit_fields_on_businesses ON public.businesses;
+CREATE TRIGGER apply_standard_audit_fields_on_businesses
+  BEFORE INSERT OR UPDATE ON public.businesses
+  FOR EACH ROW EXECUTE FUNCTION public.apply_standard_audit_fields();
+
+DROP TRIGGER IF EXISTS apply_standard_audit_fields_on_tasks ON public.tasks;
+CREATE TRIGGER apply_standard_audit_fields_on_tasks
+  BEFORE INSERT OR UPDATE ON public.tasks
+  FOR EACH ROW EXECUTE FUNCTION public.apply_standard_audit_fields();
+
+DROP TRIGGER IF EXISTS apply_standard_audit_fields_on_system_roles ON public.system_roles;
+CREATE TRIGGER apply_standard_audit_fields_on_system_roles
+  BEFORE INSERT OR UPDATE ON public.system_roles
+  FOR EACH ROW EXECUTE FUNCTION public.apply_standard_audit_fields();
+
+DROP TRIGGER IF EXISTS apply_standard_audit_fields_on_settings ON public.settings;
+CREATE TRIGGER apply_standard_audit_fields_on_settings
+  BEFORE INSERT OR UPDATE ON public.settings
+  FOR EACH ROW EXECUTE FUNCTION public.apply_standard_audit_fields();
 
 CREATE OR REPLACE FUNCTION public.current_user_department_id()
 RETURNS TEXT AS $$
@@ -1269,7 +1529,6 @@ BEGIN
         sub_departments,
         okrs,
         reviews,
-        updated_at,
         row_version
       )
       VALUES (
@@ -1284,7 +1543,6 @@ BEGIN
         COALESCE(next_item->'subDepartments', '[]'::jsonb),
         COALESCE(next_item->'okrs', '{}'::jsonb),
         COALESCE(next_item->'reviews', '{}'::jsonb),
-        FLOOR(EXTRACT(EPOCH FROM clock_timestamp()) * 1000)::BIGINT,
         0
       );
     ELSE
@@ -1334,7 +1592,6 @@ BEGIN
           sub_departments = COALESCE(next_item->'subDepartments', '[]'::jsonb),
           okrs = COALESCE(next_item->'okrs', '{}'::jsonb),
           reviews = COALESCE(next_item->'reviews', '{}'::jsonb),
-          updated_at = FLOOR(EXTRACT(EPOCH FROM clock_timestamp()) * 1000)::BIGINT,
           row_version = expected_row_version + 1
         WHERE id = next_item->>'id'
           AND row_version = expected_row_version;
@@ -1428,7 +1685,6 @@ BEGIN
       INSERT INTO public.processes (
         id,
         department_id,
-        created_by,
         name,
         category,
         level,
@@ -1441,7 +1697,6 @@ BEGIN
         nodes,
         links,
         history,
-        updated_at,
         row_version
       )
       VALUES (
@@ -1450,11 +1705,6 @@ BEGIN
           WHEN public.is_admin() THEN NULLIF(next_item->>'departmentId', '')
           WHEN public.is_manager() THEN target_department_id
           ELSE current_department_id
-        END,
-        CASE
-          WHEN public.is_admin() THEN COALESCE(NULLIF(next_item->>'createdBy', ''), current_id)
-          WHEN public.is_manager() THEN COALESCE(NULLIF(next_item->>'createdBy', ''), current_id)
-          ELSE current_id
         END,
         COALESCE(next_item->>'name', ''),
         COALESCE(next_item->>'category', ''),
@@ -1468,7 +1718,6 @@ BEGIN
         COALESCE(next_item->'nodes', '[]'::jsonb),
         COALESCE(next_item->'links', '[]'::jsonb),
         COALESCE(next_item->'history', '[]'::jsonb),
-        FLOOR(EXTRACT(EPOCH FROM clock_timestamp()) * 1000)::BIGINT,
         0
       );
     ELSE
@@ -1486,11 +1735,6 @@ BEGIN
             WHEN public.is_manager() THEN target_department_id
             ELSE current_department_id
           END,
-          created_by = CASE
-            WHEN public.is_admin() THEN COALESCE(NULLIF(next_item->>'createdBy', ''), current_id)
-            WHEN public.is_manager() THEN COALESCE(NULLIF(previous_item->>'createdBy', ''), current_id)
-            ELSE current_id
-          END,
           name = COALESCE(next_item->>'name', ''),
           category = COALESCE(next_item->>'category', ''),
           level = COALESCE((next_item->>'level')::INTEGER, 1),
@@ -1503,7 +1747,6 @@ BEGIN
           nodes = COALESCE(next_item->'nodes', '[]'::jsonb),
           links = COALESCE(next_item->'links', '[]'::jsonb),
           history = COALESCE(next_item->'history', '[]'::jsonb),
-          updated_at = FLOOR(EXTRACT(EPOCH FROM clock_timestamp()) * 1000)::BIGINT,
           row_version = expected_row_version + 1
         WHERE id = next_item->>'id'
           AND row_version = expected_row_version;
@@ -1595,7 +1838,6 @@ BEGIN
         system_role_ids,
         custom_permissions,
         auth_id,
-        updated_at,
         row_version
       )
       VALUES (
@@ -1609,7 +1851,6 @@ BEGIN
         CASE WHEN next_item ? 'systemRoleIds' THEN COALESCE(next_item->'systemRoleIds', '[]'::jsonb) ELSE NULL END,
         CASE WHEN next_item ? 'customPermissions' THEN COALESCE(next_item->'customPermissions', '{}'::jsonb) ELSE NULL END,
         CASE WHEN NULLIF(next_item->>'auth_id', '') IS NULL THEN NULL ELSE (next_item->>'auth_id')::UUID END,
-        FLOOR(EXTRACT(EPOCH FROM clock_timestamp()) * 1000)::BIGINT,
         0
       );
     ELSE
@@ -1629,7 +1870,6 @@ BEGIN
           reviews = CASE WHEN next_item ? 'reviews' THEN COALESCE(next_item->'reviews', '{}'::jsonb) ELSE NULL END,
           system_role_ids = CASE WHEN next_item ? 'systemRoleIds' THEN COALESCE(next_item->'systemRoleIds', '[]'::jsonb) ELSE NULL END,
           custom_permissions = CASE WHEN next_item ? 'customPermissions' THEN COALESCE(next_item->'customPermissions', '{}'::jsonb) ELSE NULL END,
-          updated_at = FLOOR(EXTRACT(EPOCH FROM clock_timestamp()) * 1000)::BIGINT,
           row_version = expected_row_version + 1
         WHERE id = next_item->>'id'
           AND row_version = expected_row_version;
@@ -1675,7 +1915,6 @@ BEGIN
   UPDATE public.users
   SET
     name = BTRIM(p_name),
-    updated_at = FLOOR(EXTRACT(EPOCH FROM clock_timestamp()) * 1000)::BIGINT,
     row_version = row_version + 1
   WHERE auth_id = current_auth_id
     AND (
@@ -1756,7 +1995,6 @@ BEGIN
         name,
         description,
         permissions,
-        updated_at,
         row_version
       )
       VALUES (
@@ -1764,7 +2002,6 @@ BEGIN
         COALESCE(next_item->>'name', ''),
         COALESCE(next_item->>'description', ''),
         COALESCE(next_item->'permissions', '{}'::jsonb),
-        FLOOR(EXTRACT(EPOCH FROM clock_timestamp()) * 1000)::BIGINT,
         0
       );
     ELSE
@@ -1779,7 +2016,6 @@ BEGIN
           name = COALESCE(next_item->>'name', ''),
           description = COALESCE(next_item->>'description', ''),
           permissions = COALESCE(next_item->'permissions', '{}'::jsonb),
-          updated_at = FLOOR(EXTRACT(EPOCH FROM clock_timestamp()) * 1000)::BIGINT,
           row_version = expected_row_version + 1
         WHERE id = next_item->>'id'
           AND row_version = expected_row_version;
@@ -1866,7 +2102,6 @@ BEGIN
         customer_needs,
         surface_product_power,
         core_product_power,
-        updated_at,
         row_version
       )
       VALUES (
@@ -1877,7 +2112,6 @@ BEGIN
         COALESCE(next_item->>'customerNeeds', ''),
         COALESCE(next_item->>'surfaceProductPower', ''),
         COALESCE(next_item->>'coreProductPower', ''),
-        FLOOR(EXTRACT(EPOCH FROM clock_timestamp()) * 1000)::BIGINT,
         0
       );
     ELSE
@@ -1895,7 +2129,6 @@ BEGIN
           customer_needs = COALESCE(next_item->>'customerNeeds', ''),
           surface_product_power = COALESCE(next_item->>'surfaceProductPower', ''),
           core_product_power = COALESCE(next_item->>'coreProductPower', ''),
-          updated_at = FLOOR(EXTRACT(EPOCH FROM clock_timestamp()) * 1000)::BIGINT,
           row_version = expected_row_version + 1
         WHERE id = next_item->>'id'
           AND row_version = expected_row_version;

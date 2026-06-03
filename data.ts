@@ -602,14 +602,12 @@ export const getWorkbenchTasks = async (_userId: string): Promise<PADEntry[]> =>
 export const saveAISettings = async (settings: AISettings): Promise<AISettings> => {
   if (!isSupabaseConfigured()) throw new Error("Supabase not configured");
 
-  const nextUpdatedAt = Date.now();
   const currentRowVersion = normalizeRowVersion(settings.rowVersion);
   const payload = {
     ai_settings: {
       selectedModelId: settings.selectedModelId,
       configs: sanitizeAIConfigs(settings.configs)
     },
-    updated_at: nextUpdatedAt,
     row_version: currentRowVersion + 1
   };
 
@@ -783,9 +781,7 @@ export const updateStrategy = async (strategy: Partial<CompanyStrategy>): Promis
   if (!isSupabaseConfigured()) throw new Error("Supabase not configured");
   try {
     const currentRowVersion = normalizeRowVersion(strategy.rowVersion);
-    const nextUpdatedAt = Date.now();
     const dbUpdates: any = {
-      updated_at: nextUpdatedAt,
       row_version: currentRowVersion + 1
     };
     if (strategy.mission !== undefined) dbUpdates.mission = strategy.mission;
@@ -836,7 +832,7 @@ export const addBusiness = async (business: BusinessDefinition): Promise<Busines
       id: business.id, name: business.name, business_format: business.businessFormat || '',
       customer_persona: business.customerPersona || '', customer_needs: business.customerNeeds || '',
       surface_product_power: business.surfaceProductPower || '', core_product_power: business.coreProductPower || '',
-      updated_at: Date.now(), row_version: 0
+      row_version: 0
     }).select('*').single();
     if (error) throw error;
     if (!data) throw buildDuplicateCreateError('业务定义');
@@ -858,7 +854,6 @@ export const updateBusiness = async (id: string, updates: Partial<BusinessDefini
     if (updates.customerNeeds !== undefined) dbUpdates.customer_needs = updates.customerNeeds;
     if (updates.surfaceProductPower !== undefined) dbUpdates.surface_product_power = updates.surfaceProductPower;
     if (updates.coreProductPower !== undefined) dbUpdates.core_product_power = updates.coreProductPower;
-    dbUpdates.updated_at = Date.now();
     dbUpdates.row_version = currentRowVersion + 1;
 
     const { data, error } = await supabase
@@ -903,7 +898,7 @@ export const addSystemRole = async (role: SystemRole): Promise<SystemRole> => {
   try {
     const { data, error } = await supabase.from('system_roles').insert({
       id: role.id, name: role.name, description: role.description || '',
-      permissions: role.permissions || {}, updated_at: Date.now(), row_version: 0
+      permissions: role.permissions || {}, row_version: 0
     }).select('*').single();
     if (error) throw error;
     if (!data) throw buildDuplicateCreateError('系统角色');
@@ -922,7 +917,6 @@ export const updateSystemRole = async (id: string, updates: Partial<SystemRole>)
     if (updates.name !== undefined) dbUpdates.name = updates.name;
     if (updates.description !== undefined) dbUpdates.description = updates.description;
     if (updates.permissions !== undefined) dbUpdates.permissions = updates.permissions;
-    dbUpdates.updated_at = Date.now();
     dbUpdates.row_version = currentRowVersion + 1;
 
     const { data, error } = await supabase
@@ -966,11 +960,11 @@ export const addProcess = async (process: ProcessDefinition): Promise<ProcessDef
   if (!isSupabaseConfigured()) throw new Error("Supabase not configured")
   try {
     const { data, error } = await supabase.from('processes').insert({
-      id: process.id, department_id: process.departmentId || null, created_by: process.createdBy || null,
+      id: process.id, department_id: process.departmentId || null,
       name: process.name, category: process.category, level: process.level,
       version: process.version, is_active: process.isActive, type: process.type, owner: process.owner,
       co_owner: process.coOwner, objective: process.objective, nodes: process.nodes || [],
-      links: process.links || [], history: process.history || [], updated_at: process.updatedAt,
+      links: process.links || [], history: process.history || [],
       row_version: 0
     }).select('*').single();
     if (error) throw error;
@@ -988,7 +982,6 @@ export const updateProcess = async (id: string, updates: Partial<ProcessDefiniti
     const currentRowVersion = normalizeRowVersion(updates.rowVersion);
     const dbUpdates: any = {};
     if (updates.departmentId !== undefined) dbUpdates.department_id = updates.departmentId || null;
-    if (updates.createdBy !== undefined) dbUpdates.created_by = updates.createdBy || null;
     if (updates.name !== undefined) dbUpdates.name = updates.name;
     if (updates.category !== undefined) dbUpdates.category = updates.category;
     if (updates.level !== undefined) dbUpdates.level = updates.level;
@@ -1001,7 +994,6 @@ export const updateProcess = async (id: string, updates: Partial<ProcessDefiniti
     if (updates.nodes !== undefined) dbUpdates.nodes = updates.nodes || [];
     if (updates.links !== undefined) dbUpdates.links = updates.links || [];
     if (updates.history !== undefined) dbUpdates.history = updates.history || [];
-    dbUpdates.updated_at = Date.now();
     dbUpdates.row_version = currentRowVersion + 1;
 
     const { data, error } = await supabase
@@ -1049,7 +1041,7 @@ export const addDepartment = async (dept: Department): Promise<Department> => {
       responsibilities: dept.responsibilities ?? '', roles: dept.roles || [],
       role_members: dept.roleMembers ?? {}, attributes: dept.attributes ?? '',
       sub_departments: dept.subDepartments ?? [], okrs: dept.okrs ?? {}, reviews: dept.reviews ?? {},
-      updated_at: Date.now(), row_version: 0
+      row_version: 0
     }).select('*').single();
     if (error) throw error;
     if (!data) throw buildDuplicateCreateError('部门');
@@ -1075,7 +1067,6 @@ export const updateDepartment = async (id: string, updates: Partial<Department>)
     if (updates.subDepartments !== undefined) dbUpdates.sub_departments = updates.subDepartments ?? [];
     if (updates.okrs !== undefined) dbUpdates.okrs = updates.okrs ?? {};
     if (updates.reviews !== undefined) dbUpdates.reviews = updates.reviews ?? {};
-    dbUpdates.updated_at = Date.now();
     dbUpdates.row_version = currentRowVersion + 1;
 
     const { data, error } = await supabase
@@ -1232,7 +1223,7 @@ export const addUser = async (user: User): Promise<User> => {
       name: user.name, role: normalizeUserRole(user.role), department_id: user.departmentId || null,
       pad_permissions: user.padPermissions || null, reviews: null,
       system_role_ids: user.systemRoleIds || null, custom_permissions: user.customPermissions || null,
-      auth_id: user.auth_id || null, updated_at: Date.now(), row_version: 0
+      auth_id: user.auth_id || null, row_version: 0
     }).select('*').single();
     if (error) throw error;
     if (!data) throw buildDuplicateCreateError('用户');
@@ -1256,7 +1247,6 @@ export const updateUser = async (id: string, updates: Partial<User>): Promise<Us
     if (updates.reviews !== undefined) dbUpdates.reviews = updates.reviews || null;
     if (updates.systemRoleIds !== undefined) dbUpdates.system_role_ids = updates.systemRoleIds || null;
     if (updates.customPermissions !== undefined) dbUpdates.custom_permissions = updates.customPermissions || null;
-    dbUpdates.updated_at = Date.now();
     dbUpdates.row_version = currentRowVersion + 1;
 
     const { data, error } = await supabase
@@ -1302,7 +1292,6 @@ export const addTask = async (task: PADEntry): Promise<PADEntry> => {
     const taskData = {
       id: task.id,
       department_id: task.departmentId || null,
-      created_by: task.createdBy || task.ownerId || null,
       title: task.title || '',
       status: task.status || 'draft',
       priority: task.priority || 'medium',
@@ -1320,7 +1309,6 @@ export const addTask = async (task: PADEntry): Promise<PADEntry> => {
       deliverable: task.deliverable || null,
       task_review: task.taskReview || null,
       task_review_score: task.taskReviewScore ?? null,
-      updated_at: Date.now(),
       row_version: 0
     };
     let data: any = null;
@@ -1368,7 +1356,6 @@ export const updateTask = async (taskId: string, task: Partial<PADEntry>): Promi
     if (task.deliverable !== undefined) taskData.deliverable = task.deliverable;
     if (task.taskReview !== undefined) taskData.task_review = task.taskReview;
     if (task.taskReviewScore !== undefined) taskData.task_review_score = task.taskReviewScore;
-    taskData.updated_at = Date.now();
     taskData.row_version = currentRowVersion + 1;
 
     let data: any = null;
