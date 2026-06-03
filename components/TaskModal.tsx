@@ -47,6 +47,8 @@ const TaskModal: React.FC<TaskModalProps> = ({
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [showParticipantPicker, setShowParticipantPicker] = useState(false);
   const [participantSearchQuery, setParticipantSearchQuery] = useState('');
+  const [showApproverPicker, setShowApproverPicker] = useState(false);
+  const [approverSearchQuery, setApproverSearchQuery] = useState('');
   const [taskCandidateUsers, setTaskCandidateUsers] = useState<User[]>([]);
   const selectableUsers = useMemo(() => {
     const mergedUsersById = new Map(users.map(user => [user.id, user]));
@@ -82,8 +84,8 @@ const TaskModal: React.FC<TaskModalProps> = ({
     () => new Map(allDepartments.map(department => [department.id, department.name])),
     [allDepartments]
   );
-  const filteredParticipantUsers = useMemo(() => {
-    const keyword = participantSearchQuery.trim().toLowerCase();
+  const getFilteredUsers = (searchQuery: string) => {
+    const keyword = searchQuery.trim().toLowerCase();
     if (!keyword) {
       return selectableUsers;
     }
@@ -117,7 +119,15 @@ const TaskModal: React.FC<TaskModalProps> = ({
       .filter(item => item.score >= 0)
       .sort((a, b) => b.score - a.score || a.user.name.localeCompare(b.user.name, 'zh-CN'))
       .map(item => item.user);
-  }, [participantSearchQuery, selectableUsers, departmentsById]);
+  };
+  const filteredParticipantUsers = useMemo(
+    () => getFilteredUsers(participantSearchQuery),
+    [participantSearchQuery, selectableUsers, departmentsById]
+  );
+  const filteredApproverUsers = useMemo(
+    () => getFilteredUsers(approverSearchQuery),
+    [approverSearchQuery, selectableUsers, departmentsById]
+  );
 
   useEffect(() => {
     if (isOpen) {
@@ -125,6 +135,8 @@ const TaskModal: React.FC<TaskModalProps> = ({
       setAiResult(null);
       setShowParticipantPicker(false);
       setParticipantSearchQuery('');
+      setShowApproverPicker(false);
+      setApproverSearchQuery('');
     }
   }, [isOpen]);
 
@@ -448,7 +460,7 @@ const TaskModal: React.FC<TaskModalProps> = ({
             </div>
             <div className="flex-1 space-y-2">
               <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">审批人</label>
-              <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl min-h-[42px] flex flex-wrap gap-2">
+              <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl min-h-[42px] flex flex-wrap gap-2 relative">
                 {(data.approverIds || []).map(uid => {
                   return (
                     <span key={uid} className="bg-white border border-slate-200 text-slate-600 px-2 py-1 rounded-lg text-[10px] font-bold flex items-center gap-1">
@@ -457,19 +469,67 @@ const TaskModal: React.FC<TaskModalProps> = ({
                     </span>
                   );
                 })}
-                <select 
-                  disabled={readOnly}
-                  className="bg-transparent text-xs font-bold outline-none text-slate-400 w-24 disabled:opacity-50"
-                  value=""
-                  onChange={e => {
-                    if (e.target.value && !(data.approverIds || []).includes(e.target.value)) {
-                      setData({ ...data, approverIds: [...(data.approverIds || []), e.target.value] });
-                    }
-                  }}
-                >
-                  <option value="">+ 添加</option>
-                  {selectableUsers.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
-                </select>
+                {!readOnly && (
+                  <button
+                    type="button"
+                    onClick={() => setShowApproverPicker(prev => !prev)}
+                    className="bg-transparent text-xs font-bold outline-none text-slate-400 px-1 py-1"
+                  >
+                    + 添加
+                  </button>
+                )}
+                {showApproverPicker && !readOnly && (
+                  <div className="absolute left-0 top-full mt-2 w-full rounded-xl border border-slate-200 bg-white shadow-lg p-3 z-20">
+                    <div className="relative mb-3">
+                      <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                      <input
+                        type="text"
+                        value={approverSearchQuery}
+                        onChange={e => setApproverSearchQuery(e.target.value)}
+                        placeholder="搜索姓名、账号、部门..."
+                        className="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-600 outline-none focus:border-brand-500"
+                      />
+                    </div>
+                    <div className="max-h-48 overflow-y-auto custom-scrollbar space-y-2">
+                      {filteredApproverUsers.map(u => {
+                        const checked = (data.approverIds || []).includes(u.id);
+                        return (
+                          <label key={u.id} className="flex items-center gap-2 text-xs font-bold text-slate-600 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={() => {
+                                const currentApproverIds = data.approverIds || [];
+                                const nextApproverIds = checked
+                                  ? currentApproverIds.filter(id => id !== u.id)
+                                  : [...currentApproverIds, u.id];
+                                setData({ ...data, approverIds: nextApproverIds });
+                              }}
+                            />
+                            <span>{u.name}</span>
+                          </label>
+                        );
+                      })}
+                      {filteredApproverUsers.length === 0 && (
+                        <div className="py-6 text-center text-xs font-bold text-slate-400">
+                          没有匹配到可选审批人
+                        </div>
+                      )}
+                    </div>
+                    <div className="flex justify-end pt-3">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowApproverPicker(false);
+                          setApproverSearchQuery('');
+                        }}
+                        className="px-3 py-1.5 bg-slate-100 text-slate-600 rounded-lg text-[10px] font-black uppercase hover:bg-slate-200"
+                      >
+                        完成
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           </div>
