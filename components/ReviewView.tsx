@@ -305,7 +305,7 @@ const ReviewView: React.FC = () => {
     setReviewScore(nextSnapshot.score);
     setOkrReviews(nextSnapshot.okrReviews);
     setLoadedDraftSnapshot(nextSnapshot);
-  }, [selectedDeptId, activeTab, selectedWeek, selectedMonth, flatDepts]);
+  }, [selectedDeptId, activeTab, selectedWeek, selectedMonth, selectedQuarter, flatDepts]);
 
   const changeReviewTab = (nextTab: 'weekly' | 'monthly' | 'quarterly') => {
     if (nextTab === activeTab) return;
