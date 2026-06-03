@@ -2,6 +2,8 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { PADEntry, User, Department, AISettings } from '../types';
 import { X, AlertCircle, Wand2, Loader2, Sparkles, CheckCircle, Trash2, Search } from 'lucide-react';
 import { checkPADQuality } from '../services/gemini';
+import { IMEInput } from './IMEInput';
+import { parseTaskTags } from '../utils/taskTags.js';
 import { getTaskCandidateUsers } from '../data';
 
 interface TaskModalProps {
@@ -536,12 +538,12 @@ const TaskModal: React.FC<TaskModalProps> = ({
 
           <div className="space-y-2">
             <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">标签 (Tags)</label>
-            <input 
+            <IMEInput 
               disabled={readOnly}
               className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold outline-none disabled:opacity-50"
               placeholder="输入标签，用逗号分隔..."
               value={(data.tags || []).join(', ')}
-              onChange={e => setData({ ...data, tags: e.target.value.split(/[,，]/).map(t => t.trim()).filter(Boolean) })}
+              onValueChange={value => setData({ ...data, tags: parseTaskTags(value) })}
             />
           </div>
 
