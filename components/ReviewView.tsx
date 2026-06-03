@@ -389,6 +389,15 @@ const ReviewView: React.FC = () => {
           }))
         : [];
 
+      const unauthorizedTask = currentUser
+        ? latestChangedTasks.find((task) => !canManageTask(task, currentUser, state.systemRoles || [], state.departments))
+        : null;
+
+      if (unauthorizedTask) {
+        showToast(`任务「${unauthorizedTask.title}」属于他人，您无权限修改其实际成果，请联系任务负责人提交复盘。`, 'error');
+        return;
+      }
+
       const changedTaskMap = new Map(
         latestChangedTasks
           .map((latestTask) => {
