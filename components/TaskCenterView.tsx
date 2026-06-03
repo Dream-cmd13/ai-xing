@@ -594,10 +594,10 @@ const TaskCenterView: React.FC = () => {
               <div key={idx} onClick={() => handleTaskClick(entry, padId)} className="bg-white border rounded-2xl p-4 hover:shadow-md transition-shadow flex items-start gap-4 group cursor-pointer">
                 <div className={`w-2 h-full rounded-full self-stretch ${getPriorityColor(entry.priority || 'low').replace('text-', 'bg-').replace('bg-', 'bg-opacity-20 ')}`}></div>
                 
-                <div className="flex-1">
+                <div className="min-w-0 flex-1">
                   <div className="flex justify-between items-start mb-2">
-                    <h3 className="text-sm font-bold text-slate-800 line-clamp-1">{entry.title || entry.plan || '无标题任务'}</h3>
-                    <span className={`text-[10px] font-black px-2 py-1 rounded-lg uppercase ${getStatusColor(entry.status || 'draft')}`}>
+                    <h3 className="min-w-0 flex-1 text-sm font-bold text-slate-800 line-clamp-2 break-words [overflow-wrap:anywhere]">{entry.title || entry.plan || '无标题任务'}</h3>
+                    <span className={`shrink-0 ml-3 text-[10px] font-black px-2 py-1 rounded-lg uppercase ${getStatusColor(entry.status || 'draft')}`}>
                       {entry.status === 'draft' ? '草稿' : 
                        entry.status === 'submitted' ? '已提交' : 
                        entry.status === 'in-progress' ? '处理中' : 
@@ -607,7 +607,7 @@ const TaskCenterView: React.FC = () => {
                     </span>
                   </div>
                   
-                  <div className="flex items-center gap-4 text-[10px] font-bold text-slate-500 mb-3">
+                  <div className="flex flex-wrap items-center gap-4 text-[10px] font-bold text-slate-500 mb-3">
                     <div className="flex items-center gap-1">
                       <UserIcon size={12} />
                       <span>{owner?.name || '未知用户'}</span>
@@ -624,7 +624,7 @@ const TaskCenterView: React.FC = () => {
                         <span>{new Date(entry.dueDate).toLocaleDateString()}</span>
                       </div>
                     )}
-                    <div className={`px-2 py-0.5 rounded ${getPriorityColor(entry.priority || 'low')}`}>
+                    <div className={`shrink-0 px-2 py-0.5 rounded ${getPriorityColor(entry.priority || 'low')}`}>
                       {entry.priority === 'high' ? '高' : entry.priority === 'medium' ? '中' : '低'}
                     </div>
                   </div>

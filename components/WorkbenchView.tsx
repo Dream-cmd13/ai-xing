@@ -536,8 +536,8 @@ const WorkbenchView: React.FC = () => {
 const TaskCard: React.FC<{ task: PADEntry, onClick: () => void }> = ({ task, onClick }) => (
   <div onClick={onClick} className="bg-slate-50 p-4 rounded-2xl border border-slate-100 hover:border-indigo-200 hover:bg-white transition-all cursor-pointer group">
     <div className="flex justify-between items-start mb-2">
-      <h4 className="font-bold text-sm text-slate-700 line-clamp-2">{task.title}</h4>
-      <span className={`text-[9px] font-black px-2 py-0.5 rounded uppercase ${
+      <h4 className="min-w-0 flex-1 font-bold text-sm text-slate-700 line-clamp-2 break-words [overflow-wrap:anywhere]">{task.title}</h4>
+      <span className={`shrink-0 ml-3 text-[9px] font-black px-2 py-0.5 rounded uppercase ${
         task.priority === 'high' ? 'bg-red-50 text-red-600' : 
         task.priority === 'medium' ? 'bg-amber-50 text-amber-600' : 
         'bg-slate-200 text-slate-500'
