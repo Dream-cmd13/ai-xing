@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useAppStore } from '../store/useAppStore';
 import { useLeaveGuard } from '@/hooks/useLeaveGuard';
 import { useAuthStore } from '../store/useAuthStore';
@@ -9,6 +9,7 @@ import { AppState, BusinessDefinition, CompanyStrategy } from '../types';
 import { IMEInput, IMETextarea } from './IMEInput';
 import { Globe, Plus, Trash2, Save, Loader2, CheckCircle, AlertCircle, Users, Target, Package, Layers, Workflow, Info } from 'lucide-react'
 const BusinessDefinitionView: React.FC = () => {
+  type SaveButtonDomain = 'businesses' | 'strategy';
   const state = useAppStore();
   const { processes, departments, users, tasks, aiSettings, systemRoles } = state;
 
@@ -23,8 +24,6 @@ const BusinessDefinitionView: React.FC = () => {
     addProcess, deleteProcessFn: deleteProcess, publishProcess, rollbackProcess, 
     handleSetTasks: setTasks, handleSetStrategy: setStrategy 
   } = actions;
-  const isSaving = state.isSaving;
-  const showSaveSuccess = state.showSaveSuccess;
   const isDirty = state.isDirty;
   const setIsDirty = state.setIsDirty;
   const { attemptLeave, LeaveModal } = useLeaveGuard(isDirty);
@@ -38,6 +37,20 @@ const BusinessDefinitionView: React.FC = () => {
   const [activeBusinessId, setActiveBusinessId] = useState<string | null>(businesses.length > 0 ? businesses[0].id : null);
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
   const [createdBusinessIds, setCreatedBusinessIds] = useState<string[]>([]);
+  const [savingDomain, setSavingDomain] = useState<SaveButtonDomain | null>(null);
+  const [saveSuccessDomains, setSaveSuccessDomains] = useState<Record<SaveButtonDomain, boolean>>({
+    businesses: false,
+    strategy: false
+  });
+  const saveSuccessTimeoutsRef = useRef<Partial<Record<SaveButtonDomain, ReturnType<typeof setTimeout>>>>({});
+
+  useEffect(() => {
+    return () => {
+      Object.values(saveSuccessTimeoutsRef.current).forEach((timeoutId) => {
+        if (timeoutId) clearTimeout(timeoutId);
+      });
+    };
+  }, []);
 
   const canEditBusiness = (business: BusinessDefinition) =>
     permissions.update || createdBusinessIds.includes(business.id);
@@ -91,17 +104,42 @@ const BusinessDefinitionView: React.FC = () => {
     setPendingDeleteId(null);
   };
 
-  const saveBusinesses = async () => {
-    const success = await handleSave(['businesses']);
-    if (success) {
-      setCreatedBusinessIds([]);
+  const setDomainSaveSuccess = (domain: SaveButtonDomain) => {
+    if (saveSuccessTimeoutsRef.current[domain]) {
+      clearTimeout(saveSuccessTimeoutsRef.current[domain]);
     }
+
+    setSaveSuccessDomains((prev) => ({ ...prev, [domain]: true }));
+    saveSuccessTimeoutsRef.current[domain] = setTimeout(() => {
+      setSaveSuccessDomains((prev) => ({ ...prev, [domain]: false }));
+      delete saveSuccessTimeoutsRef.current[domain];
+    }, 3000);
+  };
+
+  const handleDomainSave = async (domain: SaveButtonDomain) => {
+    const isDomainDirty = domain === 'businesses' ? isBusinessDirty : isStrategyDirty;
+    if (!isDomainDirty || savingDomain) return;
+
+    setSavingDomain(domain);
+    setSaveSuccessDomains((prev) => ({ ...prev, [domain]: false }));
+    const success = await handleSave([domain]);
+    if (success) {
+      if (domain === 'businesses') {
+        setCreatedBusinessIds([]);
+      }
+      setDomainSaveSuccess(domain);
+    }
+    setSavingDomain(null);
   };
 
   const activeBusiness = businesses.find(b => b.id === activeBusinessId);
   const canEditActiveBusiness = !!activeBusiness && canEditBusiness(activeBusiness);
   const isBusinessDirty = dirtyDomains.includes('businesses');
   const isStrategyDirty = dirtyDomains.includes('strategy');
+  const isBusinessSaving = savingDomain === 'businesses';
+  const isStrategySaving = savingDomain === 'strategy';
+  const showBusinessSaveSuccess = saveSuccessDomains.businesses;
+  const showStrategySaveSuccess = saveSuccessDomains.strategy;
 
   return (
     <div className="h-full flex flex-col bg-slate-50 overflow-hidden">
@@ -115,20 +153,20 @@ const BusinessDefinitionView: React.FC = () => {
         </div>
         <div className="flex items-center gap-2 w-full md:w-auto">
           <button 
-            onClick={saveBusinesses}
-            disabled={isSaving}
-            className={`flex-1 md:flex-none flex items-center justify-center gap-2 px-6 py-2.5 rounded-xl text-xs font-black uppercase transition-all shadow-lg ${showSaveSuccess && isBusinessDirty ? 'bg-emerald-50 text-emerald-600 shadow-emerald-100' : isBusinessDirty ? 'bg-brand-600 text-white shadow-brand-200 hover:bg-brand-700' : 'bg-slate-100 text-slate-400 cursor-default'}`}
+            onClick={() => handleDomainSave('businesses')}
+            disabled={!!savingDomain || !isBusinessDirty}
+            className={`flex-1 md:flex-none flex items-center justify-center gap-2 px-6 py-2.5 rounded-xl text-xs font-black uppercase transition-all shadow-lg ${showBusinessSaveSuccess ? 'bg-emerald-50 text-emerald-600 shadow-emerald-100' : isBusinessDirty ? 'bg-brand-600 text-white shadow-brand-200 hover:bg-brand-700' : 'bg-slate-100 text-slate-400 cursor-default'}`}
           >
-            {isSaving ? <Loader2 className="animate-spin" size={16}/> : showSaveSuccess ? <CheckCircle size={16}/> : <Save size={16}/>}
-            {showSaveSuccess ? '已保存' : isBusinessDirty ? '保存事业定义' : '事业已是最新'}
+            {isBusinessSaving ? <Loader2 className="animate-spin" size={16}/> : showBusinessSaveSuccess ? <CheckCircle size={16}/> : <Save size={16}/>}
+            {showBusinessSaveSuccess ? '已保存' : isBusinessDirty ? '保存事业定义' : '事业已是最新'}
           </button>
           <button 
-            onClick={() => handleSave(['strategy'])}
-            disabled={isSaving}
-            className={`flex-1 md:flex-none flex items-center justify-center gap-2 px-6 py-2.5 rounded-xl text-xs font-black uppercase transition-all shadow-lg ${showSaveSuccess && isStrategyDirty ? 'bg-emerald-50 text-emerald-600 shadow-emerald-100' : isStrategyDirty ? 'bg-slate-800 text-white shadow-slate-200 hover:bg-slate-900' : 'bg-slate-100 text-slate-400 cursor-default'}`}
+            onClick={() => handleDomainSave('strategy')}
+            disabled={!!savingDomain || !isStrategyDirty}
+            className={`flex-1 md:flex-none flex items-center justify-center gap-2 px-6 py-2.5 rounded-xl text-xs font-black uppercase transition-all shadow-lg ${showStrategySaveSuccess ? 'bg-emerald-50 text-emerald-600 shadow-emerald-100' : isStrategyDirty ? 'bg-slate-800 text-white shadow-slate-200 hover:bg-slate-900' : 'bg-slate-100 text-slate-400 cursor-default'}`}
           >
-            {isSaving ? <Loader2 className="animate-spin" size={16}/> : showSaveSuccess ? <CheckCircle size={16}/> : <Save size={16}/>}
-            {showSaveSuccess ? '已保存' : isStrategyDirty ? '保存使命愿景' : '使命愿景已是最新'}
+            {isStrategySaving ? <Loader2 className="animate-spin" size={16}/> : showStrategySaveSuccess ? <CheckCircle size={16}/> : <Save size={16}/>}
+            {showStrategySaveSuccess ? '已保存' : isStrategyDirty ? '保存使命愿景' : '使命愿景已是最新'}
           </button>
         </div>
       </div>
