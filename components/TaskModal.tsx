@@ -168,7 +168,7 @@ const TaskModal: React.FC<TaskModalProps> = ({
   if (!isOpen) return null;
   const isEditing = mode === 'edit';
   const canEditOwner = isEditing ? isAdmin : availableOwners.length > 1;
-  const isDepartmentReadOnly = readOnly || mode === 'edit' || (mode === 'create' && !isAdmin);
+  const isDepartmentReadOnly = readOnly || (!isAdmin && (mode === 'edit' || mode === 'create'));
 
   const handleSave = (status: string, keepOpen?: boolean) => {
     // Validation
