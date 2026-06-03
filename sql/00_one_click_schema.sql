@@ -627,9 +627,8 @@ RETURNS BOOLEAN AS $$
 DECLARE
   user_record RECORD;
   custom_perm JSONB;
-  role_id TEXT;
-  role_record RECORD;
-  role_perm JSONB;
+  custom_allowed BOOLEAN := false;
+  role_allowed BOOLEAN := false;
 BEGIN
   -- Admin always has permission
   IF public.is_admin() THEN
@@ -649,36 +648,24 @@ BEGIN
     RETURN false;
   END IF;
 
-  -- Check custom permissions first (override)
+  -- Personal permissions are additive to role permissions. A false personal value
+  -- must not deny an action granted by an assigned system role.
   IF user_record.custom_permissions IS NOT NULL
      AND jsonb_typeof(user_record.custom_permissions) = 'object'
      AND user_record.custom_permissions ? p_menu_id THEN
     custom_perm := user_record.custom_permissions -> p_menu_id;
-    RETURN COALESCE((custom_perm ->> p_action)::BOOLEAN, false);
+    custom_allowed := COALESCE((custom_perm ->> p_action)::BOOLEAN, false);
   END IF;
 
-  -- Check system role permissions
-  IF user_record.system_role_ids IS NOT NULL THEN
-    FOR role_id IN
-      SELECT value
-      FROM public.jsonb_text_values(user_record.system_role_ids)
-    LOOP
-      SELECT permissions INTO role_record
-      FROM public.system_roles
-      WHERE id = role_id;
+  SELECT COALESCE(BOOL_OR(COALESCE((sr.permissions -> p_menu_id ->> p_action)::BOOLEAN, false)), false)
+  INTO role_allowed
+  FROM public.jsonb_text_values(user_record.system_role_ids) AS role_ids(value)
+  JOIN public.system_roles sr ON sr.id = role_ids.value
+  WHERE user_record.system_role_ids IS NOT NULL
+    AND sr.permissions IS NOT NULL
+    AND sr.permissions ? p_menu_id;
 
-      IF role_record IS NOT NULL
-         AND role_record.permissions IS NOT NULL
-         AND role_record.permissions ? p_menu_id THEN
-        role_perm := role_record.permissions -> p_menu_id;
-        IF COALESCE((role_perm ->> p_action)::BOOLEAN, false) THEN
-          RETURN true;
-        END IF;
-      END IF;
-    END LOOP;
-  END IF;
-
-  RETURN false;
+  RETURN custom_allowed OR role_allowed;
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER STABLE;
 
