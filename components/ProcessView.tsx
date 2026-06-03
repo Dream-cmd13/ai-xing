@@ -130,6 +130,7 @@ const ProcessView: React.FC = () => {
   const [publishVersion, setPublishVersion] = useState('');
   const [showPublishModal, setShowPublishModal] = useState(false);
   const [editModal, setEditModal] = useState<{ nodeId: string, field: keyof SIPOC | 'label', title: string } | null>(null);
+  const [pendingSipocInput, setPendingSipocInput] = useState('');
   const [dragInfo, setDragInfo] = useState<{ nodeId: string, startX: number, startY: number, nodeX: number, nodeY: number } | null>(null);
   const [localNodePos, setLocalNodePos] = useState<{ id: string, x: number, y: number } | null>(null);
   const [showOwnerRoleDropdown, setShowOwnerRoleDropdown] = useState(false);
@@ -282,6 +283,20 @@ const ProcessView: React.FC = () => {
     updateCurrentData(newNodes, currentContext.links);
   }, [currentContext, updateCurrentData]);
 
+  const appendSipocItem = useCallback(() => {
+    if (!editModal || !isArrayField(editModal.field) || !selectedNode) return;
+
+    const nextValue = pendingSipocInput.trim();
+    if (!nextValue) return;
+
+    const field = editModal.field as keyof SIPOC;
+    const currentItems = (selectedNode.sipoc[field] as string[]) || [];
+    updateNode(selectedNode.id, {
+      sipoc: { ...selectedNode.sipoc, [field]: [...currentItems, nextValue] }
+    });
+    setPendingSipocInput('');
+  }, [editModal, pendingSipocInput, selectedNode, updateNode]);
+
   const toggleAssistantRole = (role: string) => {
     if (!selectedNode) return;
     const currentRoles = selectedNode.sipoc.assistantRoles || [];
@@ -359,6 +374,12 @@ const ProcessView: React.FC = () => {
       setCurrentProcessId(null);
     };
   }, [setCurrentProcessId]);
+
+  useEffect(() => {
+    if (!editModal || !isArrayField(editModal.field)) {
+      setPendingSipocInput('');
+    }
+  }, [editModal]);
 
   const formatTime = (ts: number) => {
     if (!ts) return '-';
@@ -817,15 +838,13 @@ const ProcessView: React.FC = () => {
                   <IMEInput 
                     id="sipoc-input"
                     className="flex-1 p-3 bg-slate-50 border rounded-xl text-xs font-bold outline-none focus:border-brand-500" 
+                    value={pendingSipocInput}
                     placeholder="输入项并回车..." 
+                    onChange={e => setPendingSipocInput(e.target.value)}
                     onKeyDown={e => {
                       if (e.key === 'Enter') {
-                        const input = e.currentTarget;
-                        if (!input.value.trim()) return;
-                        const field = editModal.field as keyof SIPOC;
-                        const currentItems = (selectedNode!.sipoc[field] as string[]) || [];
-                        updateNode(selectedNode!.id, { sipoc: { ...selectedNode!.sipoc, [field]: [...currentItems, input.value.trim()] } });
-                        input.value = '';
+                        e.preventDefault();
+                        appendSipocItem();
                       }
                     }}
                   />
@@ -853,12 +872,7 @@ const ProcessView: React.FC = () => {
             <button onClick={() => {
               // Save any pending input
               if (isArrayField(editModal.field)) {
-                const input = document.getElementById('sipoc-input') as HTMLInputElement;
-                if (input && input.value.trim()) {
-                  const field = editModal.field as keyof SIPOC;
-                  const currentItems = (selectedNode!.sipoc[field] as string[]) || [];
-                  updateNode(selectedNode!.id, { sipoc: { ...selectedNode!.sipoc, [field]: [...currentItems, input.value.trim()] } });
-                }
+                appendSipocItem();
               }
               setEditModal(null);
             }} className="w-full mt-8 py-4 bg-slate-900 text-white rounded-2xl font-black uppercase text-xs">完成编辑</button>
