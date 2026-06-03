@@ -267,18 +267,20 @@ const ReviewView: React.FC = () => {
     };
   }, [setIsDirty]);
 
+  const currentPeriodKey = useMemo(
+    () => (
+      activeTab === 'weekly'
+        ? selectedWeek
+        : activeTab === 'monthly'
+          ? selectedMonth
+          : selectedQuarter
+    ),
+    [activeTab, selectedWeek, selectedMonth, selectedQuarter]
+  );
+
   // Load existing review when selection changes
   useEffect(() => {
-    if (!selectedDeptId) {
-      const emptySnapshot = createReviewDraftSnapshot();
-      setReviewContent(emptySnapshot.content);
-      setReviewScore(emptySnapshot.score);
-      setOkrReviews(emptySnapshot.okrReviews);
-      setLoadedDraftSnapshot(emptySnapshot);
-      return;
-    }
-    const dept = flatDepts.find(d => d.id === selectedDeptId);
-    if (!dept) {
+    if (!selectedDept) {
       const emptySnapshot = createReviewDraftSnapshot();
       setReviewContent(emptySnapshot.content);
       setReviewScore(emptySnapshot.score);
@@ -287,12 +289,7 @@ const ReviewView: React.FC = () => {
       return;
     }
 
-    const periodKey = activeTab === 'weekly'
-      ? selectedWeek
-      : activeTab === 'monthly'
-        ? selectedMonth
-        : selectedQuarter;
-    const reviews = dept.reviews?.[periodKey] || [];
+    const reviews = selectedDept.reviews?.[currentPeriodKey] || [];
     const latestReview = reviews.length > 0 ? reviews[reviews.length - 1] : null;
 
     const nextSnapshot = createReviewDraftSnapshot(latestReview ? {
@@ -305,7 +302,7 @@ const ReviewView: React.FC = () => {
     setReviewScore(nextSnapshot.score);
     setOkrReviews(nextSnapshot.okrReviews);
     setLoadedDraftSnapshot(nextSnapshot);
-  }, [selectedDeptId, activeTab, selectedWeek, selectedMonth, selectedQuarter, flatDepts]);
+  }, [selectedDept, currentPeriodKey]);
 
   const changeReviewTab = (nextTab: 'weekly' | 'monthly' | 'quarterly') => {
     if (nextTab === activeTab) return;
@@ -348,11 +345,7 @@ const ReviewView: React.FC = () => {
         okrDetails: okrReviews
     };
 
-    const periodKey = activeTab === 'weekly'
-      ? selectedWeek
-      : activeTab === 'monthly'
-        ? selectedMonth
-        : selectedQuarter;
+    const periodKey = currentPeriodKey;
 
     const updateDeptRecursive = (depts: Department[]): Department[] => {
       return depts.map(d => {
@@ -461,11 +454,7 @@ const ReviewView: React.FC = () => {
     loadDeptTasks();
   }, [selectedDeptId, selectedWeek, selectedMonth, selectedQuarter, activeTab, state.tasks, state.users, state.systemRoles, currentUser]);
 
-  const currentPeriodLabel = activeTab === 'weekly'
-    ? selectedWeek
-    : activeTab === 'monthly'
-      ? selectedMonth
-      : selectedQuarter;
+  const currentPeriodLabel = currentPeriodKey;
 
   const [deptTasks, setDeptTasks] = useState<PADEntry[]>([]);
 
