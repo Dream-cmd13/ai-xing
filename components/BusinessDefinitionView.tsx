@@ -46,7 +46,7 @@ const BusinessDefinitionView: React.FC = () => {
 
   useEffect(() => {
     return () => {
-      Object.values(saveSuccessTimeoutsRef.current).forEach((timeoutId) => {
+      (Object.values(saveSuccessTimeoutsRef.current) as ReturnType<typeof setTimeout>[]).forEach((timeoutId) => {
         if (timeoutId) clearTimeout(timeoutId);
       });
     };

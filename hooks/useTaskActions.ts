@@ -1,10 +1,10 @@
 import { MutableRefObject, useCallback } from 'react';
-import { addTask as addDbTask, updateTask as updateDbTask, deleteTask as deleteDbTask } from '@/data';
+import { addTask as addDbTask, updateTask as updateDbTask, deleteTask as deleteDbTask, getTaskById } from '@/data';
 import { AppStoreState, useAppStore } from '@/store/useAppStore';
 import { PADEntry, User } from '@/types';
 import { isAdminUser } from '@/utils/permissions';
 import { prepareTaskForPersistence } from '@/utils/taskPersistence.js';
-import { removeTasksById, upsertTasksById } from '@/utils/taskSyncState.js';
+import { removeTasksById, resolveLatestTaskBaseline, upsertTasksById } from '@/utils/taskSyncState.js';
 import { getUserFacingError } from '@/utils/userFacingError';
 
 interface UseTaskActionsOptions {
@@ -49,18 +49,28 @@ export const useTaskActions = ({
     const previousLastSavedTasks = stateRef.current.lastSavedTasks || [];
     const previousDirtyDomains = [...store.dirtyDomains];
     const currentUserIsAdmin = isAdminUser(currentUser, store.systemRoles || []);
-    const normalizedEntries = entriesToPersist.map((entry) => {
+    const normalizedEntries: PADEntry[] = [];
+
+    for (const entry of entriesToPersist) {
       const previousTask = previousLastSavedTasks.find((task) => task.id === entry.id);
-      return prepareTaskForPersistence(
+      const latestTask = mode === 'update'
+        ? await getTaskById(entry.id)
+        : null;
+      const taskBaseline = mode === 'update'
+        ? resolveLatestTaskBaseline(previousTask, latestTask)
+        : previousTask;
+
+      normalizedEntries.push(prepareTaskForPersistence(
         entry,
-        previousTask,
+        taskBaseline,
         currentUser,
         store.users || [],
         store.systemRoles || [],
         mode,
         currentUserIsAdmin
-      );
-    });
+      ));
+    }
+
     const optimisticTaskMap = new Map(normalizedEntries.map((entry) => [entry.id, entry]));
     const nextOptimisticTasks = optimisticTasks.map((task) => optimisticTaskMap.get(task.id) ?? task);
 

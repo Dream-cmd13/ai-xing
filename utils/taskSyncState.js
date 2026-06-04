@@ -14,6 +14,17 @@ export const hasTaskLocalChanges = (localTasks, lastSavedTasks, taskId) => {
   return normalizeForConflictComparison(localTask) !== normalizeForConflictComparison(lastSavedTask);
 };
 
+export const resolveLatestTaskBaseline = (previousTask, latestTask) => {
+  if (!latestTask) return previousTask || null;
+  if (!previousTask) return latestTask;
+
+  if (normalizeForConflictComparison(previousTask) !== normalizeForConflictComparison(latestTask)) {
+    throw new Error('任务已被其他人修改，请刷新后重试');
+  }
+
+  return latestTask;
+};
+
 export const upsertTasksById = (tasks, entries) => {
   const nextEntries = entries || [];
   const entryMap = new Map(nextEntries.map((entry) => [entry.id, entry]));
