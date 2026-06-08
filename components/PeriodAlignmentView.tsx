@@ -93,13 +93,28 @@ const PeriodAlignmentView: React.FC<PeriodAlignmentViewProps> = ({
     }
   }, [periodWeeks]);
 
+  const flatDepts = useMemo(() => {
+    const list: Department[] = [];
+    const collect = (depts: Department[]) => {
+      depts.forEach((department) => {
+        list.push(department);
+        if (department.subDepartments?.length) {
+          collect(department.subDepartments);
+        }
+      });
+    };
+    collect(state.departments);
+    return list;
+  }, [state.departments]);
+
   // Get OKRs for the selected department and period
   const okrs = useMemo(() => {
     if (!selectedDeptId) return [];
-    const dept = state.departments.find(d => d.id === selectedDeptId);
+    const dept = flatDepts.find(d => d.id === selectedDeptId);
     if (!dept) return [];
-    return dept.okrs?.[selectedYear]?.[selectedPeriod] || [];
-  }, [state.departments, selectedDeptId, selectedYear, selectedPeriod]);
+    const yearOkrs = dept.okrs?.[selectedYear] || dept.okrs?.[String(selectedYear)] || {};
+    return yearOkrs[selectedPeriod] || [];
+  }, [flatDepts, selectedDeptId, selectedYear, selectedPeriod]);
 
   // Pre-group tasks for efficiency
   const tasksByWeekAndKr = useMemo(() => {
