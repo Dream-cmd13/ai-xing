@@ -37,6 +37,31 @@ const flattenDepartments = (departments: Department[]): Department[] => {
   return list;
 };
 
+const collectAncestorDepartmentIds = (
+  departments: Department[],
+  targetDepartmentId?: string
+): string[] => {
+  if (!targetDepartmentId) return [];
+
+  const walk = (items: Department[], ancestors: string[]): string[] | null => {
+    for (const department of items) {
+      const nextAncestors = [...ancestors, department.id];
+      if (department.id === targetDepartmentId) {
+        return nextAncestors;
+      }
+
+      const match = walk(department.subDepartments || [], nextAncestors);
+      if (match) {
+        return match;
+      }
+    }
+
+    return null;
+  };
+
+  return walk(departments, []) || [];
+};
+
 const getQuarterFromMonth = (monthIndex: number): string => QUARTERS[Math.floor(monthIndex / 3)] || 'Q1';
 
 const getQuarterFromDate = (value: number): QuarterScope | null => {
@@ -183,7 +208,12 @@ export const createTaskOkrGroups = ({
     : undefined;
   const allowedDepartmentIds = isAdmin
     ? new Set(allDepartments.map((department) => department.id))
-    : new Set([ownerDepartmentId || currentUser.departmentId].filter(Boolean) as string[]);
+    : new Set(
+        collectAncestorDepartmentIds(
+          departments,
+          ownerDepartmentId || currentUser.departmentId
+        )
+      );
 
   if (allowedDepartmentIds.size === 0) {
     return groups;
