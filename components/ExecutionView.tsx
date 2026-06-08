@@ -4,7 +4,7 @@ import { useAuthStore } from '../store/useAuthStore';
 import { useAppActions } from '../hooks/useAppActions';
 import { usePermissions } from '../hooks/usePermissions';
 
-import { AppState, Department, User, WeeklyPAD, PADEntry, OKR, TaskLog, MenuPermission } from '../types';
+import { AppState, Department, User, WeeklyPAD, PADEntry, TaskLog, MenuPermission } from '../types';
 import PageToast from './PageToast';
 import PeriodAlignmentView from './PeriodAlignmentView';
 import TaskModal from './TaskModal';
@@ -13,6 +13,7 @@ import { usePageToast } from '../hooks/usePageToast';
 import { getUserFacingError } from '../utils/userFacingError';
 import { canAssignTaskOwner, canManageDepartment, canManageTask, canViewTask, getAssignableTaskOwners, getVisibleDepartments, isAdminUser } from '../utils/permissions';
 import { ensureTaskTargetWeeks } from '../utils/taskPeriods.js';
+import { createTaskOkrGroups, getWeekDateRange } from '../utils/taskOkrOptions';
 
 
 
@@ -119,40 +120,28 @@ const ExecutionView: React.FC = () => {
   const canEditExecutionTask = permissions.update;
 
   const groupedAvailableKRs = useMemo(() => {
-    if (!taskModal.weekId) return [];
-    const year = parseInt(taskModal.weekId.split('-')[0]);
-    const groups: { label: string, options: { id: string, name: string }[] }[] = [];
-    
-    // Company OKRs
-    const companyOkrs = state.strategy.companyOKRs[year] || [];
-    const companyOptions: { id: string, name: string }[] = [];
-    companyOkrs.forEach(o => {
-      (o.keyResults || []).forEach((kr, idx) => {
-        companyOptions.push({ id: `${o.id}-kr-${idx}`, name: kr });
-      });
+    return createTaskOkrGroups({
+      companyOKRs: state.strategy.companyOKRs,
+      departments: state.departments,
+      currentUser,
+      ownerId: taskModal.data.ownerId,
+      users: state.users,
+      isAdmin: currentUserIsAdmin,
+      startDate: taskModal.data.startDate,
+      dueDate: taskModal.data.dueDate,
+      fallbackWeekId: taskModal.weekId
     });
-    if (companyOptions.length > 0) {
-      groups.push({ label: '公司战略指标', options: companyOptions });
-    }
-
-    // Department OKRs
-    flatDepts.forEach(d => {
-      const deptOkrs = d.okrs?.[year] || {};
-      const deptOptions: { id: string, name: string }[] = [];
-      Object.entries(deptOkrs).forEach(([period, okrs]: [string, OKR[]]) => {
-        (okrs || []).forEach(o => {
-          (o.keyResults || []).forEach((kr, idx) => {
-            deptOptions.push({ id: `${o.id}-kr-${idx}`, name: `${kr} (${period})` });
-          });
-        });
-      });
-      if (deptOptions.length > 0) {
-        groups.push({ label: `${d.name} 指标`, options: deptOptions });
-      }
-    });
-
-    return groups;
-  }, [state.strategy.companyOKRs, flatDepts, taskModal.weekId]);
+  }, [
+    state.strategy.companyOKRs,
+    state.departments,
+    state.users,
+    currentUser,
+    currentUserIsAdmin,
+    taskModal.data.ownerId,
+    taskModal.data.startDate,
+    taskModal.data.dueDate,
+    taskModal.weekId
+  ]);
 
   const renderDeptTree = (depts: Department[], depth = 0) => {
     const handleDeptClick = (id: string) => {
@@ -177,6 +166,7 @@ const ExecutionView: React.FC = () => {
 
   const handleAddTask = (weekId: string, alignedKrId: string) => {
     if (!canCreateExecutionTask) return;
+    const weekRange = getWeekDateRange(weekId);
     setTaskModal({
       isOpen: true,
       weekId,
@@ -190,8 +180,8 @@ const ExecutionView: React.FC = () => {
         departmentId: currentUserIsAdmin ? (selectedDeptId || currentUser.departmentId) : currentUser.departmentId,
         alignedKrId: alignedKrId,
         targetWeeks: [weekId],
-        startDate: Date.now(),
-        dueDate: Date.now() + 86400000,
+        startDate: weekRange?.startDate ?? Date.now(),
+        dueDate: weekRange?.dueDate ?? (Date.now() + 86400000),
         tags: [],
         participantIds: [],
         approverIds: []
@@ -299,6 +289,7 @@ const ExecutionView: React.FC = () => {
     showToast(`第 ${weekNum} 周任务已成功${actionText}至 [${ownerName}] 的个人计划中`);
 
     if (keepOpen) {
+      const weekRange = getWeekDateRange(taskModal.weekId);
       setTaskModal({ 
         isOpen: true, 
         weekId: taskModal.weekId, 
@@ -312,8 +303,8 @@ const ExecutionView: React.FC = () => {
           departmentId: currentUserIsAdmin ? (selectedDeptId || currentUser.departmentId) : currentUser.departmentId,
           alignedKrId: taskModal.data.alignedKrId,
           targetWeeks: taskModal.weekId ? [taskModal.weekId] : [],
-          startDate: Date.now(),
-          dueDate: Date.now() + 86400000,
+          startDate: weekRange?.startDate ?? Date.now(),
+          dueDate: weekRange?.dueDate ?? (Date.now() + 86400000),
           tags: [],
           participantIds: [],
           approverIds: []

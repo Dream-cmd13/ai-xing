@@ -6,11 +6,12 @@ import { usePageToast } from '@/hooks/usePageToast';
 import { usePermissions } from '@/hooks/usePermissions';
 import { getDepartments, getStrategy, getTaskUsersForTasks, getUsers, getWorkbenchTasks } from '@/data';
 
-import { AppState, PADEntry, OKR, WeeklyPAD, TaskLog } from '@/types';
+import { AppState, PADEntry, WeeklyPAD, TaskLog } from '@/types';
 import { Calendar, CheckCircle, Clock, Target, ArrowRight, LayoutDashboard, ListTodo, Briefcase, Flag, Loader2 } from 'lucide-react';
 import PageToast from './PageToast';
 import TaskModal from './TaskModal';
 import { ensureTaskTargetWeeks } from '@/utils/taskPeriods.js';
+import { createTaskOkrGroups, getWeekDateRange } from '@/utils/taskOkrOptions';
 import { getUserFacingError } from '@/utils/userFacingError';
 import { canAssignTaskOwner, canManageTask, canViewTask, getAssignableTaskOwners, isAdminUser } from '@/utils/permissions';
 
@@ -248,40 +249,28 @@ const WorkbenchView: React.FC = () => {
   }, [allMyTasks, nextWeekId]);
 
   const groupedAvailableKRs = useMemo(() => {
-    if (!taskModal.weekId) return [];
-    const year = parseInt(taskModal.weekId.split('-')[0]);
-    const groups: { label: string, options: { id: string, name: string }[] }[] = [];
-    
-    // Company OKRs
-    const companyOkrs = state.strategy.companyOKRs[year] || [];
-    const companyOptions: { id: string, name: string }[] = [];
-    companyOkrs.forEach(o => {
-      (o.keyResults || []).forEach((kr, idx) => {
-        companyOptions.push({ id: `${o.id}-kr-${idx}`, name: kr });
-      });
+    return createTaskOkrGroups({
+      companyOKRs: state.strategy.companyOKRs,
+      departments: state.departments,
+      currentUser,
+      ownerId: taskModal.data.ownerId,
+      users: state.users,
+      isAdmin: isAdminUser(currentUser, state.systemRoles || []),
+      startDate: taskModal.data.startDate,
+      dueDate: taskModal.data.dueDate,
+      fallbackWeekId: taskModal.weekId
     });
-    if (companyOptions.length > 0) {
-      groups.push({ label: '公司战略指标', options: companyOptions });
-    }
-
-    // Department OKRs
-    state.departments.forEach(d => {
-      const deptOkrs = d.okrs?.[year] || {};
-      const deptOptions: { id: string, name: string }[] = [];
-      Object.entries(deptOkrs).forEach(([period, okrs]: [string, OKR[]]) => {
-        (okrs || []).forEach(o => {
-          (o.keyResults || []).forEach((kr, idx) => {
-            deptOptions.push({ id: `${o.id}-kr-${idx}`, name: `${kr} (${period})` });
-          });
-        });
-      });
-      if (deptOptions.length > 0) {
-        groups.push({ label: `${d.name} 指标`, options: deptOptions });
-      }
-    });
-
-    return groups;
-  }, [state.strategy.companyOKRs, state.departments, taskModal.weekId]);
+  }, [
+    state.strategy.companyOKRs,
+    state.departments,
+    state.users,
+    state.systemRoles,
+    currentUser,
+    taskModal.data.ownerId,
+    taskModal.data.startDate,
+    taskModal.data.dueDate,
+    taskModal.weekId
+  ]);
 
   const handleTaskClick = (task: PADEntry) => {
     const owner = state.users.find(u => u.id === task.ownerId);
@@ -386,6 +375,7 @@ const WorkbenchView: React.FC = () => {
     }
     
     if (keepOpen) {
+      const weekRange = getWeekDateRange(taskModal.weekId);
       setTaskModal({ 
         isOpen: true, 
         weekId: taskModal.weekId, 
@@ -398,8 +388,8 @@ const WorkbenchView: React.FC = () => {
           ownerId: currentUser.id,
           departmentId: currentUser.departmentId,
           targetWeeks: taskModal.weekId ? [taskModal.weekId] : [],
-          startDate: Date.now(),
-          dueDate: Date.now() + 86400000,
+          startDate: weekRange?.startDate ?? Date.now(),
+          dueDate: weekRange?.dueDate ?? (Date.now() + 86400000),
           tags: [],
           participantIds: [],
           approverIds: []

@@ -5,7 +5,7 @@ import { useAuthStore } from '../store/useAuthStore';
 import { useAppActions } from '../hooks/useAppActions';
 import { usePermissions } from '../hooks/usePermissions';
 
-import { AppState, WeeklyPAD, PADEntry, Department, User, OKR, TaskLog, MenuPermission } from '../types';
+import { AppState, WeeklyPAD, PADEntry, Department, User, TaskLog, MenuPermission } from '../types';
 import PageToast from './PageToast';
 import TaskModal from './TaskModal';
 import { 
@@ -17,6 +17,7 @@ import { usePageToast } from '../hooks/usePageToast';
 import { getUserFacingError } from '../utils/userFacingError';
 import { canAssignTaskOwner, canManageTask, canViewTask, getAssignableTaskOwners, getVisibleDepartments, isAdminUser } from '../utils/permissions';
 import { ensureTaskTargetWeeks } from '../utils/taskPeriods.js';
+import { createTaskOkrGroups, getWeekDateRange } from '../utils/taskOkrOptions';
 
 
 
@@ -98,39 +99,28 @@ const WeeklyView: React.FC = () => {
   );
 
   const groupedAvailableKRs = useMemo(() => {
-    const groups: { label: string, options: { id: string, name: string }[] }[] = [];
-    
-    // Company OKRs
-    const companyOkrs = state.strategy.companyOKRs[parseInt(selectedWeek.split('-')[0])] || [];
-    const companyOptions: { id: string, name: string }[] = [];
-    companyOkrs.forEach(o => {
-      (o.keyResults || []).forEach((kr, idx) => {
-        companyOptions.push({ id: `${o.id}-kr-${idx}`, name: kr });
-      });
+    return createTaskOkrGroups({
+      companyOKRs: state.strategy.companyOKRs,
+      departments: state.departments,
+      currentUser,
+      ownerId: taskModal.data.ownerId,
+      users: state.users,
+      isAdmin: isAdminUser(currentUser, state.systemRoles || []),
+      startDate: taskModal.data.startDate,
+      dueDate: taskModal.data.dueDate,
+      fallbackWeekId: selectedWeek
     });
-    if (companyOptions.length > 0) {
-      groups.push({ label: '公司战略指标', options: companyOptions });
-    }
-
-    // Department OKRs
-    flatDepts.forEach(d => {
-      const year = parseInt(selectedWeek.split('-')[0]);
-      const deptOkrs = d.okrs?.[year] || {};
-      const deptOptions: { id: string, name: string }[] = [];
-      Object.entries(deptOkrs).forEach(([period, okrs]: [string, OKR[]]) => {
-        (okrs || []).forEach(o => {
-          (o.keyResults || []).forEach((kr, idx) => {
-            deptOptions.push({ id: `${o.id}-kr-${idx}`, name: `${kr} (${period})` });
-          });
-        });
-      });
-      if (deptOptions.length > 0) {
-        groups.push({ label: `${d.name} 指标`, options: deptOptions });
-      }
-    });
-
-    return groups;
-  }, [state.strategy.companyOKRs, flatDepts, selectedWeek]);
+  }, [
+    state.strategy.companyOKRs,
+    state.departments,
+    state.users,
+    state.systemRoles,
+    currentUser,
+    taskModal.data.ownerId,
+    taskModal.data.startDate,
+    taskModal.data.dueDate,
+    selectedWeek
+  ]);
 
   const confirmDeleteEntry = async () => {
     if (deleteConfirmIndex === null) return;
@@ -163,6 +153,7 @@ const WeeklyView: React.FC = () => {
     const ownerId = currentUserIsAdmin
       ? selectedOwnerId
       : (canCreateForSelectedOwner ? selectedOwnerId : currentUser.id);
+    const weekRange = getWeekDateRange(selectedWeek);
     setTaskModal({ 
       isOpen: true, 
       index: null, 
@@ -175,8 +166,8 @@ const WeeklyView: React.FC = () => {
         ownerId,
         departmentId: state.users.find(u => u.id === ownerId)?.departmentId || currentUser.departmentId,
         targetWeeks: [selectedWeek],
-        startDate: Date.now(),
-        dueDate: Date.now() + 86400000,
+        startDate: weekRange?.startDate ?? Date.now(),
+        dueDate: weekRange?.dueDate ?? (Date.now() + 86400000),
         tags: [],
         participantIds: [],
         approverIds: []
@@ -312,6 +303,7 @@ const WeeklyView: React.FC = () => {
     }
 
     if (keepOpen) {
+      const weekRange = getWeekDateRange(selectedWeek);
       setTaskModal({ 
         isOpen: true, 
         index: null, 
@@ -327,8 +319,8 @@ const WeeklyView: React.FC = () => {
             ? state.users.find(u => u.id === selectedOwnerId)?.departmentId || currentUser.departmentId
             : currentUser.departmentId,
           targetWeeks: [selectedWeek],
-          startDate: Date.now(),
-          dueDate: Date.now() + 86400000,
+          startDate: weekRange?.startDate ?? Date.now(),
+          dueDate: weekRange?.dueDate ?? (Date.now() + 86400000),
           tags: [],
           participantIds: [],
           approverIds: []

@@ -4,7 +4,7 @@ import { useAuthStore } from '../store/useAuthStore';
 import { useAppActions } from '../hooks/useAppActions';
 import { usePermissions } from '../hooks/usePermissions';
 
-import { AppState, WeeklyPAD, PADEntry, User, Department, OKR, TaskLog, MenuPermission } from '../types';
+import { AppState, WeeklyPAD, PADEntry, User, Department, TaskLog, MenuPermission } from '../types';
 import { 
   LayoutList, Clock, User as UserIcon, 
   Building2, Filter, Search, Calendar, Tag, ChevronDown, ChevronRight,
@@ -16,6 +16,7 @@ import { usePageToast } from '../hooks/usePageToast';
 import { getUserFacingError } from '../utils/userFacingError';
 import { canAssignTaskOwner, canManageTask, canViewTask, getAssignableTaskOwners, getVisibleDepartments, isAdminUser } from '../utils/permissions';
 import { ensureTaskTargetWeeks } from '../utils/taskPeriods.js';
+import { createTaskOkrGroups, getWeekDateRange } from '../utils/taskOkrOptions';
 import { getTaskById, getTaskList, getTaskUsersForTasks } from '../data';
 
 
@@ -221,6 +222,7 @@ const TaskCenterView: React.FC = () => {
       await persistTaskEntries(nextTasks, entriesToAdd, isNewTask ? 'create' : 'update');
 
       if (keepOpen) {
+        const weekRange = getWeekDateRange(taskModal.weekId);
         setTaskModal({ 
           isOpen: true, 
           weekId: taskModal.weekId, 
@@ -233,8 +235,8 @@ const TaskCenterView: React.FC = () => {
             priority: 'medium',
             ownerId: currentUser.id,
             departmentId: currentUser.departmentId,
-            startDate: Date.now(),
-            dueDate: Date.now() + 86400000,
+            startDate: weekRange?.startDate ?? Date.now(),
+            dueDate: weekRange?.dueDate ?? (Date.now() + 86400000),
             action: '',
             deliverable: '',
             taskReview: '',
@@ -275,38 +277,28 @@ const TaskCenterView: React.FC = () => {
   };
 
   const groupedAvailableKRs = useMemo(() => {
-    if (!taskModal.weekId) return [];
-    const year = parseInt(taskModal.weekId.split('-')[0]);
-    const groups: { label: string, options: { id: string, name: string }[] }[] = [];
-    
-    const companyOkrs = state.strategy.companyOKRs[year] || [];
-    const companyOptions: { id: string, name: string }[] = [];
-    companyOkrs.forEach(o => {
-      (o.keyResults || []).forEach((kr, idx) => {
-        companyOptions.push({ id: `${o.id}-kr-${idx}`, name: kr });
-      });
+    return createTaskOkrGroups({
+      companyOKRs: state.strategy.companyOKRs,
+      departments: state.departments,
+      currentUser,
+      ownerId: taskModal.data.ownerId,
+      users,
+      isAdmin: isAdminUser(currentUser, state.systemRoles || []),
+      startDate: taskModal.data.startDate,
+      dueDate: taskModal.data.dueDate,
+      fallbackWeekId: taskModal.weekId
     });
-    if (companyOptions.length > 0) {
-      groups.push({ label: '公司战略指标', options: companyOptions });
-    }
-
-    departments.forEach(d => {
-      const deptOkrs = d.okrs?.[year] || {};
-      const deptOptions: { id: string, name: string }[] = [];
-      Object.entries(deptOkrs).forEach(([period, okrs]: [string, OKR[]]) => {
-        (okrs || []).forEach(o => {
-          (o.keyResults || []).forEach((kr, idx) => {
-            deptOptions.push({ id: `${o.id}-kr-${idx}`, name: `${kr} (${period})` });
-          });
-        });
-      });
-      if (deptOptions.length > 0) {
-        groups.push({ label: `${d.name} 指标`, options: deptOptions });
-      }
-    });
-
-    return groups;
-  }, [state.strategy.companyOKRs, departments, taskModal.weekId]);
+  }, [
+    state.strategy.companyOKRs,
+    state.departments,
+    state.systemRoles,
+    currentUser,
+    taskModal.data.ownerId,
+    taskModal.data.startDate,
+    taskModal.data.dueDate,
+    taskModal.weekId,
+    users
+  ]);
 
   const allTasks = useMemo(() => {
     const tasks: { padId: string, entry: PADEntry, owner: User | undefined, dept: Department | undefined }[] = [];
@@ -489,29 +481,32 @@ const TaskCenterView: React.FC = () => {
           {permissions.update && (
             <div className="flex gap-2">
               <button 
-                onClick={() => setTaskModal({ 
-                  isOpen: true, 
-                  weekId: currentWeekId, 
-                  padId: null,
-                  mode: 'create',
-                  data: {
-                    id: `task-${Date.now()}`,
-                    title: '',
-                    status: 'draft',
-                    priority: 'medium',
-                    ownerId: currentUser.id,
-                    departmentId: currentUser.departmentId,
-                    startDate: Date.now(),
-                    dueDate: Date.now() + 86400000,
-                    action: '',
-                    deliverable: '',
-                    taskReview: '',
-                    taskReviewScore: undefined,
-                    tags: [],
-                    participantIds: [],
-                    approverIds: []
-                  } 
-                })}
+                onClick={() => {
+                  const weekRange = getWeekDateRange(currentWeekId);
+                  setTaskModal({ 
+                    isOpen: true, 
+                    weekId: currentWeekId, 
+                    padId: null,
+                    mode: 'create',
+                    data: {
+                      id: `task-${Date.now()}`,
+                      title: '',
+                      status: 'draft',
+                      priority: 'medium',
+                      ownerId: currentUser.id,
+                      departmentId: currentUser.departmentId,
+                      startDate: weekRange?.startDate ?? Date.now(),
+                      dueDate: weekRange?.dueDate ?? (Date.now() + 86400000),
+                      action: '',
+                      deliverable: '',
+                      taskReview: '',
+                      taskReviewScore: undefined,
+                      tags: [],
+                      participantIds: [],
+                      approverIds: []
+                    } 
+                  });
+                }}
                 className="px-6 py-2.5 bg-brand-600 text-white rounded-xl text-xs font-black uppercase flex items-center gap-2 hover:bg-brand-700 transition-all shadow-md shadow-brand-100"
               >
                 <Plus size={16} /> 新增任务

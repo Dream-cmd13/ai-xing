@@ -6,13 +6,14 @@ import { useAppActions } from '../hooks/useAppActions';
 import { usePageToast } from '../hooks/usePageToast';
 import { usePermissions } from '../hooks/usePermissions';
 
-import { AppState, Department, ReviewEntry, ObjectiveReview, User, PADEntry, MenuPermission, OKR } from '../types';
+import { AppState, Department, ReviewEntry, ObjectiveReview, User, PADEntry, MenuPermission } from '../types';
 import { Calendar, Building2, ClipboardCheck, Save, CheckCircle, Loader2, Target, TrendingUp, MessageSquare, FileText, Lock, Download, RefreshCw, ChevronLeft, ChevronRight, PieChart } from 'lucide-react';
 import PageToast from './PageToast';
 import TaskModal from './TaskModal';
 import { getTaskById } from '../data';
 import { getUserFacingError } from '../utils/userFacingError';
 import { canManageReview, canManageTask, getVisibleDepartments, canViewTask, isAdminUser } from '../utils/permissions';
+import { createTaskOkrGroups } from '../utils/taskOkrOptions';
 import { isTaskInMonthlyPeriod, isTaskInWeeklyPeriod } from '../utils/taskPeriods.js';
 import { readTaskReviewState, updateTaskReviewState } from '../utils/reviewTaskState.js';
 import { createReviewDraftSnapshot, hasReviewDraftChanges, ReviewDraftSnapshot } from '../utils/reviewDraft';
@@ -202,34 +203,28 @@ const ReviewView: React.FC = () => {
   }, [currentUser, selectedDept, permissions.update, state.systemRoles, state.departments]);
 
   const groupedAvailableKRs = useMemo(() => {
-    const groups: { label: string, options: { id: string, name: string }[] }[] = [];
-    const year = new Date().getFullYear();
-    const companyOkrs = state.strategy.companyOKRs[year] || [];
-    const companyOptions: { id: string, name: string }[] = [];
-    companyOkrs.forEach(o => {
-      (o.keyResults || []).forEach((kr, idx) => {
-        companyOptions.push({ id: `${o.id}-kr-${idx}`, name: kr });
-      });
+    return createTaskOkrGroups({
+      companyOKRs: state.strategy.companyOKRs,
+      departments: state.departments,
+      currentUser,
+      ownerId: taskModal.data.ownerId,
+      users: state.users,
+      isAdmin: isAdminUser(currentUser, state.systemRoles || []),
+      startDate: taskModal.data.startDate,
+      dueDate: taskModal.data.dueDate,
+      fallbackWeekId: taskModal.weekId
     });
-    if (companyOptions.length > 0) {
-      groups.push({ label: '公司战略指标', options: companyOptions });
-    }
-    flatDepts.forEach(d => {
-      const deptOkrs = d.okrs?.[year] || {};
-      const deptOptions: { id: string, name: string }[] = [];
-      Object.entries(deptOkrs).forEach(([period, okrs]: [string, OKR[]]) => {
-        (okrs || []).forEach(o => {
-          (o.keyResults || []).forEach((kr, idx) => {
-            deptOptions.push({ id: `${o.id}-kr-${idx}`, name: `${kr} (${period})` });
-          });
-        });
-      });
-      if (deptOptions.length > 0) {
-        groups.push({ label: `${d.name} 指标`, options: deptOptions });
-      }
-    });
-    return groups;
-  }, [state.strategy, flatDepts]);
+  }, [
+    state.strategy.companyOKRs,
+    state.departments,
+    state.users,
+    state.systemRoles,
+    currentUser,
+    taskModal.data.ownerId,
+    taskModal.data.startDate,
+    taskModal.data.dueDate,
+    taskModal.weekId
+  ]);
 
   const currentDraftSnapshot = useMemo(() => createReviewDraftSnapshot({
     content: reviewContent,
