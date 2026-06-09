@@ -44,7 +44,9 @@ const App: React.FC = () => {
       const { isAuthenticated: currentIsAuthenticated } = useAuthStore.getState();
       const userId = session?.user?.id;
       const email = (session?.user?.email || '').toLowerCase();
+      const phone = (session?.user?.phone || '').trim();
       const accountFromEmail = email.includes('@') ? email.split('@')[0] : email;
+      const accountFromPhone = phone;
 
       if (userId) {
         // If already processed this user and we are authenticated, don't reload everything
@@ -62,11 +64,13 @@ const App: React.FC = () => {
         try {
           const bootstrapData = await getBootstrapData();
           if (bootstrapData) {
-            // Prefer auth_id mapping, fallback to username for legacy records.
+            // Prefer auth_id mapping, fallback to username for legacy email/phone records.
             const user = bootstrapData.users?.find((u) => {
               if (u.auth_id === userId) return true;
-              if (!accountFromEmail) return false;
-              return (u.username || '').toLowerCase() === accountFromEmail;
+              const normalizedUsername = (u.username || '').toLowerCase();
+              if (accountFromEmail && normalizedUsername === accountFromEmail) return true;
+              if (accountFromPhone && normalizedUsername === accountFromPhone) return true;
+              return false;
             });
             if (user) {
               // Backfill auth_id so subsequent logins can map directly.

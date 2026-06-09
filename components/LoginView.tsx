@@ -9,6 +9,7 @@ import { cn } from '../utils/cn';
 import { supabase } from '../supabase';
 import { getUserFacingError } from '../utils/userFacingError';
 
+const MOBILE_LOGIN_PATTERN = /^1\d{10}$/;
 
 
 const LoginView: React.FC = () => {
@@ -42,11 +43,11 @@ const LoginView: React.FC = () => {
     
     try {
       const account = username.trim().toLowerCase();
-      const email = account.includes('@') ? account : `${account}@app.local`;
-      const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
-        email,
-        password
-      });
+      const isPhoneLogin = MOBILE_LOGIN_PATTERN.test(account);
+      const credential = isPhoneLogin
+        ? { phone: account, password }
+        : { email: account.includes('@') ? account : `${account}@app.local`, password };
+      const { data: authData, error: authError } = await supabase.auth.signInWithPassword(credential);
 
       if (authError) {
         showToast(getUserFacingError(authError, '登录失败，请检查账号或密码后重试'), 'error');
