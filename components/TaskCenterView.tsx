@@ -1,4 +1,4 @@
-﻿import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useAppStore } from '../store/useAppStore';
 import { useAuthStore } from '../store/useAuthStore';
 import { useAppActions } from '../hooks/useAppActions';
@@ -657,6 +657,7 @@ const TaskCenterView: React.FC = () => {
         data={taskModal.data}
         setData={(newData) => setTaskModal({ ...taskModal, data: newData })}
         onSave={saveTask}
+        isSaving={state.isSaving}
         onDelete={deleteTask}
         users={users}
         departments={departments}

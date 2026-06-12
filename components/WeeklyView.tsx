@@ -556,6 +556,7 @@ const WeeklyView: React.FC = () => {
         data={taskModal.data}
         setData={(newData) => setTaskModal({ ...taskModal, data: newData })}
         onSave={saveTask}
+        isSaving={state.isSaving}
         onDelete={handleDeleteTask}
         users={state.users}
         departments={state.departments}

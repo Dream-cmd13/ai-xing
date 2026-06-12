@@ -12,6 +12,7 @@ interface TaskModalProps {
   data: Partial<PADEntry>;
   setData: (data: Partial<PADEntry>) => void;
   onSave: (status: string, keepOpen?: boolean) => void;
+  isSaving?: boolean;
   onDelete?: () => void;
   users: User[];
   departments?: Department[];
@@ -31,6 +32,7 @@ const TaskModal: React.FC<TaskModalProps> = ({
   data,
   setData,
   onSave,
+  isSaving = false,
   onDelete,
   users,
   departments = [],
@@ -213,6 +215,10 @@ const TaskModal: React.FC<TaskModalProps> = ({
   const isDepartmentReadOnly = readOnly || (!isAdmin && (mode === 'edit' || mode === 'create'));
 
   const handleSave = (status: string, keepOpen?: boolean) => {
+    if (isSaving) {
+      return;
+    }
+
     // Validation
     if (!data.title || data.title.trim() === '') {
       setError('任务标题不能为空');
@@ -701,22 +707,26 @@ const TaskModal: React.FC<TaskModalProps> = ({
             <>
               <button 
                 onClick={() => handleSave('draft')}
-                className="px-6 py-3 bg-white border border-slate-200 text-slate-600 rounded-xl font-black text-xs uppercase hover:bg-slate-50"
+                disabled={isSaving}
+                className="px-6 py-3 bg-white border border-slate-200 text-slate-600 rounded-xl font-black text-xs uppercase hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                存草稿
+                {isSaving ? '保存中...' : '存草稿'}
               </button>
               <div className="flex gap-3">
                 <button 
                   onClick={() => handleSave('submitted', true)}
-                  className="px-6 py-3 bg-slate-900 text-white rounded-xl font-black text-xs uppercase shadow-xl hover:bg-brand-600"
+                  disabled={isSaving}
+                  className="px-6 py-3 bg-slate-900 text-white rounded-xl font-black text-xs uppercase shadow-xl hover:bg-brand-600 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  提交并继续下一条
+                  {isSaving ? '提交中...' : '提交并继续下一条'}
                 </button>
                 <button 
                   onClick={() => handleSave('submitted', false)}
-                  className="px-8 py-3 bg-brand-600 text-white rounded-xl font-black text-xs uppercase shadow-xl hover:bg-brand-700"
+                  disabled={isSaving}
+                  className="px-8 py-3 bg-brand-600 text-white rounded-xl font-black text-xs uppercase shadow-xl hover:bg-brand-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
                 >
-                  提交
+                  {isSaving ? <Loader2 size={14} className="animate-spin" /> : null}
+                  {isSaving ? '提交中...' : '提交'}
                 </button>
               </div>
             </>

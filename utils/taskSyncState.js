@@ -1,5 +1,10 @@
 import { normalizeForConflictComparison } from '../syncConflictGuard.ts';
 
+const toComparableRowVersion = (value) => {
+  const numericValue = typeof value === 'number' ? value : Number(value);
+  return Number.isFinite(numericValue) ? numericValue : null;
+};
+
 export const getLastSavedTask = (lastSavedTasks, taskId) =>
   (lastSavedTasks || []).find((task) => task.id === taskId) || null;
 
@@ -17,6 +22,16 @@ export const hasTaskLocalChanges = (localTasks, lastSavedTasks, taskId) => {
 export const resolveLatestTaskBaseline = (previousTask, latestTask) => {
   if (!latestTask) return previousTask || null;
   if (!previousTask) return latestTask;
+
+  const previousRowVersion = toComparableRowVersion(previousTask?.rowVersion);
+  const latestRowVersion = toComparableRowVersion(latestTask?.rowVersion);
+
+  if (previousRowVersion !== null && latestRowVersion !== null) {
+    if (previousRowVersion !== latestRowVersion) {
+      throw new Error('任务已被其他人修改，请刷新后重试');
+    }
+    return latestTask;
+  }
 
   if (normalizeForConflictComparison(previousTask) !== normalizeForConflictComparison(latestTask)) {
     throw new Error('任务已被其他人修改，请刷新后重试');

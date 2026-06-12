@@ -1,4 +1,4 @@
-import { MutableRefObject, useCallback } from 'react';
+import { MutableRefObject, useCallback, useRef } from 'react';
 import { addTask as addDbTask, updateTask as updateDbTask, deleteTask as deleteDbTask, getTaskById } from '@/data';
 import { AppStoreState, useAppStore } from '@/store/useAppStore';
 import { PADEntry, User } from '@/types';
@@ -24,6 +24,25 @@ export const useTaskActions = ({
   syncStateRef,
   showSaveSuccessFeedback
 }: UseTaskActionsOptions) => {
+  const taskMutationQueueRef = useRef<Promise<void>>(Promise.resolve());
+
+  const enqueueTaskMutation = useCallback(async <T,>(operation: () => Promise<T>): Promise<T> => {
+    const previousMutation = taskMutationQueueRef.current;
+    let releaseCurrentMutation: () => void = () => {};
+
+    taskMutationQueueRef.current = new Promise<void>((resolve) => {
+      releaseCurrentMutation = resolve;
+    });
+
+    await previousMutation;
+
+    try {
+      return await operation();
+    } finally {
+      releaseCurrentMutation();
+    }
+  }, []);
+
   const rollbackTaskMutation = (
     previousTasks: PADEntry[],
     previousLastSavedTasks: PADEntry[],
@@ -43,99 +62,107 @@ export const useTaskActions = ({
     entriesToPersist: PADEntry[],
     mode: 'create' | 'update'
   ) => {
-    if (!isAuthenticated || !currentUser) return [];
+    return enqueueTaskMutation(async () => {
+      if (!isAuthenticated || !currentUser) return [];
 
-    const previousTasks = stateRef.current.tasks || [];
-    const previousLastSavedTasks = stateRef.current.lastSavedTasks || [];
-    const previousDirtyDomains = [...store.dirtyDomains];
-    const currentUserIsAdmin = isAdminUser(currentUser, store.systemRoles || []);
-    const normalizedEntries: PADEntry[] = [];
+      stateRef.current = useAppStore.getState() as any;
 
-    for (const entry of entriesToPersist) {
-      const previousTask = previousLastSavedTasks.find((task) => task.id === entry.id);
-      const latestTask = mode === 'update'
-        ? await getTaskById(entry.id)
-        : null;
-      const taskBaseline = mode === 'update'
-        ? resolveLatestTaskBaseline(previousTask, latestTask)
-        : previousTask;
+      const previousTasks = stateRef.current.tasks || [];
+      const previousLastSavedTasks = stateRef.current.lastSavedTasks || [];
+      const previousDirtyDomains = [...store.dirtyDomains];
+      const currentUserIsAdmin = isAdminUser(currentUser, store.systemRoles || []);
+      const normalizedEntries: PADEntry[] = [];
 
-      normalizedEntries.push(prepareTaskForPersistence(
-        entry,
-        taskBaseline,
-        currentUser,
-        store.users || [],
-        store.systemRoles || [],
-        mode,
-        currentUserIsAdmin
-      ));
-    }
+      for (const entry of entriesToPersist) {
+        const previousTask = previousLastSavedTasks.find((task) => task.id === entry.id);
+        const latestTask = mode === 'update'
+          ? await getTaskById(entry.id)
+          : null;
+        const taskBaseline = mode === 'update'
+          ? resolveLatestTaskBaseline(previousTask, latestTask)
+          : previousTask;
 
-    const optimisticTaskMap = new Map(normalizedEntries.map((entry) => [entry.id, entry]));
-    const nextOptimisticTasks = optimisticTasks.map((task) => optimisticTaskMap.get(task.id) ?? task);
-
-    store.setState({ tasks: nextOptimisticTasks });
-    store.setIsDirty(true);
-    store.setIsSaving(true);
-    syncStateRef();
-
-    try {
-      const savedEntries: PADEntry[] = [];
-      for (const entry of normalizedEntries) {
-        const savedEntry = mode === 'create'
-          ? await addDbTask(entry)
-          : await updateDbTask(entry.id, entry);
-        savedEntries.push(savedEntry);
+        normalizedEntries.push(prepareTaskForPersistence(
+          entry,
+          taskBaseline,
+          currentUser,
+          store.users || [],
+          store.systemRoles || [],
+          mode,
+          currentUserIsAdmin
+        ));
       }
 
-      const currentTasks = (useAppStore.getState() as any).tasks || [];
-      const mergedTasks = upsertTasksById(currentTasks, savedEntries);
-      const mergedLastSavedTasks = upsertTasksById(previousLastSavedTasks, savedEntries);
+      const optimisticTaskMap = new Map(normalizedEntries.map((entry) => [entry.id, entry]));
+      const nextOptimisticTasks = optimisticTasks.map((task) => optimisticTaskMap.get(task.id) ?? task);
 
-      store.setState({ tasks: mergedTasks });
-      store.setLastSavedTasks(mergedLastSavedTasks);
-      showSaveSuccessFeedback(['tasks']);
+      store.setState({ tasks: nextOptimisticTasks });
+      store.setIsDirty(true);
+      store.setIsSaving(true);
       syncStateRef();
-      return savedEntries;
-    } catch (error: any) {
-      rollbackTaskMutation(previousTasks, previousLastSavedTasks, previousDirtyDomains, error);
-      throw error;
-    }
-  }, [currentUser, isAuthenticated, showSaveSuccessFeedback, stateRef, store, syncStateRef]);
+
+      try {
+        const savedEntries: PADEntry[] = [];
+        for (const entry of normalizedEntries) {
+          const savedEntry = mode === 'create'
+            ? await addDbTask(entry)
+            : await updateDbTask(entry.id, entry);
+          savedEntries.push(savedEntry);
+        }
+
+        const currentTasks = (useAppStore.getState() as any).tasks || [];
+        const mergedTasks = upsertTasksById(currentTasks, savedEntries);
+        const mergedLastSavedTasks = upsertTasksById(previousLastSavedTasks, savedEntries);
+
+        store.setState({ tasks: mergedTasks });
+        store.setLastSavedTasks(mergedLastSavedTasks);
+        showSaveSuccessFeedback(['tasks']);
+        syncStateRef();
+        return savedEntries;
+      } catch (error: any) {
+        rollbackTaskMutation(previousTasks, previousLastSavedTasks, previousDirtyDomains, error);
+        throw error;
+      }
+    });
+  }, [currentUser, enqueueTaskMutation, isAuthenticated, showSaveSuccessFeedback, stateRef, store, syncStateRef]);
 
   const persistTaskDeletion = useCallback(async (
     optimisticTasks: PADEntry[],
     taskIds: string[]
   ) => {
-    if (!isAuthenticated) return;
+    return enqueueTaskMutation(async () => {
+      if (!isAuthenticated) return;
 
-    const previousTasks = stateRef.current.tasks || [];
-    const previousLastSavedTasks = stateRef.current.lastSavedTasks || [];
-    const previousDirtyDomains = [...store.dirtyDomains];
+      stateRef.current = useAppStore.getState() as any;
 
-    store.setState({ tasks: optimisticTasks });
-    store.setIsDirty(true);
-    store.setIsSaving(true);
-    syncStateRef();
+      const previousTasks = stateRef.current.tasks || [];
+      const previousLastSavedTasks = stateRef.current.lastSavedTasks || [];
+      const previousDirtyDomains = [...store.dirtyDomains];
 
-    try {
-      for (const taskId of taskIds) {
-        const previousTask = previousLastSavedTasks.find((task) => task.id === taskId);
-        if (!previousTask) {
-          continue;
-        }
-        await deleteDbTask(taskId, previousTask.rowVersion);
-      }
-
-      const mergedLastSavedTasks = removeTasksById(previousLastSavedTasks, taskIds);
-      store.setLastSavedTasks(mergedLastSavedTasks);
-      showSaveSuccessFeedback(['tasks']);
+      store.setState({ tasks: optimisticTasks });
+      store.setIsDirty(true);
+      store.setIsSaving(true);
       syncStateRef();
-    } catch (error: any) {
-      rollbackTaskMutation(previousTasks, previousLastSavedTasks, previousDirtyDomains, error);
-      throw error;
-    }
-  }, [isAuthenticated, showSaveSuccessFeedback, stateRef, store, syncStateRef]);
+
+      try {
+        for (const taskId of taskIds) {
+          const previousTask = previousLastSavedTasks.find((task) => task.id === taskId);
+          if (!previousTask) {
+            continue;
+          }
+          await deleteDbTask(taskId, previousTask.rowVersion);
+        }
+
+        const mergedLastSavedTasks = removeTasksById(previousLastSavedTasks, taskIds);
+        store.setLastSavedTasks(mergedLastSavedTasks);
+        showSaveSuccessFeedback(['tasks']);
+        syncStateRef();
+      } catch (error: any) {
+        rollbackTaskMutation(previousTasks, previousLastSavedTasks, previousDirtyDomains, error);
+        throw error;
+      }
+    });
+  }, [enqueueTaskMutation, isAuthenticated, showSaveSuccessFeedback, stateRef, store, syncStateRef]);
 
   return {
     persistTaskEntries,
