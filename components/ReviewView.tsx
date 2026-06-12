@@ -79,6 +79,7 @@ const ReviewView: React.FC = () => {
   const [reviewContent, setReviewContent] = useState('');
   const [reviewScore, setReviewScore] = useState(0);
   const [okrReviews, setOkrReviews] = useState<Record<string, ObjectiveReview>>({});
+  const [deptTasks, setDeptTasks] = useState<PADEntry[]>([]);
   const [currentQuarterlyOkrIndex, setCurrentQuarterlyOkrIndex] = useState(0);
   const [reviewSubTab, setReviewSubTab] = useState<'tasks' | 'weekly-records' | 'okrs'>(
     initialTab === 'quarterly' || initialTab === 'monthly' ? 'okrs' : 'tasks'
@@ -237,24 +238,73 @@ const ReviewView: React.FC = () => {
     [loadedDraftSnapshot, currentDraftSnapshot]
   );
 
+  const getDeptTasksForSelection = React.useCallback(() => {
+    if (!selectedDeptId) {
+      return [];
+    }
+
+    const nextTasks: PADEntry[] = [];
+    const seen = new Set<string>();
+
+    (state.tasks || []).forEach(task => {
+      const inPeriod = activeTab === 'weekly'
+        ? isTaskInWeeklyPeriod(task.targetWeeks, selectedWeek)
+        : activeTab === 'monthly'
+          ? isTaskInMonthlyPeriod(task.targetWeeks, selectedMonth)
+          : false;
+
+      if (!inPeriod) return;
+      if (!canViewTask(task, currentUser, state.users, state.systemRoles || [], state.departments)) return;
+
+      const taskDeptId = task.departmentId || state.users.find(u => u.id === task.ownerId)?.departmentId;
+      if (taskDeptId === selectedDeptId && !seen.has(task.id)) {
+        seen.add(task.id);
+        nextTasks.push(task);
+      }
+    });
+
+    return nextTasks;
+  }, [
+    activeTab,
+    currentUser,
+    selectedDeptId,
+    selectedMonth,
+    selectedWeek,
+    state.departments,
+    state.systemRoles,
+    state.tasks,
+    state.users
+  ]);
+
+  const hasTaskDeliverableChanges = useMemo(
+    () => deptTasks.some((task) => {
+      const latestTask = state.tasks.find((entry) => entry.id === task.id);
+      return (latestTask?.deliverable || '') !== (task.deliverable || '');
+    }),
+    [deptTasks, state.tasks]
+  );
+
+  const hasUnsavedChanges = hasDraftChanges || hasTaskDeliverableChanges;
+
   const discardReviewDraft = useMemo(
     () => () => {
       clearToast();
       setReviewContent(loadedDraftSnapshot.content);
       setReviewScore(loadedDraftSnapshot.score);
       setOkrReviews(loadedDraftSnapshot.okrReviews);
+      setDeptTasks(getDeptTasksForSelection());
       setIsDirty(false);
     },
-    [clearToast, loadedDraftSnapshot, setIsDirty]
+    [clearToast, getDeptTasksForSelection, loadedDraftSnapshot, setIsDirty]
   );
 
-  const { attemptLeave, LeaveModal } = useLeaveGuard(hasDraftChanges, {
+  const { attemptLeave, LeaveModal } = useLeaveGuard(hasUnsavedChanges, {
     onDiscard: discardReviewDraft
   });
 
   useEffect(() => {
-    setIsDirty(hasDraftChanges);
-  }, [hasDraftChanges, setIsDirty]);
+    setIsDirty(hasUnsavedChanges);
+  }, [hasUnsavedChanges, setIsDirty]);
 
   useEffect(() => {
     return () => {
@@ -361,7 +411,8 @@ const ReviewView: React.FC = () => {
       .filter((task) => {
         const currentTask = state.tasks.find((entry) => entry.id === task.id);
         if (!currentTask) return false;
-        return (currentTask.taskReview || '') !== (task.taskReview || '')
+        return (currentTask.deliverable || '') !== (task.deliverable || '')
+          || (currentTask.taskReview || '') !== (task.taskReview || '')
           || (currentTask.taskReviewScore ?? 0) !== (task.taskReviewScore ?? 0);
       })
       .map((task) => task.id);
@@ -394,11 +445,13 @@ const ReviewView: React.FC = () => {
 
             const nextTask = {
               ...latestTask,
+              deliverable: syncedTask.deliverable || '',
               taskReview: syncedTask.taskReview || '',
               taskReviewScore: syncedTask.taskReviewScore ?? 0
             };
 
-            const hasChanged = (latestTask.taskReview || '') !== (nextTask.taskReview || '')
+            const hasChanged = (latestTask.deliverable || '') !== (nextTask.deliverable || '')
+              || (latestTask.taskReview || '') !== (nextTask.taskReview || '')
               || (latestTask.taskReviewScore ?? 0) !== (nextTask.taskReviewScore ?? 0);
 
             return hasChanged ? [latestTask.id, nextTask] as [string, PADEntry] : null;
@@ -423,6 +476,7 @@ const ReviewView: React.FC = () => {
 
     const success = await handleSave(['departments']);
     if (success) {
+      setDeptTasks(syncedDeptTasks);
       setLoadedDraftSnapshot(currentDraftSnapshot);
       setIsDirty(false);
       showToast('复盘报告已提交并保存成功', 'success');
@@ -450,8 +504,6 @@ const ReviewView: React.FC = () => {
   }, [selectedDeptId, selectedWeek, selectedMonth, selectedQuarter, activeTab, state.tasks, state.users, state.systemRoles, currentUser]);
 
   const currentPeriodLabel = currentPeriodKey;
-
-  const [deptTasks, setDeptTasks] = useState<PADEntry[]>([]);
 
   const getWeeksForMonth = (monthKey: string) => {
     const [yearPart, monthPart] = monthKey.split('-M');
@@ -503,33 +555,9 @@ const ReviewView: React.FC = () => {
     updateReviewContent(cleaned ? `${cleaned}\n\n${nextContent}` : nextContent);
   };
 
-  const loadDeptTasks = () => {
-    if (!selectedDeptId) {
-      setDeptTasks([]);
-      return;
-    }
-    const tasks: PADEntry[] = [];
-    const seen = new Set<string>();
-    
-    (state.tasks || []).forEach(task => {
-      const inPeriod = activeTab === 'weekly'
-        ? isTaskInWeeklyPeriod(task.targetWeeks, selectedWeek)
-        : activeTab === 'monthly'
-          ? isTaskInMonthlyPeriod(task.targetWeeks, selectedMonth)
-          : false;
-      
-      if (!inPeriod) return;
-      if (!canViewTask(task, currentUser, state.users, state.systemRoles || [], state.departments)) return;
-      
-      const taskDeptId = task.departmentId || state.users.find(u => u.id === task.ownerId)?.departmentId;
-      if (taskDeptId === selectedDeptId && !seen.has(task.id)) {
-        seen.add(task.id);
-        tasks.push(task);
-      }
-    });
-    
-    setDeptTasks(tasks);
-  };
+  const loadDeptTasks = React.useCallback(() => {
+    setDeptTasks(getDeptTasksForSelection());
+  }, [getDeptTasksForSelection]);
   const currentOkrs = useMemo(() => {
     if (!selectedDeptId) return [];
     const dept = flatDepts.find(d => d.id === selectedDeptId);
@@ -632,9 +660,19 @@ const ReviewView: React.FC = () => {
               <div className="mb-2 flex flex-col gap-1 md:flex-row md:items-center md:justify-between">
                 <label className="text-[11px] font-black uppercase tracking-widest text-slate-400">预期成果</label>
               </div>
-              <div className="w-full min-h-[100px] max-h-72 overflow-y-auto bg-slate-50 border border-slate-100 rounded-2xl px-4 py-3 text-sm font-medium text-slate-600 leading-6 custom-scrollbar whitespace-pre-wrap">
-                {task.deliverable || '暂无预期成果'}
-              </div>
+              <textarea
+                placeholder="输入该任务的预期成果..."
+                className="w-full min-h-[100px] max-h-72 resize-y bg-slate-50 border border-slate-100 rounded-2xl px-4 py-3 text-sm font-medium text-slate-700 outline-none focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500 transition-all leading-6"
+                value={task.deliverable || ''}
+                disabled={!canEditReview}
+                onChange={e => {
+                  setDeptTasks((prevTasks) => prevTasks.map((entry) => (
+                    entry.id === task.id
+                      ? { ...entry, deliverable: e.target.value }
+                      : entry
+                  )));
+                }}
+              />
             </div>
 
             <div className="flex-1">
@@ -752,8 +790,8 @@ const ReviewView: React.FC = () => {
           </div>
             <button 
               onClick={submitReview} 
-              disabled={isSaving || !hasDraftChanges || !canEditReview} 
-              className={`px-6 py-2.5 rounded-xl text-xs font-black uppercase flex items-center gap-2 transition-all shadow-md ${hasDraftChanges ? 'bg-brand-600 text-white hover:bg-brand-700 shadow-brand-100' : 'bg-slate-100 text-slate-400 cursor-default'}`}
+              disabled={isSaving || !hasUnsavedChanges || !canEditReview} 
+              className={`px-6 py-2.5 rounded-xl text-xs font-black uppercase flex items-center gap-2 transition-all shadow-md ${hasUnsavedChanges ? 'bg-brand-600 text-white hover:bg-brand-700 shadow-brand-100' : 'bg-slate-100 text-slate-400 cursor-default'}`}
             >
               {isSaving ? <Loader2 className="animate-spin" size={16}/> : <Save size={16} />} 
               {isDirty ? '提交复盘' : '已是最新'}
@@ -1216,6 +1254,7 @@ const ReviewView: React.FC = () => {
         data={taskModal.data}
         setData={(newData) => setTaskModal({ ...taskModal, data: newData })}
         onSave={saveTask}
+        isSaving={isSaving}
         onDelete={handleDeleteTask}
         users={state.users}
         departments={state.departments}
