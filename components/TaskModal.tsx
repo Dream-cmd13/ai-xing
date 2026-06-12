@@ -698,9 +698,11 @@ const TaskModal: React.FC<TaskModalProps> = ({
               {!onDelete && <div />}
               <button 
                 onClick={() => handleSave(data.status as string, false)}
-                className="px-8 py-3 bg-brand-600 text-white rounded-xl font-black text-xs uppercase shadow-xl hover:bg-brand-700"
+                disabled={isSaving}
+                className="px-8 py-3 bg-brand-600 text-white rounded-xl font-black text-xs uppercase shadow-xl hover:bg-brand-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
               >
-                保存更改
+                {isSaving ? <Loader2 size={14} className="animate-spin" /> : null}
+                {isSaving ? '保存中...' : '保存更改'}
               </button>
             </>
           ) : (

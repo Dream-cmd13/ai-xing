@@ -29,6 +29,7 @@ export const useAppActions = () => {
   const stateRef = useRef(store);
   const saveSuccessTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const savingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const saveOperationInFlightRef = useRef(false);
 
   useEffect(() => {
     stateRef.current = store;
@@ -48,6 +49,9 @@ export const useAppActions = () => {
 
   const executeAtomicOperation = useCallback(async (operation: () => Promise<void>) => {
     if (!isAuthenticated) return;
+    if (saveOperationInFlightRef.current) return;
+
+    saveOperationInFlightRef.current = true;
     store.setIsSaving(true);
     try {
       await operation();
@@ -58,6 +62,8 @@ export const useAppActions = () => {
     } catch (error: any) {
       store.setIsSaving(false);
       store.setBackendError(getUserFacingError(error, '操作失败，请稍后重试'));
+    } finally {
+      saveOperationInFlightRef.current = false;
     }
   }, [isAuthenticated, store]);
 
@@ -144,6 +150,9 @@ export const useAppActions = () => {
 
   const handleSave = useCallback(async (domains: SaveDomain[] = ALL_SAVE_DOMAINS) => {
     if (!isAuthenticated) return false;
+    if (saveOperationInFlightRef.current) return false;
+
+    saveOperationInFlightRef.current = true;
     stateRef.current = useAppStore.getState() as any;
     
     store.setIsSaving(true);
@@ -164,6 +173,8 @@ export const useAppActions = () => {
       store.setIsSaving(false);
       store.setBackendError(getUserFacingError(error, '保存失败，请稍后重试'));
       return false;
+    } finally {
+      saveOperationInFlightRef.current = false;
     }
   }, [isAuthenticated, store]);
 
@@ -193,6 +204,10 @@ export const useAppActions = () => {
 
   const submitAISettings = async (newAISettings: any) => {
     if (!isAuthenticated) return;
+    if (saveOperationInFlightRef.current) return;
+
+    saveOperationInFlightRef.current = true;
+    stateRef.current = useAppStore.getState() as any;
     store.setIsSaving(true);
     try {
       const nextSettings = {
@@ -210,6 +225,7 @@ export const useAppActions = () => {
       store.setBackendError(getUserFacingError(error, '保存系统设置失败，请稍后重试'));
     } finally {
       store.setIsSaving(false);
+      saveOperationInFlightRef.current = false;
     }
   };
 
