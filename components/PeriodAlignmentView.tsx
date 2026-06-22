@@ -19,7 +19,8 @@ interface PeriodAlignmentViewProps {
   canCreateTask: boolean;
   canEditTask: boolean;
   onAddTask: (deptId: string, krId?: string, weekId?: string) => void;
-  onTaskClick: (task: PADEntry) => void;
+  onTaskClick: (weekId: string, task: PADEntry) => void;
+  onOwnerTaskGroupClick: (group: { ownerId: string; ownerName: string; tasks: PADEntry[]; weekId: string; krId: string }) => void;
 }
 
 const PeriodAlignmentView: React.FC<PeriodAlignmentViewProps> = ({
@@ -29,7 +30,8 @@ const PeriodAlignmentView: React.FC<PeriodAlignmentViewProps> = ({
   canCreateTask,
   canEditTask,
   onAddTask,
-  onTaskClick
+  onTaskClick,
+  onOwnerTaskGroupClick
 }) => {
   const state = useAppStore();
   const { processes, departments, users, strategy, tasks, aiSettings, businesses, systemRoles } = state;
@@ -250,13 +252,27 @@ const PeriodAlignmentView: React.FC<PeriodAlignmentViewProps> = ({
                         const taskOwnerSections = createTaskOwnerSections(tasks, state.users, selectedDepartmentManagerUserIds);
                         return (
                           <div key={w.id} className="flex-1 min-w-0 p-3 border-r min-w-[200px] flex flex-col gap-2 relative">
-                            {taskOwnerSections.map(({ task: t, ownerName, isFirstTaskForOwner }) => (
+                            {taskOwnerSections.map(({ task: t, ownerId, ownerName, isFirstTaskForOwner }) => {
+                              const ownerTasks = taskOwnerSections
+                                .filter((section) => section.ownerId === ownerId)
+                                .map((section) => section.task);
+                              return (
                               <React.Fragment key={t.id}>
                                 {isFirstTaskForOwner && (
                                   <div className="flex items-center min-w-0 px-1 pt-1">
-                                    <span className="max-w-full truncate rounded-md border border-slate-100 bg-slate-50 px-1.5 py-0.5 text-[10px] font-black text-slate-500">
+                                    <button
+                                      type="button"
+                                      onClick={() => onOwnerTaskGroupClick({
+                                        ownerId,
+                                        ownerName,
+                                        tasks: ownerTasks,
+                                        weekId: w.id,
+                                        krId
+                                      })}
+                                      className="max-w-full truncate rounded-md border border-slate-100 bg-slate-50 px-1.5 py-0.5 text-[10px] font-black text-slate-500 transition-colors hover:border-brand-200 hover:bg-brand-50 hover:text-brand-600"
+                                    >
                                       {ownerName}
-                                    </span>
+                                    </button>
                                   </div>
                                 )}
                                 <div 
@@ -269,7 +285,8 @@ const PeriodAlignmentView: React.FC<PeriodAlignmentViewProps> = ({
                                   </div>
                                 </div>
                               </React.Fragment>
-                            ))}
+                            );
+                            })}
                             {canCreateTask && (
                               <button 
                                 onClick={() => onAddTask(w.id, krId)}

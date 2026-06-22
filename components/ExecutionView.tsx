@@ -8,6 +8,7 @@ import { AppState, Department, User, WeeklyPAD, PADEntry, TaskLog, MenuPermissio
 import PageToast from './PageToast';
 import PeriodAlignmentView from './PeriodAlignmentView';
 import TaskModal from './TaskModal';
+import OwnerTaskModal from './OwnerTaskModal';
 import { Building2, ChevronDown, ChevronRight, LayoutGrid, Plus, X, Calendar, User as UserIcon, Clock } from 'lucide-react';
 import { usePageToast } from '../hooks/usePageToast';
 import { getUserFacingError } from '../utils/userFacingError';
@@ -86,6 +87,14 @@ const ExecutionView: React.FC = () => {
   const [selectedYear, setSelectedYear] = useState<number>(currentInfo.year);
   const [selectedPeriod, setSelectedPeriod] = useState<string>(currentInfo.q);
   const [taskModal, setTaskModal] = useState<{ isOpen: boolean, weekId: string | null, mode: 'create' | 'edit', data: Partial<PADEntry> }>({ isOpen: false, weekId: null, mode: 'create', data: {} });
+  const [ownerTaskModal, setOwnerTaskModal] = useState<{
+    isOpen: boolean;
+    ownerId: string;
+    ownerName: string;
+    weekId: string | null;
+    krId: string | null;
+    tasks: PADEntry[];
+  }>({ isOpen: false, ownerId: '', ownerName: '', weekId: null, krId: null, tasks: [] });
   const initializedDefaultDeptUserKeyRef = useRef<string | null>(null);
   const { toastState, showToast, clearToast } = usePageToast();
 
@@ -262,6 +271,24 @@ const ExecutionView: React.FC = () => {
       data: task
     });
   };
+
+  const handleOwnerTaskGroupClick = (group: { ownerId: string; ownerName: string; tasks: PADEntry[]; weekId: string; krId: string }) => {
+    setOwnerTaskModal({
+      isOpen: true,
+      ownerId: group.ownerId,
+      ownerName: group.ownerName,
+      weekId: group.weekId,
+      krId: group.krId,
+      tasks: group.tasks
+    });
+  };
+
+  const currentOwnerModalTasks = useMemo(() => {
+    if (!ownerTaskModal.isOpen) return [];
+    return ownerTaskModal.tasks
+      .map((task) => state.tasks.find((entry) => entry.id === task.id) || task)
+      .filter((task) => state.tasks.some((entry) => entry.id === task.id));
+  }, [ownerTaskModal.isOpen, ownerTaskModal.tasks, state.tasks]);
 
   const saveTask = async (status: string = 'draft', keepOpen: boolean = false) => {
     if (!taskModal.weekId) return;
@@ -469,7 +496,8 @@ const ExecutionView: React.FC = () => {
               canCreateTask={canCreateExecutionTask}
               canEditTask={canEditExecutionTask}
               onAddTask={handleAddTask}
-              onTaskClick={handleTaskClick}
+              onTaskClick={(weekId, task) => handleTaskClick(weekId, task)}
+              onOwnerTaskGroupClick={handleOwnerTaskGroupClick}
             />
           ) : (
             <div className="h-full flex flex-col items-center justify-center text-slate-400 gap-4">
@@ -485,6 +513,17 @@ const ExecutionView: React.FC = () => {
         message={toastState?.message || ''}
         type={toastState?.type}
         onClose={clearToast}
+      />
+
+      <OwnerTaskModal
+        isOpen={ownerTaskModal.isOpen}
+        ownerName={ownerTaskModal.ownerName}
+        tasks={currentOwnerModalTasks}
+        onClose={() => setOwnerTaskModal({ isOpen: false, ownerId: '', ownerName: '', weekId: null, krId: null, tasks: [] })}
+        onTaskClick={(task) => {
+          if (!ownerTaskModal.weekId) return;
+          handleTaskClick(ownerTaskModal.weekId, task);
+        }}
       />
 
       {/* Task Modal */}

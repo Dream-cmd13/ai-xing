@@ -1,5 +1,6 @@
 const UNKNOWN_OWNER_NAME = 'Unassigned';
 const DEPARTMENT_MANAGER_ROLE_NAME = '\u90e8\u95e8\u957f';
+const PINYIN_COLLATOR = new Intl.Collator('zh-Hans-u-co-pinyin');
 
 const normalizeManagerUserIds = (managerUserIds) => {
   if (!managerUserIds) return new Set();
@@ -42,6 +43,7 @@ export const createTaskOwnerSections = (tasks, users, managerUserIds) => {
       const group = {
         ownerId,
         originalIndex: groups.length,
+        ownerName: usersById.get(ownerId)?.name || UNKNOWN_OWNER_NAME,
         tasks: [],
       };
       groupsByOwner.set(ownerId, group);
@@ -55,7 +57,14 @@ export const createTaskOwnerSections = (tasks, users, managerUserIds) => {
     const aIsManager = managerIdSet.has(a.ownerId);
     const bIsManager = managerIdSet.has(b.ownerId);
     if (aIsManager !== bIsManager) return aIsManager ? -1 : 1;
-    return a.originalIndex - b.originalIndex;
+
+    const pinyinCompare = PINYIN_COLLATOR.compare(a.ownerName, b.ownerName);
+    if (pinyinCompare !== 0) return pinyinCompare;
+
+    const nameCompare = a.ownerName.localeCompare(b.ownerName, 'zh-Hans-CN');
+    if (nameCompare !== 0) return nameCompare;
+
+    return a.ownerId.localeCompare(b.ownerId, 'en');
   });
 
   return sortedGroups.flatMap((group) => {
