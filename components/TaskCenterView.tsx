@@ -378,15 +378,16 @@ const TaskCenterView: React.FC = () => {
       } else if (filterType === 'org') {
         // Org tasks filtering
         const isSelf = owner?.id === currentUser.id;
+        const taskDeptId = entry.departmentId || owner?.departmentId;
         
         if (selectedOrgDeptId) {
-          if (!owner?.departmentId) return false;
-          if (!isDeptInHierarchy(owner.departmentId, selectedOrgDeptId)) {
+          if (!taskDeptId) return false;
+          if (!isDeptInHierarchy(taskDeptId, selectedOrgDeptId)) {
             return false;
           }
         } else {
           // If no specific department selected, only show tasks from visible departments or self
-          const isVisibleDept = owner?.departmentId ? flatDepts.some(d => d.id === owner.departmentId) : false;
+          const isVisibleDept = taskDeptId ? flatDepts.some(d => d.id === taskDeptId) : false;
           if (!isSelf && !isVisibleDept) return false;
         }
       }
