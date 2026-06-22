@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useAppStore } from '../store/useAppStore';
 import { useAuthStore } from '../store/useAuthStore';
 import { useAppActions } from '../hooks/useAppActions';
@@ -32,6 +32,35 @@ const getCurrentWeekInfo = () => {
   return { year: d.getUTCFullYear(), week, q };
 };
 
+const getDepartmentPath = (departments: Department[], targetDepartmentId?: string): string[] => {
+  if (!targetDepartmentId) return [];
+
+  const walk = (items: Department[], path: string[]): string[] | null => {
+    for (const department of items) {
+      const nextPath = [...path, department.id];
+      if (department.id === targetDepartmentId) {
+        return nextPath;
+      }
+
+      const nestedPath = walk(department.subDepartments || [], nextPath);
+      if (nestedPath) return nestedPath;
+    }
+
+    return null;
+  };
+
+  return walk(departments, []) || [];
+};
+
+const getDefaultSelectedDepartmentId = (
+  departments: Department[],
+  userDepartmentId?: string
+): string | null => {
+  const path = getDepartmentPath(departments, userDepartmentId);
+  if (path.length >= 2) return path[path.length - 2];
+  return userDepartmentId || null;
+};
+
 const ExecutionView: React.FC = () => {
   const state = useAppStore();
   const { processes, departments, users, strategy, tasks, aiSettings, businesses, systemRoles } = state;
@@ -53,10 +82,11 @@ const ExecutionView: React.FC = () => {
   const setCurrentProcessId = state.setCurrentProcessId;
 
   const currentInfo = useMemo(() => getCurrentWeekInfo(), []);
-  const [selectedDeptId, setSelectedDeptId] = useState<string | null>(currentUser.departmentId || null);
+  const [selectedDeptId, setSelectedDeptId] = useState<string | null>(null);
   const [selectedYear, setSelectedYear] = useState<number>(currentInfo.year);
   const [selectedPeriod, setSelectedPeriod] = useState<string>(currentInfo.q);
   const [taskModal, setTaskModal] = useState<{ isOpen: boolean, weekId: string | null, mode: 'create' | 'edit', data: Partial<PADEntry> }>({ isOpen: false, weekId: null, mode: 'create', data: {} });
+  const initializedDefaultDeptUserKeyRef = useRef<string | null>(null);
   const { toastState, showToast, clearToast } = usePageToast();
 
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
@@ -96,6 +126,29 @@ const ExecutionView: React.FC = () => {
     collect(visibleDepartments);
     return list;
   }, [visibleDepartments]);
+
+  useEffect(() => {
+    const currentUserDeptKey = `${currentUser.id}:${currentUser.departmentId || ''}`;
+    if (initializedDefaultDeptUserKeyRef.current === currentUserDeptKey) return;
+    if (visibleDepartments.length === 0) return;
+
+    const defaultDeptId = getDefaultSelectedDepartmentId(visibleDepartments, currentUser.departmentId);
+    const nextDeptId = defaultDeptId && flatDepts.some(d => d.id === defaultDeptId)
+      ? defaultDeptId
+      : null;
+
+    setSelectedDeptId(nextDeptId);
+    initializedDefaultDeptUserKeyRef.current = currentUserDeptKey;
+  }, [currentUser.id, currentUser.departmentId, flatDepts, visibleDepartments]);
+
+  useEffect(() => {
+    if (!selectedDeptId || flatDepts.length === 0) return;
+    if (flatDepts.some(d => d.id === selectedDeptId)) return;
+
+    const defaultDeptId = getDefaultSelectedDepartmentId(visibleDepartments, currentUser.departmentId);
+    const nextDeptId = defaultDeptId && flatDepts.some(d => d.id === defaultDeptId) ? defaultDeptId : null;
+    setSelectedDeptId(nextDeptId);
+  }, [currentUser.departmentId, flatDepts, selectedDeptId, visibleDepartments]);
   const currentUserIsAdmin = useMemo(
     () => isAdminUser(currentUser, state.systemRoles || []),
     [currentUser, state.systemRoles]
@@ -331,7 +384,7 @@ const ExecutionView: React.FC = () => {
   };
 
   return (
-    <div className="h-full flex flex-col md:flex-row gap-4 md:gap-6 overflow-hidden relative">
+    <div className={`h-full flex flex-col md:flex-row gap-4 ${isSidebarOpen ? 'md:gap-6' : 'md:gap-0'} overflow-hidden relative`}>
       {/* Mobile Sidebar Toggle */}
       <div className="md:hidden flex justify-between items-center bg-white p-4 rounded-2xl border shadow-sm shrink-0">
         <div className="flex items-center gap-2 font-black text-slate-800">
@@ -349,9 +402,11 @@ const ExecutionView: React.FC = () => {
       {/* Left Sidebar: Org Tree */}
       <div className={`
         absolute md:relative z-10 md:z-0
-        w-full md:w-64 bg-white border rounded-2xl md:rounded-[2.5rem] p-4 md:p-6 flex flex-col shadow-xl md:shadow-sm shrink-0
-        transition-all duration-300 origin-top
-        ${isSidebarOpen ? 'scale-y-100 opacity-100' : 'scale-y-0 opacity-0 md:scale-y-100 md:opacity-100'}
+        flex flex-col shrink-0 transition-all duration-300 origin-top
+        ${isSidebarOpen
+          ? 'w-full md:w-64 bg-white border rounded-2xl md:rounded-[2.5rem] p-4 md:p-6 shadow-xl md:shadow-sm scale-y-100 opacity-100'
+          : 'w-full md:w-0 bg-white border md:border-0 rounded-2xl md:rounded-[2.5rem] p-4 md:p-0 shadow-xl md:shadow-none scale-y-0 opacity-0 md:scale-y-100 md:opacity-100 md:overflow-hidden md:pointer-events-none'
+        }
         top-[72px] md:top-0 left-0
       `}>
         <div className="mb-4 md:mb-6">
@@ -365,7 +420,7 @@ const ExecutionView: React.FC = () => {
       </div>
 
       {/* Right Content: Period Alignment View */}
-      <div className="flex-1 flex flex-col overflow-hidden bg-white border rounded-2xl md:rounded-[2.5rem] shadow-sm relative">
+      <div className="flex-1 min-w-0 flex flex-col overflow-hidden bg-white border rounded-2xl md:rounded-[2.5rem] shadow-sm relative">
         <div className="p-4 md:p-6 border-b flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
              <div className="flex items-center gap-3 md:gap-4">
                 <div className="p-2 md:p-3 bg-brand-50 text-brand-600 rounded-xl md:rounded-2xl"><LayoutGrid size={20} className="md:w-6 md:h-6"/></div>
@@ -375,6 +430,16 @@ const ExecutionView: React.FC = () => {
                 </div>
              </div>
              <div className="flex flex-wrap items-center gap-2 md:gap-4 w-full md:w-auto">
+                <button
+                  type="button"
+                  onClick={() => setIsSidebarOpen(prev => !prev)}
+                  className="hidden md:inline-flex items-center gap-2 bg-slate-50 border rounded-xl px-3 py-2 text-xs font-bold text-slate-600 hover:bg-brand-50 hover:border-brand-100 hover:text-brand-600 transition-colors"
+                  aria-expanded={isSidebarOpen}
+                >
+                  <Building2 size={14}/>
+                  <span className="max-w-32 truncate">{selectedDepartment?.name || '选择部门'}</span>
+                  <ChevronDown size={14} className={`transition-transform ${isSidebarOpen ? 'rotate-180' : ''}`}/>
+                </button>
                 <select 
                   className="flex-1 md:flex-none bg-slate-50 border rounded-xl px-2 md:px-3 py-2 text-[10px] md:text-xs font-bold outline-none text-slate-600"
                   value={selectedYear}

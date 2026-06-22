@@ -193,11 +193,11 @@ const PeriodAlignmentView: React.FC<PeriodAlignmentViewProps> = ({
       </div>
 
       {/* Grid */}
-      <div className="flex-1 overflow-auto custom-scrollbar">
+      <div className="flex-1 overflow-x-auto overflow-y-auto custom-scrollbar okr-alignment-scrollbar">
         <div className="min-w-[1000px]">
           {/* Grid Header */}
           <div className="flex border-b sticky top-0 bg-white z-10">
-            <div className="w-80 shrink-0 p-4 font-black text-xs text-slate-400 uppercase tracking-widest bg-slate-50 border-r">
+            <div className="sticky left-0 z-20 w-72 md:w-80 shrink-0 p-4 font-black text-xs text-slate-400 uppercase tracking-widest bg-slate-50 border-r shadow-[8px_0_16px_-16px_rgba(15,23,42,0.55)]">
               目标与关键结果(OKR)
             </div>
             {visibleWeeks.map(w => (
@@ -213,7 +213,7 @@ const PeriodAlignmentView: React.FC<PeriodAlignmentViewProps> = ({
               <React.Fragment key={okr.id}>
                 {/* Objective Row */}
                 <div className="flex bg-slate-50/30">
-                  <div className="w-80 shrink-0 p-4 border-r">
+                  <div className="sticky left-0 z-[5] w-72 md:w-80 shrink-0 p-4 border-r bg-slate-50 shadow-[8px_0_16px_-16px_rgba(15,23,42,0.45)]">
                     <div className="flex items-center gap-2 mb-1">
                       <span className="bg-brand-600 text-white text-[9px] font-black px-1.5 py-0.5 rounded uppercase">OBJ {oIdx + 1}</span>
                     </div>
@@ -229,7 +229,7 @@ const PeriodAlignmentView: React.FC<PeriodAlignmentViewProps> = ({
                   const krId = `${okr.id}-kr-${kIdx}`;
                   return (
                     <div key={krId} className="flex group hover:bg-slate-50 transition-colors">
-                      <div className="w-80 shrink-0 p-4 border-r pl-8 relative">
+                      <div className="sticky left-0 z-[5] w-72 md:w-80 shrink-0 p-4 border-r pl-8 relative bg-white shadow-[8px_0_16px_-16px_rgba(15,23,42,0.45)] group-hover:bg-slate-50 transition-colors">
                         <div className="absolute left-4 top-6 w-2 h-2 rounded-full bg-brand-300"/>
                         <div className="flex items-center gap-2 mb-1">
                           <span className="text-[9px] font-black text-slate-400 uppercase">KR {kIdx + 1}</span>
