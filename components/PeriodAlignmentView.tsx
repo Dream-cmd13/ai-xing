@@ -8,7 +8,7 @@ import { usePermissions } from '@/hooks/usePermissions';
 import { AppState, Department, OKR, PADEntry, WeeklyPAD, User } from '@/types';
 import { ChevronLeft, ChevronRight, Plus, Calendar, Target, CheckCircle, Clock } from 'lucide-react';
 import { canViewTask } from '@/utils/permissions';
-import { createTaskOwnerSections } from '@/utils/taskOwnerGrouping.js';
+import { createTaskOwnerSections, getDepartmentManagerUserIds } from '@/utils/taskOwnerGrouping.js';
 
 
 
@@ -112,6 +112,10 @@ const PeriodAlignmentView: React.FC<PeriodAlignmentViewProps> = ({
     if (!selectedDeptId) return null;
     return flatDepts.find(d => d.id === selectedDeptId) || null;
   }, [flatDepts, selectedDeptId]);
+  const selectedDepartmentManagerUserIds = useMemo(
+    () => getDepartmentManagerUserIds(selectedDepartment, state.users),
+    [selectedDepartment, state.users]
+  );
 
   // Get OKRs for the selected department and period
   const okrs = useMemo(() => {
@@ -243,7 +247,7 @@ const PeriodAlignmentView: React.FC<PeriodAlignmentViewProps> = ({
                       
                       {visibleWeeks.map(w => {
                         const tasks = getTasksForCell(w.id, krId);
-                        const taskOwnerSections = createTaskOwnerSections(tasks, state.users, selectedDepartment?.managerUserId);
+                        const taskOwnerSections = createTaskOwnerSections(tasks, state.users, selectedDepartmentManagerUserIds);
                         return (
                           <div key={w.id} className="flex-1 min-w-0 p-3 border-r min-w-[200px] flex flex-col gap-2 relative">
                             {taskOwnerSections.map(({ task: t, ownerName, isFirstTaskForOwner }) => (
