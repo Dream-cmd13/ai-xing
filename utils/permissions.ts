@@ -128,6 +128,38 @@ const collectDepartmentIds = (department: Department): string[] => {
   return ids;
 };
 
+const collectAncestorDepartmentIds = (
+  departments: Department[] = [],
+  targetDepartmentId?: string
+): string[] => {
+  if (!targetDepartmentId) return [];
+
+  const walk = (items: Department[], ancestors: string[]): string[] | null => {
+    for (const department of items) {
+      const nextAncestors = [...ancestors, department.id];
+      if (department.id === targetDepartmentId) {
+        return nextAncestors;
+      }
+
+      const match = walk(department.subDepartments || [], nextAncestors);
+      if (match) return match;
+    }
+
+    return null;
+  };
+
+  return walk(departments, []) || [];
+};
+
+export const isDepartmentSelfOrAncestor = (
+  departments: Department[] = [],
+  targetDepartmentId?: string,
+  currentDepartmentId?: string
+): boolean => {
+  if (!targetDepartmentId || !currentDepartmentId) return false;
+  return collectAncestorDepartmentIds(departments, currentDepartmentId).includes(targetDepartmentId);
+};
+
 const getScopedDepartmentIds = (
   currentUser: User,
   departments: Department[] = []

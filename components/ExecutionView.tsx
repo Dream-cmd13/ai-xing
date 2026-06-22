@@ -11,7 +11,7 @@ import TaskModal from './TaskModal';
 import { Building2, ChevronDown, ChevronRight, LayoutGrid, Plus, X, Calendar, User as UserIcon, Clock } from 'lucide-react';
 import { usePageToast } from '../hooks/usePageToast';
 import { getUserFacingError } from '../utils/userFacingError';
-import { canAssignTaskOwner, canManageDepartment, canManageTask, canViewTask, getAssignableTaskOwners, getVisibleDepartments, isAdminUser } from '../utils/permissions';
+import { canAssignTaskOwner, canManageDepartment, canManageTask, canViewTask, getAssignableTaskOwners, getVisibleDepartments, isAdminUser, isDepartmentSelfOrAncestor } from '../utils/permissions';
 import { ensureTaskTargetWeeks } from '../utils/taskPeriods.js';
 import { createTaskOkrGroups, getWeekDateRange } from '../utils/taskOkrOptions';
 
@@ -112,10 +112,15 @@ const ExecutionView: React.FC = () => {
   const canManageSelectedDepartment = selectedDepartment
     ? canManageDepartment(selectedDepartment, currentUser, state.systemRoles || [], state.departments)
     : false;
+  const canCreateTaskForSelectedOkr = isDepartmentSelfOrAncestor(
+    state.departments,
+    selectedDeptId || undefined,
+    currentUser.departmentId
+  );
   const canCreateExecutionTask = permissions.create && (
     currentUserIsAdmin
       ? canManageSelectedDepartment
-      : selectedDeptId === currentUser.departmentId
+      : canCreateTaskForSelectedOkr
   );
   const canEditExecutionTask = permissions.update;
 
