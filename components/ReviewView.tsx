@@ -19,6 +19,7 @@ import { readTaskReviewState, updateTaskReviewState } from '../utils/reviewTaskS
 import { createReviewDraftSnapshot, hasReviewDraftChanges, ReviewDraftSnapshot } from '../utils/reviewDraft';
 import { syncTaskReviewsToTasks } from '../utils/taskReviewSync';
 import { useLeaveGuard } from '@/hooks/useLeaveGuard';
+import { createTaskOwnerSections } from '../utils/taskOwnerGrouping.js';
 
 
 
@@ -263,10 +264,11 @@ const ReviewView: React.FC = () => {
       }
     });
 
-    return nextTasks;
+    return createTaskOwnerSections(nextTasks, state.users, selectedDept?.managerUserId).map((section) => section.task);
   }, [
     activeTab,
     currentUser,
+    selectedDept?.managerUserId,
     selectedDeptId,
     selectedMonth,
     selectedWeek,
