@@ -258,16 +258,7 @@ const ExecutionView: React.FC = () => {
 
     let nextTasks = [...state.tasks];
     
-    const entriesToAdd: PADEntry[] = [];
-    
-    if (isNewTask && newTask.title.includes('\n')) {
-      const titles = newTask.title.split('\n').filter(t => t.trim());
-      titles.forEach((t, i) => {
-         entriesToAdd.push({ ...newTask, id: `task-${Date.now()}-${i}`, title: t.trim() });
-      });
-    } else {
-      entriesToAdd.push(newTask);
-    }
+    const entriesToAdd: PADEntry[] = [newTask];
     
     if (isNewTask) {
       nextTasks = [...entriesToAdd, ...nextTasks];

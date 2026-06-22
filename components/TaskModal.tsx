@@ -280,13 +280,13 @@ const TaskModal: React.FC<TaskModalProps> = ({
                 AI 质量检查
               </button>
             </div>
-            <textarea 
-              placeholder="输入任务标题，如：本周完成财务分析报表&#10;输入多行可以同时创建多条任务" 
+            <textarea
+              placeholder="输入任务标题，如：本周完成财务分析报表"
               className="w-full h-24 p-4 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold outline-none focus:border-brand-500 resize-none disabled:opacity-50"
               value={data.title || ''}
               disabled={readOnly}
               onChange={e => {
-                setData({ ...data, title: e.target.value });
+                setData({ ...data, title: e.target.value.replace(/\s*\r?\n\s*/g, ' ') });
                 if (error) setError(null);
               }}
             />

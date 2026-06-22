@@ -54,6 +54,7 @@ const WeeklyView: React.FC = () => {
   const [selectedOwnerId, setSelectedOwnerId] = useState<string>(currentUser.id);
   const [viewMode, setViewMode] = useState<'pad' | 'review'>('pad');
   const [deleteConfirmIndex, setDeleteConfirmIndex] = useState<number | null>(null);
+  const [taskModal, setTaskModal] = useState<{ isOpen: boolean, index: number | null, mode: 'create' | 'edit', data: Partial<PADEntry> }>({ isOpen: false, index: null, mode: 'create', data: {} });
 
   // Derived State
   const visibleDepartments = useMemo(() => getVisibleDepartments(currentUser, state.departments, state.systemRoles || []), [currentUser, state.departments, state.systemRoles]);
@@ -141,8 +142,6 @@ const WeeklyView: React.FC = () => {
     }
     setDeleteConfirmIndex(null);
   };
-
-  const [taskModal, setTaskModal] = useState<{ isOpen: boolean, index: number | null, mode: 'create' | 'edit', data: Partial<PADEntry> }>({ isOpen: false, index: null, mode: 'create', data: {} });
 
   const handleAddTask = () => {
     const currentUserIsAdmin = isAdminUser(currentUser, state.systemRoles || []);
@@ -276,16 +275,7 @@ const WeeklyView: React.FC = () => {
       }
     }
     
-    // Prepare entries to add (handle multi-line title for new tasks)
-    const entriesToAdd: PADEntry[] = [];
-    if (taskModal.index === null && newData.title.includes('\n')) {
-      const titles = newData.title.split('\n').filter(t => t.trim());
-      titles.forEach((t, i) => {
-         entriesToAdd.push({ ...newData, id: `task-${Date.now()}-${i}`, title: t.trim() });
-      });
-    } else {
-      entriesToAdd.push(newData);
-    }
+    const entriesToAdd: PADEntry[] = [newData];
     
     let nextTasks = [...state.tasks];
     if (taskModal.index !== null) {
