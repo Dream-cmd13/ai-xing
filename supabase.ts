@@ -22,6 +22,8 @@ export const supabase = createClient(
     auth: {
       persistSession: true,
       autoRefreshToken: true,
+      // Avoid legacy navigator.locks deadlocks seen in some Edge/Chromium sessions.
+      lock: async (_name, _acquireTimeout, fn) => await fn(),
     }
   }
 );

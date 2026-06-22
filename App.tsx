@@ -7,6 +7,26 @@ import { useAppStore } from '@/store/useAppStore';
 import { getBootstrapData } from '@/data';
 import { supabase } from '@/supabase';
 
+const INIT_TIMEOUT_MS = 12000;
+const withTimeout = async <T,>(operation: PromiseLike<T>, label: string, timeoutMs = INIT_TIMEOUT_MS): Promise<T> => {
+  let timeoutId: ReturnType<typeof setTimeout> | null = null;
+  const promise = Promise.resolve(operation);
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<T>((_, reject) => {
+        timeoutId = setTimeout(() => {
+          reject(new Error(`${label} timeout after ${timeoutMs}ms`));
+        }, timeoutMs);
+      })
+    ]);
+  } finally {
+    if (timeoutId) {
+      clearTimeout(timeoutId);
+    }
+  }
+};
+
 const DEFAULT_AI_SETTINGS = {
   selectedModelId: 'gemini',
   configs: [
@@ -29,6 +49,7 @@ const App: React.FC = () => {
   const { 
     setState, 
     setIsInitialLoadComplete, 
+    setBackendError,
     setLastSavedAISettings,
     setLastSavedUsers,
     setLastSavedSystemRoles,
@@ -56,13 +77,15 @@ const App: React.FC = () => {
         }
 
         // Avoid concurrent initialization
-        if (isInitializingRef.current) return;
+        if (isInitializingRef.current) {
+          return;
+        }
 
         isInitializingRef.current = true;
         setIsInitialLoadComplete(false);
         resetDomainLoadState();
         try {
-          const bootstrapData = await getBootstrapData();
+          const bootstrapData = await withTimeout(getBootstrapData(), 'bootstrap');
           if (bootstrapData) {
             // Prefer auth_id mapping, fallback to username for legacy email/phone records.
             const user = bootstrapData.users?.find((u) => {
@@ -75,19 +98,27 @@ const App: React.FC = () => {
             if (user) {
               // Backfill auth_id so subsequent logins can map directly.
               if (user.auth_id !== userId) {
-                const { error: bindError } = await supabase
-                  .from('users')
-                  .update({ auth_id: userId })
-                  .eq('id', user.id);
-                if (bindError) {
+                try {
+                  const { error: bindError } = await withTimeout(
+                    supabase
+                      .from('users')
+                      .update({ auth_id: userId })
+                      .eq('id', user.id),
+                    'auth_id backfill'
+                  );
+                  if (bindError) {
+                    console.warn('Failed to backfill auth_id for user', bindError);
+                  } else {
+                    user.auth_id = userId;
+                  }
+                } catch (bindError) {
                   console.warn('Failed to backfill auth_id for user', bindError);
-                } else {
-                  user.auth_id = userId;
                 }
               }
 
               lastProcessedUserIdRef.current = userId;
               login(user);
+              setBackendError(null);
               const initialUsers = bootstrapData.users || [];
               const initialSystemRoles = bootstrapData.systemRoles || [];
               
@@ -115,6 +146,7 @@ const App: React.FC = () => {
             }
           }
         } catch (e) {
+          setBackendError((e as any)?.message || '系统初始化失败，请刷新页面后重试');
           console.error("Session restore failed", e);
         } finally {
           isInitializingRef.current = false;
@@ -158,8 +190,11 @@ const App: React.FC = () => {
     };
 
     // Check initial session
-    supabase.auth.getSession().then(({ data: { session } }) => {
+    withTimeout(supabase.auth.getSession(), 'getSession').then(({ data: { session } }) => {
       handleAuthChange(session);
+    }).catch((error) => {
+      setBackendError(error?.message || '登录态恢复超时，请刷新页面后重试');
+      setIsInitialLoadComplete(true);
     });
 
     // Listen for auth changes
@@ -170,7 +205,7 @@ const App: React.FC = () => {
     return () => {
       subscription.unsubscribe();
     };
-  }, [login, resetDomainLoadState, setDomainLoadState, setIsInitialLoadComplete, setLastSavedAISettings, setLastSavedSystemRoles, setLastSavedUsers, setState]);
+  }, [login, resetDomainLoadState, setBackendError, setDomainLoadState, setIsInitialLoadComplete, setLastSavedAISettings, setLastSavedSystemRoles, setLastSavedUsers, setState]);
 
   return (
     <BrowserRouter>
