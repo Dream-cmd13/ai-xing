@@ -11,7 +11,8 @@ import { getRequiredDomains } from '../utils/routeDomains';
 import { 
   ShieldCheck, Settings, LogOut, X, Menu, LayoutDashboard, GitGraph, Target, Building2,
   Calendar, Users, UserCog, ShieldCheck as ShieldCheckIcon, Settings as SettingsIcon,
-  ChevronRight, Save, Loader2 as Spinner, AlertCircle, CheckCircle, Briefcase, ListTodo, ClipboardCheck, Key
+  ChevronRight, Save, Loader2 as Spinner, AlertCircle, CheckCircle, Briefcase, ListTodo, ClipboardCheck, Key,
+  PanelLeftClose, PanelLeftOpen
 } from 'lucide-react';
 
 const iconMap: Record<string, React.ReactNode> = {
@@ -45,7 +46,8 @@ export const MainLayout: React.FC<MainLayoutProps> = ({ content }) => {
   const { dirtyDomains, isDirty, isSaving, showSaveSuccess, backendError, systemRoles, users, lastSavedUsers } = useAppStore();
   const navigate = useNavigate();
   const location = useLocation();
-  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(true);
+  const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
+  const [isDesktopSidebarCollapsed, setIsDesktopSidebarCollapsed] = useState(false);
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
   const [profileName, setProfileName] = useState(currentUser?.name || '');
   const [newPassword, setNewPassword] = useState('');
@@ -81,7 +83,7 @@ export const MainLayout: React.FC<MainLayoutProps> = ({ content }) => {
     const proceed = () => {
       useAppStore.getState().setBackendError(null);
       navigate(path);
-      setIsSidebarCollapsed(true);
+      setIsMobileSidebarOpen(false);
     };
 
     if (!shouldGuardNavigation) {
@@ -212,21 +214,26 @@ export const MainLayout: React.FC<MainLayoutProps> = ({ content }) => {
 
   return (
     <div className="flex h-screen w-screen bg-slate-50 overflow-hidden relative">
-      {!isSidebarCollapsed && (
+      {isMobileSidebarOpen && (
         <div 
           className="md:hidden fixed inset-0 bg-black/50 z-40"
-          onClick={() => setIsSidebarCollapsed(true)}
+          onClick={() => setIsMobileSidebarOpen(false)}
         />
       )}
 
-      <aside className={`w-64 bg-slate-900 text-slate-300 flex flex-col shrink-0 fixed md:relative z-50 h-full transition-transform duration-300 ${isSidebarCollapsed ? '-translate-x-full md:translate-x-0' : 'translate-x-0'}`}>
+      <aside className={`
+        w-64 bg-slate-900 text-slate-300 flex flex-col shrink-0 fixed md:relative z-50 h-full
+        transition-[width,transform] duration-300 ease-out will-change-[width,transform] overflow-hidden
+        ${isMobileSidebarOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}
+        ${isDesktopSidebarCollapsed ? 'md:w-16' : 'md:w-64'}
+      `}>
         <div className="p-3 border-b border-slate-800 bg-slate-800/40">
-          <div className="flex items-center justify-between">
+          <div className={`flex items-center ${isDesktopSidebarCollapsed ? 'md:flex-col md:justify-center md:gap-2' : 'justify-between'}`}>
             <div className="flex items-center gap-2 overflow-hidden">
               <div className="w-8 h-8 bg-brand-600 rounded-lg flex items-center justify-center shrink-0 shadow-lg shadow-brand-600/20">
                 <ShieldCheck className="text-white" size={18} />
               </div>
-              <div className="flex flex-col min-w-0">
+              <div className={`flex flex-col min-w-0 ${isDesktopSidebarCollapsed ? 'md:hidden' : ''}`}>
                 <div className="flex items-center gap-1">
                   <h1 className="text-white font-black text-sm tracking-tighter leading-tight truncate">AI星组织</h1>
                 </div>
@@ -243,20 +250,29 @@ export const MainLayout: React.FC<MainLayoutProps> = ({ content }) => {
                 </div>
               </div>
             </div>
-            <button className="md:hidden text-slate-400 hover:text-white" onClick={() => setIsSidebarCollapsed(true)}>
+            <button
+              className="hidden md:flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 hover:bg-slate-700 hover:text-white transition-colors"
+              onClick={() => setIsDesktopSidebarCollapsed(prev => !prev)}
+              title={isDesktopSidebarCollapsed ? '展开导航' : '收起导航'}
+              aria-label={isDesktopSidebarCollapsed ? '展开导航' : '收起导航'}
+              aria-expanded={!isDesktopSidebarCollapsed}
+            >
+              {isDesktopSidebarCollapsed ? <PanelLeftOpen size={18} /> : <PanelLeftClose size={18} />}
+            </button>
+            <button className="md:hidden text-slate-400 hover:text-white" onClick={() => setIsMobileSidebarOpen(false)}>
               <X size={18} />
             </button>
           </div>
         </div>
 
-        <nav className="flex-1 p-4 space-y-4 overflow-y-auto custom-scrollbar">
+        <nav className={`flex-1 space-y-4 overflow-y-auto custom-scrollbar transition-[padding] duration-300 ${isDesktopSidebarCollapsed ? 'p-2 md:px-2 md:py-4' : 'p-4'}`}>
           {MENU_GROUPS.map((group, idx) => {
             const visibleItems = group.items.filter(item => canAccessMenu(item.id));
             if (visibleItems.length === 0) return null;
             
             return (
               <div key={idx}>
-                {group.label && (
+                {group.label && !isDesktopSidebarCollapsed && (
                   <div className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-2 px-3">
                     {group.label}
                   </div>
@@ -268,7 +284,10 @@ export const MainLayout: React.FC<MainLayoutProps> = ({ content }) => {
                       <button
                         key={item.id}
                         onClick={() => handleNavigation(`/${item.id}`)}
-                        className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg transition-all duration-200 text-sm font-medium ${
+                        title={isDesktopSidebarCollapsed ? item.label : undefined}
+                        className={`w-full flex items-center rounded-lg transition-all duration-200 text-sm font-medium ${
+                          isDesktopSidebarCollapsed ? 'justify-center px-2 py-2.5' : 'gap-3 px-3 py-2'
+                        } ${
                           isActive 
                             ? 'bg-brand-500/10 text-brand-400 shadow-sm shadow-brand-500/5' 
                             : 'text-slate-400 hover:bg-slate-800/50 hover:text-slate-200'
@@ -277,8 +296,8 @@ export const MainLayout: React.FC<MainLayoutProps> = ({ content }) => {
                         <span className={`${isActive ? 'text-brand-400' : 'text-slate-500'}`}>
                           {iconMap[item.id] || <LayoutDashboard size={18} />}
                         </span>
-                        <span className="truncate">{item.label}</span>
-                        {isActive && <ChevronRight size={14} className="ml-auto opacity-50" />}
+                        {!isDesktopSidebarCollapsed && <span className="truncate">{item.label}</span>}
+                        {isActive && !isDesktopSidebarCollapsed && <ChevronRight size={14} className="ml-auto opacity-50" />}
                       </button>
                     );
                   })}
@@ -294,7 +313,7 @@ export const MainLayout: React.FC<MainLayoutProps> = ({ content }) => {
           <div className="flex items-center gap-3">
             <button 
               className="md:hidden p-2 -ml-2 text-slate-500 hover:bg-slate-100 rounded-lg transition-colors"
-              onClick={() => setIsSidebarCollapsed(false)}
+              onClick={() => setIsMobileSidebarOpen(true)}
             >
               <Menu size={20} />
             </button>
