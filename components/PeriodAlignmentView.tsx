@@ -8,6 +8,7 @@ import { usePermissions } from '@/hooks/usePermissions';
 import { AppState, Department, OKR, PADEntry, WeeklyPAD, User } from '@/types';
 import { ChevronLeft, ChevronRight, Plus, Calendar, Target, CheckCircle, Clock } from 'lucide-react';
 import { canViewTask } from '@/utils/permissions';
+import { createTaskOwnerSections } from '@/utils/taskOwnerGrouping.js';
 
 
 
@@ -107,14 +108,17 @@ const PeriodAlignmentView: React.FC<PeriodAlignmentViewProps> = ({
     return list;
   }, [state.departments]);
 
+  const selectedDepartment = useMemo(() => {
+    if (!selectedDeptId) return null;
+    return flatDepts.find(d => d.id === selectedDeptId) || null;
+  }, [flatDepts, selectedDeptId]);
+
   // Get OKRs for the selected department and period
   const okrs = useMemo(() => {
-    if (!selectedDeptId) return [];
-    const dept = flatDepts.find(d => d.id === selectedDeptId);
-    if (!dept) return [];
-    const yearOkrs = dept.okrs?.[selectedYear] || dept.okrs?.[String(selectedYear)] || {};
+    if (!selectedDepartment) return [];
+    const yearOkrs = selectedDepartment.okrs?.[selectedYear] || selectedDepartment.okrs?.[String(selectedYear)] || {};
     return yearOkrs[selectedPeriod] || [];
-  }, [flatDepts, selectedDeptId, selectedYear, selectedPeriod]);
+  }, [selectedDepartment, selectedYear, selectedPeriod]);
 
   // Pre-group tasks for efficiency
   const tasksByWeekAndKr = useMemo(() => {
@@ -239,19 +243,28 @@ const PeriodAlignmentView: React.FC<PeriodAlignmentViewProps> = ({
                       
                       {visibleWeeks.map(w => {
                         const tasks = getTasksForCell(w.id, krId);
+                        const taskOwnerSections = createTaskOwnerSections(tasks, state.users, selectedDepartment?.managerUserId);
                         return (
                           <div key={w.id} className="flex-1 min-w-0 p-3 border-r min-w-[200px] flex flex-col gap-2 relative">
-                            {tasks.map(t => (
-                              <div 
-                                key={t.id} 
-                                onClick={() => onTaskClick(w.id, t)}
-                                className="bg-white p-2 rounded-lg border shadow-sm text-[10px] font-bold text-slate-700 transition-all cursor-pointer hover:border-brand-300"
-                              >
-                                <div className="flex items-center gap-1 mb-1">
-                                  {t.status === 'completed' ? <CheckCircle size={10} className="text-emerald-500"/> : <Clock size={10} className="text-amber-500"/>}
-                                  <span className="truncate">{t.title}</span>
+                            {taskOwnerSections.map(({ task: t, ownerName, isFirstTaskForOwner }) => (
+                              <React.Fragment key={t.id}>
+                                {isFirstTaskForOwner && (
+                                  <div className="flex items-center min-w-0 px-1 pt-1">
+                                    <span className="max-w-full truncate rounded-md border border-slate-100 bg-slate-50 px-1.5 py-0.5 text-[10px] font-black text-slate-500">
+                                      {ownerName}
+                                    </span>
+                                  </div>
+                                )}
+                                <div 
+                                  onClick={() => onTaskClick(w.id, t)}
+                                  className="bg-white p-2 rounded-lg border shadow-sm text-[10px] font-bold text-slate-700 transition-all cursor-pointer hover:border-brand-300"
+                                >
+                                  <div className="flex items-center gap-1 mb-1">
+                                    {t.status === 'completed' ? <CheckCircle size={10} className="text-emerald-500"/> : <Clock size={10} className="text-amber-500"/>}
+                                    <span className="truncate">{t.title}</span>
+                                  </div>
                                 </div>
-                              </div>
+                              </React.Fragment>
                             ))}
                             {canCreateTask && (
                               <button 
