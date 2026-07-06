@@ -6,6 +6,11 @@
 -- still carry the nested department_id. The previous visible task RPC only
 -- joined against root rows from public.departments, so manager visibility for
 -- nested department tasks could fall back to only personal involvement.
+--
+-- This expands the department id list and lets visibility inherited from a
+-- visible parent flow to its nested departments. This matches the current
+-- business rule that departments under the same parent are treated as one
+-- department for OKR execution visibility.
 
 CREATE OR REPLACE FUNCTION public.get_current_user_visible_task_ids()
 RETURNS TABLE(id TEXT)
