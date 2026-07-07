@@ -6,7 +6,7 @@ import { useAppActions } from '../hooks/useAppActions';
 import { usePageToast } from '../hooks/usePageToast';
 import { usePermissions } from '../hooks/usePermissions';
 
-import { AppState, Department, ReviewEntry, ObjectiveReview, User, PADEntry, MenuPermission } from '../types';
+import { AppState, Department, ReviewEntry, ObjectiveReview, User, PADEntry, MenuPermission, OKR } from '../types';
 import { Calendar, Building2, ClipboardCheck, Save, CheckCircle, Loader2, Target, TrendingUp, MessageSquare, FileText, Lock, Download, RefreshCw, ChevronLeft, ChevronRight, PieChart } from 'lucide-react';
 import PageToast from './PageToast';
 import TaskModal from './TaskModal';
@@ -546,7 +546,7 @@ const ReviewView: React.FC = () => {
   }, [activeTab, selectedDept, selectedMonth]);
 
   const appendContentToSummary = (sectionTitle: string, sectionContent: string) => {
-    const managedTitles = ['本期任务汇总', '本月周复盘记录汇总'];
+    const managedTitles = ['本期任务汇总', '本月周复盘记录汇总', '月度复盘记录汇总', '季度复盘记录汇总'];
     const escapeRegex = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     const normalized = sectionContent.trim();
     const nextContent = normalized ? `${sectionTitle}：\n${normalized}` : `${sectionTitle}：\n暂无内容`;
@@ -559,6 +559,97 @@ const ReviewView: React.FC = () => {
       .trim();
 
     updateReviewContent(cleaned ? `${cleaned}\n\n${nextContent}` : nextContent);
+  };
+
+  const getReviewStatusLabel = (status?: string) => {
+    if (status === 'at-risk') return '有风险';
+    if (status === 'behind') return '滞后';
+    return '正常推进';
+  };
+
+  const getAverageKrProgress = (okr: OKR, review?: ObjectiveReview) => {
+    const krCount = okr.keyResults?.length || 0;
+    const totalKrProgress = okr.keyResults?.reduce((sum, _kr, idx) => sum + (Number(review?.krReviews?.[idx]?.progress) || 0), 0) || 0;
+    return krCount > 0 ? Math.round(totalKrProgress / krCount) : 0;
+  };
+
+  const buildOkrReviewSummary = (items: Array<{ okr: OKR & { period?: string }; review?: ObjectiveReview | null; prefix?: string }>) => {
+    if (items.length === 0) return '暂无 OKR 记录';
+
+    return items.map(({ okr, review, prefix }, index) => {
+      const effectiveReview = review || { progress: 0, krReviews: [], lessonsLearned: '', methodology: '', nextSteps: '' };
+      const krSummary = (okr.keyResults || []).map((kr, krIndex) => {
+        const krReview = effectiveReview.krReviews?.[krIndex];
+        return [
+          `  ${krIndex + 1}. ${kr}`,
+          `     进度：${Number(krReview?.progress) || 0}%`,
+          `     状态：${getReviewStatusLabel(krReview?.status)}`,
+          `     执行情况：${krReview?.comment?.trim() || '暂无记录'}`
+        ].join('\n');
+      }).join('\n');
+
+      return [
+        `${index + 1}. ${prefix ? `${prefix} - ` : ''}${okr.objective || '未命名 OKR'}`,
+        `周期：${okr.period || '未标记'}`,
+        `KR 完成度汇总：${getAverageKrProgress(okr, effectiveReview)}%`,
+        `KR 执行情况和进度：`,
+        krSummary || '  暂无 KR',
+        `经验教训：${effectiveReview.lessonsLearned?.trim() || '暂无记录'}`,
+        `方法论沉淀：${effectiveReview.methodology?.trim() || '暂无记录'}`,
+        `下一步计划：${effectiveReview.nextSteps?.trim() || '暂无记录'}`
+      ].join('\n');
+    }).join('\n\n');
+  };
+
+  const getMonthsForQuarter = (quarterKey: string) => {
+    const [yearPart, quarterPart] = quarterKey.split('-Q');
+    const year = Number(yearPart);
+    const quarter = Number(quarterPart);
+    if (!year || !quarter) return [];
+
+    const startMonth = (quarter - 1) * 3 + 1;
+    return [startMonth, startMonth + 1, startMonth + 2].map((month) => `${year}-M${month.toString().padStart(2, '0')}`);
+  };
+
+  const appendMonthlyAdjustmentSummary = () => {
+    const summary = buildOkrReviewSummary(currentOkrs.map((okr) => ({
+      okr,
+      review: okrReviews[okr.id]
+    })));
+    appendContentToSummary('月度复盘记录汇总', summary);
+    showToast('已将月度复盘记录汇总到总结中', 'success');
+  };
+
+  const appendQuarterlyAdjustmentSummary = () => {
+    if (!selectedDept) return;
+    const monthKeys = getMonthsForQuarter(selectedQuarter);
+    const summaryItems = monthKeys.flatMap((monthKey) => {
+      const monthlyReviews = selectedDept.reviews?.[monthKey] || [];
+      const monthlyReview = monthlyReviews.length > 0 ? monthlyReviews[monthlyReviews.length - 1] : null;
+      const monthlyOkrDetails = monthlyReview?.okrDetails || {};
+
+      return currentOkrs
+        .map((okr) => ({
+          okr,
+          review: monthlyOkrDetails[okr.id],
+          prefix: monthKey
+        }));
+    });
+
+    const summary = buildOkrReviewSummary(summaryItems);
+    appendContentToSummary('季度复盘记录汇总', summary);
+    showToast('已将季度月份复盘记录汇总到总结中', 'success');
+  };
+
+  const appendAdjustmentSummaryToReview = () => {
+    if (!canEditReview) return;
+    if (activeTab === 'monthly') {
+      appendMonthlyAdjustmentSummary();
+      return;
+    }
+    if (activeTab === 'quarterly') {
+      appendQuarterlyAdjustmentSummary();
+    }
   };
 
   const loadDeptTasks = React.useCallback(() => {
@@ -878,27 +969,40 @@ const ReviewView: React.FC = () => {
               <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4">
                  {/* Overall Review */}
                  <div className="space-y-4">
-                    <div className="flex justify-between items-center">
+                    <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
                        <div className="flex items-center gap-4">
                          <h4 className="text-sm font-black text-slate-700 uppercase tracking-widest flex items-center gap-2"><Target size={16}/> 整体复盘总结</h4>
                        </div>
-                       <div className="flex items-center gap-2 bg-slate-50 px-3 py-1 rounded-xl border">
-                          <span className="text-[10px] font-black text-slate-400 uppercase">综合评分</span>
-                          <input 
-                              type="text" 
-                              className="w-12 bg-transparent text-sm font-black text-brand-600 outline-none text-right"
-                              value={reviewScore === 0 ? 0 : reviewScore || ''}
+                       <div className="flex flex-wrap items-center gap-2">
+                          {(activeTab === 'monthly' || activeTab === 'quarterly') && (
+                            <button
+                              type="button"
                               disabled={!canEditReview}
-                              onChange={e => {
-                                if (e.target.value === '') {
-                                  updateReviewScore('' as any);
-                                  return;
-                                }
-                                handleNumberInput(e.target.value, updateReviewScore, 100)
-                              }}
-                              onFocus={e => e.target.select()}
-                            />
-                          <span className="text-xs font-bold text-slate-300">/ 100</span>
+                              onClick={appendAdjustmentSummaryToReview}
+                              className="px-3 py-1.5 bg-indigo-50 text-indigo-600 rounded-lg text-xs font-bold hover:bg-indigo-100 transition-colors flex items-center gap-1 disabled:opacity-50 disabled:hover:bg-indigo-50"
+                            >
+                              <Download size={14} />
+                              读取记录到总结
+                            </button>
+                          )}
+                          <div className="flex items-center gap-2 bg-slate-50 px-3 py-1 rounded-xl border">
+                            <span className="text-[10px] font-black text-slate-400 uppercase">综合评分</span>
+                            <input 
+                                type="text" 
+                                className="w-12 bg-transparent text-sm font-black text-brand-600 outline-none text-right"
+                                value={reviewScore === 0 ? 0 : reviewScore || ''}
+                                disabled={!canEditReview}
+                                onChange={e => {
+                                  if (e.target.value === '') {
+                                    updateReviewScore('' as any);
+                                    return;
+                                  }
+                                  handleNumberInput(e.target.value, updateReviewScore, 100)
+                                }}
+                                onFocus={e => e.target.select()}
+                              />
+                            <span className="text-xs font-bold text-slate-300">/ 100</span>
+                          </div>
                        </div>
                     </div>
                     <textarea 
@@ -1041,28 +1145,6 @@ const ReviewView: React.FC = () => {
                               </div>
                             </div>
                           </div>
-                        </div>
-                        <div className="flex flex-wrap justify-end gap-2">
-                          <button
-                            disabled={!canEditReview}
-                            onClick={() => {
-                              if (!canEditReview) return;
-                              const weeklySummary = monthlyWeekReviews.length > 0
-                                ? monthlyWeekReviews.map(({ period, review }, index) => {
-                                    if (!review) {
-                                      return `${index + 1}. ${period}\n总结：暂无周复盘记录`;
-                                    }
-                                    return `${index + 1}. ${period}\n评分：${review.score}\n总结：${review.content || '暂无总结内容'}`;
-                                  }).join('\n\n')
-                                : '本月暂无周复盘记录';
-                              appendContentToSummary('本月周复盘记录汇总', weeklySummary);
-                              showToast('已将周复盘记录读取到总结中', 'success');
-                            }}
-                            className="px-3 py-1.5 bg-indigo-50 text-indigo-600 rounded-lg text-xs font-bold hover:bg-indigo-100 transition-colors flex items-center gap-1 disabled:opacity-50 disabled:hover:bg-indigo-50"
-                          >
-                            <Download size={14} />
-                            读取周复盘记录到总结
-                          </button>
                         </div>
                         <div className="pb-2">
                           {monthlyWeekReviews.length === 0 ? (
