@@ -611,6 +611,24 @@ const ReviewView: React.FC = () => {
     return [startMonth, startMonth + 1, startMonth + 2].map((month) => `${year}-M${month.toString().padStart(2, '0')}`);
   };
 
+  const formatMonthKeyLabel = (monthKey: string, includeYear = false) => {
+    const [yearPart, monthPart] = monthKey.split('-M');
+    const month = Number(monthPart);
+    if (!month) return monthKey;
+    return includeYear ? `${yearPart}年${month}月` : `${month}月`;
+  };
+
+  const getSummaryReadDescription = () => {
+    if (activeTab === 'monthly') {
+      return `读取当前月份（${formatMonthKeyLabel(selectedMonth, true)}）的所有 KR 执行情况、进度、经验教训、方法论沉淀和下一步计划到总结。`;
+    }
+    if (activeTab === 'quarterly') {
+      const months = getMonthsForQuarter(selectedQuarter).map((monthKey) => formatMonthKeyLabel(monthKey)).join('、');
+      return `读取当前季度（${months}）各月已保存的 KR 执行情况、进度和复盘沉淀到总结。`;
+    }
+    return '';
+  };
+
   const appendMonthlyAdjustmentSummary = () => {
     const summary = buildOkrReviewSummary(currentOkrs.map((okr) => ({
       okr,
@@ -970,8 +988,13 @@ const ReviewView: React.FC = () => {
                  {/* Overall Review */}
                  <div className="space-y-4">
                     <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-                       <div className="flex items-center gap-4">
+                       <div className="flex flex-col gap-1">
                          <h4 className="text-sm font-black text-slate-700 uppercase tracking-widest flex items-center gap-2"><Target size={16}/> 整体复盘总结</h4>
+                         {(activeTab === 'monthly' || activeTab === 'quarterly') && (
+                           <p className="max-w-3xl text-xs font-medium leading-relaxed text-slate-400">
+                             {getSummaryReadDescription()}
+                           </p>
+                         )}
                        </div>
                        <div className="flex flex-wrap items-center gap-2">
                           {(activeTab === 'monthly' || activeTab === 'quarterly') && (
