@@ -415,6 +415,9 @@ const ReviewView: React.FC = () => {
     const syncedTaskMap = new Map(syncedDeptTasks.map((task) => [task.id, task]));
     const candidateTaskIds = syncedDeptTasks
       .filter((task) => {
+        // 跳过当前用户无权管理的任务。同步层会把不在 okrReviews 中的任务 taskReview 置为空字符串，
+        // 导致他人任务（数据库中已有复盘内容）被误判为"有变更"，属于假阳性，直接跳过。
+        if (currentUser && !canManageTask(task, currentUser, state.systemRoles || [], state.departments)) return false;
         const currentTask = state.tasks.find((entry) => entry.id === task.id);
         if (!currentTask) return false;
         return (currentTask.deliverable || '') !== (task.deliverable || '')
