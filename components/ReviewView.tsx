@@ -576,6 +576,20 @@ const ReviewView: React.FC = () => {
     return krCount > 0 ? Math.round(totalKrProgress / krCount) : 0;
   };
 
+  const getSummaryKrAverageScore = (items: Array<{ okr: OKR; review?: ObjectiveReview | null }>) => {
+    let totalKrProgress = 0;
+    let krCount = 0;
+
+    items.forEach(({ okr, review }) => {
+      (okr.keyResults || []).forEach((_kr, idx) => {
+        totalKrProgress += Number(review?.krReviews?.[idx]?.progress) || 0;
+        krCount += 1;
+      });
+    });
+
+    return krCount > 0 ? Math.round(totalKrProgress / krCount) : 0;
+  };
+
   const buildOkrReviewSummary = (items: Array<{ okr: OKR & { period?: string }; review?: ObjectiveReview | null; prefix?: string }>) => {
     if (items.length === 0) return '暂无 OKR 记录';
 
@@ -633,11 +647,13 @@ const ReviewView: React.FC = () => {
   };
 
   const appendMonthlyAdjustmentSummary = () => {
-    const summary = buildOkrReviewSummary(currentOkrs.map((okr) => ({
+    const summaryItems = currentOkrs.map((okr) => ({
       okr,
       review: okrReviews[okr.id]
-    })));
+    }));
+    const summary = buildOkrReviewSummary(summaryItems);
     appendContentToSummary('月度复盘记录汇总', summary);
+    setReviewScore(getSummaryKrAverageScore(summaryItems));
     showToast('已将月度复盘记录汇总到总结中', 'success');
   };
 
@@ -659,6 +675,7 @@ const ReviewView: React.FC = () => {
 
     const summary = buildOkrReviewSummary(summaryItems);
     appendContentToSummary('季度复盘记录汇总', summary);
+    setReviewScore(getSummaryKrAverageScore(summaryItems));
     showToast('已将季度月份复盘记录汇总到总结中', 'success');
   };
 
