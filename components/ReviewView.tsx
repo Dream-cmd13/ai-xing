@@ -640,8 +640,7 @@ const ReviewView: React.FC = () => {
       return `读取当前月份（${formatMonthKeyLabel(selectedMonth, true)}）的所有 KR 执行情况、进度、经验教训、方法论沉淀和下一步计划到总结。`;
     }
     if (activeTab === 'quarterly') {
-      const months = getMonthsForQuarter(selectedQuarter).map((monthKey) => formatMonthKeyLabel(monthKey)).join('、');
-      return `读取当前季度（${months}）各月已保存的 KR 执行情况、进度和复盘沉淀到总结。`;
+      return '读取当前页面的 KR 执行情况、进度和复盘沉淀到总结。';
     }
     return '';
   };
@@ -658,25 +657,15 @@ const ReviewView: React.FC = () => {
   };
 
   const appendQuarterlyAdjustmentSummary = () => {
-    if (!selectedDept) return;
-    const monthKeys = getMonthsForQuarter(selectedQuarter);
-    const summaryItems = monthKeys.flatMap((monthKey) => {
-      const monthlyReviews = selectedDept.reviews?.[monthKey] || [];
-      const monthlyReview = monthlyReviews.length > 0 ? monthlyReviews[monthlyReviews.length - 1] : null;
-      const monthlyOkrDetails = monthlyReview?.okrDetails || {};
-
-      return currentOkrs
-        .map((okr) => ({
-          okr,
-          review: monthlyOkrDetails[okr.id],
-          prefix: monthKey
-        }));
-    });
+    const summaryItems = currentOkrs.map((okr) => ({
+      okr,
+      review: okrReviews[okr.id]
+    }));
 
     const summary = buildOkrReviewSummary(summaryItems);
     appendContentToSummary('季度复盘记录汇总', summary);
     setReviewScore(getSummaryKrAverageScore(summaryItems));
-    showToast('已将季度月份复盘记录汇总到总结中', 'success');
+    showToast('已将季度复盘记录汇总到总结中', 'success');
   };
 
   const appendAdjustmentSummaryToReview = () => {
