@@ -8,6 +8,9 @@
     "build": "vite build",
     "lint": "npm run lint:app",
     "lint:app": "tsc --noEmit -p tsconfig.app.json",
+    "mcp:start": "npm --prefix mcp-server start",
+    "mcp:test": "npm --prefix mcp-server test",
+    "mcp:test:live": "npm --prefix mcp-server run test:live",
     "preview": "vite preview"
   },
   "dependencies": {

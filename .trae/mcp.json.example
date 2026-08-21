@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "ai_xing_okr": {
+      "url": "https://your-existing-domain.example/mcp",
+      "headers": {
+        "Authorization": "Basic <仅填写在个人配置中，禁止提交真实值>"
+      }
+    }
+  }
+}

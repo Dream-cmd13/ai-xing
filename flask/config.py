@@ -46,8 +46,5 @@ class Config:
         if missing:
             raise RuntimeError(f"Missing required environment variables: {', '.join(missing)}")
 
-        if cls.LLM_PROVIDER_DEFAULT == "gemini" and not cls.GEMINI_API_KEY:
-            raise RuntimeError("Missing required environment variable: GEMINI_API_KEY")
-
-        if cls.LLM_PROVIDER_DEFAULT == "deepseek" and not cls.DEEPSEEK_API_KEY:
-            raise RuntimeError("Missing required environment variable: DEEPSEEK_API_KEY")
+        # AI provider keys are validated when /api/ai/chat is called. Admin
+        # operations such as password reset must not depend on an LLM key.
