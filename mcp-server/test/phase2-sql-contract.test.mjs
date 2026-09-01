@@ -4,6 +4,8 @@ import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 
+import { MIGRATION_MANIFEST } from '../scripts/migrate.mjs';
+
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 
 async function migration(name) {
@@ -431,4 +433,52 @@ test('review data preflight is read-only and returns identifiers instead of revi
   assert.match(sql, /SELECT object_type, object_id, json_path, reason/i);
   assert.doesNotMatch(sql, /\b(?:INSERT|UPDATE|DELETE|ALTER|DROP|TRUNCATE|CREATE)\b/i);
   assert.doesNotMatch(sql, /(?:auth_id|password|refresh[_ ]?token|Authorization|JWT|permission_json)/i);
+});
+
+test('task validation migration protects every update path and the people enrichment function', async () => {
+  const sql = await migration('2026-09-01_mcp_task_validation_and_people_security.sql');
+
+  assertTransactional(sql);
+  assert.match(sql, /CREATE OR REPLACE FUNCTION public\.mcp_validate_task_changes\s*\(\s*p_changes JSONB,\s*p_allow_submitted BOOLEAN/i);
+  assert.match(sql, /target_weeks 不允许重复/i);
+  assert.match(sql, /task_review_score 必须是 0 到 100 的整数/i);
+  assert.match(sql, /due_date 不能早于 start_date/i);
+  assert.match(sql, /CREATE TRIGGER mcp_validate_task_row_contract_trigger/i);
+  for (const functionName of [
+    'mcp_update_pad_task',
+    'mcp_update_pad_task_scoped',
+    'mcp_update_pad_task_with_review_sync',
+    'mcp_update_pad_task_with_review_sync_scoped',
+  ]) {
+    const start = sql.indexOf(`CREATE OR REPLACE FUNCTION public.${functionName}(`);
+    const end = sql.indexOf('\n$$;', start);
+    assert.notEqual(start, -1, functionName);
+    assert.match(sql.slice(start, end), /mcp_validate_task_changes\(p_changes, FALSE\)/i, functionName);
+  }
+  assert.match(sql, /CREATE OR REPLACE FUNCTION public\.get_current_user_task_users_for_tasks\(p_task_ids TEXT\[\]\)[\s\S]{0,700}SET search_path = public/i);
+  assert.match(sql, /REVOKE ALL ON FUNCTION public\.get_current_user_task_users_for_tasks\(TEXT\[\]\) FROM PUBLIC, anon, authenticated, service_role/i);
+  assert.match(sql, /GRANT EXECUTE ON FUNCTION public\.get_current_user_task_users_for_tasks\(TEXT\[\]\) TO authenticated/i);
+  assert.doesNotMatch(sql, /GRANT EXECUTE[^;]+TO anon/i);
+});
+
+test('release readiness requires the complete ordered transactional manifest and hardened privileges', async () => {
+  const sql = await migration('2026-09-01_mcp_release_contract.sql');
+
+  assertTransactional(sql);
+  assert.match(sql, /CREATE TABLE IF NOT EXISTS mcp_internal\.release_contracts/i);
+  assert.match(sql, /manifest_digest TEXT NOT NULL CHECK/i);
+  assert.match(sql, /required_versions JSONB NOT NULL CHECK/i);
+  assert.match(sql, /REVOKE ALL ON TABLE mcp_internal\.release_contracts FROM PUBLIC, anon, authenticated, service_role/i);
+  for (const fileName of MIGRATION_MANIFEST.filter((name) => (
+    name !== '2026-08-27_mcp_task_indexes.sql' && name !== '2026-09-01_mcp_release_contract.sql'
+  ))) {
+    assert.match(sql, new RegExp(fileName.replace(/\.sql$/i, '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&')), fileName);
+  }
+  assert.match(sql, /requiredMigrations/i);
+  assert.match(sql, /functionPrivileges/i);
+  assert.match(sql, /deferredIndexes/i);
+  assert.match(sql, /has_function_privilege\('authenticated'/i);
+  assert.match(sql, /has_function_privilege\('anon'/i);
+  assert.match(sql, /GRANT EXECUTE ON FUNCTION public\.mcp_get_readiness\(\) TO anon, authenticated/i);
+  assert.doesNotMatch(sql, /GRANT\s+(?:SELECT|INSERT|UPDATE|DELETE|ALL)\s+ON\s+TABLE/i);
 });

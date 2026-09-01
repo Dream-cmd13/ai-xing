@@ -36,9 +36,17 @@ export const MIGRATION_MANIFEST = Object.freeze([
   '2026-08-31_mcp_okr_task_attachment_json_fallback.sql',
   '2026-08-31_mcp_okr_readiness_gate.sql',
   '2026-08-31_web_task_center_scoped_pagination.sql',
+  '2026-09-01_mcp_task_validation_and_people_security.sql',
+  '2026-09-01_mcp_release_contract.sql',
 ]);
 
 const NON_TRANSACTIONAL = new Set(['2026-08-27_mcp_task_indexes.sql']);
+// This checksummed migration predates the transaction-envelope convention.
+// The runner still wraps it in its own transaction; every later transactional
+// migration must carry and pass the strict outer-envelope validation.
+const LEGACY_UNWRAPPED_TRANSACTIONAL = new Set(['2026-08-27_mcp_readiness.sql']);
+export const RELEASE_ID = '2026-09-01';
+const RELEASE_CONTRACT_FILE = '2026-09-01_mcp_release_contract.sql';
 const LOCK_KEY = 'ai-xing:mcp:migrations:v1';
 const LEGACY_ADOPTION_CHECKS = Object.freeze({
   '2026-08-21_mcp_write_infra_tables': [
@@ -83,10 +91,106 @@ export function checksum(sql) {
   return createHash('sha256').update(sql.replace(/\r\n?/g, '\n'), 'utf8').digest('hex');
 }
 
-function unwrapTransaction(sql) {
+function migrationEnvelopeError() {
+  const error = new Error('事务型迁移必须且只能包含一个顶层 BEGIN/COMMIT 外壳。');
+  error.code = 'MIGRATION_ENVELOPE_INVALID';
+  return error;
+}
+
+function topLevelSqlStatements(sql) {
+  const statements = [];
+  let start = 0;
+  let mode = 'normal';
+  let dollarTag = '';
+  let blockDepth = 0;
+
+  for (let index = 0; index < sql.length; index += 1) {
+    const current = sql[index];
+    const next = sql[index + 1];
+    if (mode === 'line-comment') {
+      if (current === '\n') mode = 'normal';
+      continue;
+    }
+    if (mode === 'block-comment') {
+      if (current === '/' && next === '*') {
+        blockDepth += 1;
+        index += 1;
+      } else if (current === '*' && next === '/') {
+        blockDepth -= 1;
+        index += 1;
+        if (blockDepth === 0) mode = 'normal';
+      }
+      continue;
+    }
+    if (mode === 'single-quote') {
+      if (current === "'" && next === "'") index += 1;
+      else if (current === "'") mode = 'normal';
+      continue;
+    }
+    if (mode === 'double-quote') {
+      if (current === '"' && next === '"') index += 1;
+      else if (current === '"') mode = 'normal';
+      continue;
+    }
+    if (mode === 'dollar-quote') {
+      if (sql.startsWith(dollarTag, index)) {
+        index += dollarTag.length - 1;
+        mode = 'normal';
+      }
+      continue;
+    }
+
+    if (current === '-' && next === '-') {
+      mode = 'line-comment';
+      index += 1;
+    } else if (current === '/' && next === '*') {
+      mode = 'block-comment';
+      blockDepth = 1;
+      index += 1;
+    } else if (current === "'") {
+      mode = 'single-quote';
+    } else if (current === '"') {
+      mode = 'double-quote';
+    } else if (current === '$') {
+      const match = /^\$[A-Za-z_][A-Za-z0-9_]*\$|^\$\$/.exec(sql.slice(index));
+      if (match) {
+        dollarTag = match[0];
+        mode = 'dollar-quote';
+        index += dollarTag.length - 1;
+      }
+    } else if (current === ';') {
+      statements.push({ start, end: index + 1, text: sql.slice(start, index + 1) });
+      start = index + 1;
+    }
+  }
+  if (mode !== 'normal' && mode !== 'line-comment') throw migrationEnvelopeError();
+  if (start < sql.length) statements.push({ start, end: sql.length, text: sql.slice(start) });
+  return statements;
+}
+
+function stripSqlComments(sql) {
   return sql
-    .replace(/^\s*BEGIN\s*;\s*/i, '')
-    .replace(/\s*COMMIT\s*;\s*$/i, '');
+    .replace(/--[^\r\n]*(?:\r?\n|$)/g, ' ')
+    .replace(/\/\*[\s\S]*?\*\//g, ' ')
+    .trim();
+}
+
+export function unwrapTransaction(sql) {
+  const statements = topLevelSqlStatements(sql)
+    .map((statement) => ({ ...statement, executable: stripSqlComments(statement.text) }))
+    .filter((statement) => statement.executable.length > 0);
+  if (statements.length < 2) throw migrationEnvelopeError();
+  const transactionStatements = statements.filter((statement) => /^(?:BEGIN|COMMIT)\s*;$/i.test(statement.executable));
+  const first = statements[0];
+  const last = statements.at(-1);
+  if (!/^BEGIN\s*;$/i.test(first.executable)
+    || !/^COMMIT\s*;$/i.test(last.executable)
+    || transactionStatements.length !== 2) {
+    throw migrationEnvelopeError();
+  }
+  const body = sql.slice(first.end, last.start).trim();
+  if (!body) throw migrationEnvelopeError();
+  return body;
 }
 
 function splitNonTransactionalSql(sql) {
@@ -110,8 +214,58 @@ async function readManifest(root = projectRoot) {
     return {
       version: fileName.replace(/\.sql$/i, ''), fileName, sql, checksum: checksum(sql),
       transactional: !NON_TRANSACTIONAL.has(fileName),
+      requiresEnvelope: !NON_TRANSACTIONAL.has(fileName) && !LEGACY_UNWRAPPED_TRANSACTIONAL.has(fileName),
     };
   }));
+}
+
+export function releaseManifestDigest(entries) {
+  const requiredEntries = entries.filter((entry) => entry.transactional && entry.fileName !== RELEASE_CONTRACT_FILE);
+  return checksum(requiredEntries.map((entry) => `${entry.version}:${entry.checksum}`).join('\n'));
+}
+
+async function recordReleaseContract(client, entries, knownVersions) {
+  const requiredEntries = entries.filter((entry) => entry.transactional && entry.fileName !== RELEASE_CONTRACT_FILE);
+  if (!requiredEntries.every((entry) => knownVersions.has(entry.version))) {
+    throw new Error('发布契约记录失败：必需事务迁移尚未全部成功。');
+  }
+  const requiredVersions = requiredEntries.map((entry) => entry.version);
+  const manifestDigest = releaseManifestDigest(entries);
+  const deferredIndexes = Object.fromEntries(entries
+    .filter((entry) => !entry.transactional)
+    .map((entry) => [entry.version, knownVersions.has(entry.version) ? 'ready' : 'pending']));
+
+  await client.query('BEGIN');
+  try {
+    const existing = await client.query(
+      'SELECT release_id, manifest_digest, required_versions FROM mcp_internal.release_contracts WHERE release_id = $1',
+      [RELEASE_ID],
+    );
+    const row = existing.rows?.[0];
+    if (row && (row.manifest_digest !== manifestDigest
+      || JSON.stringify(row.required_versions) !== JSON.stringify(requiredVersions))) {
+      const error = new Error('发布契约不一致，拒绝覆盖既有记录。');
+      error.code = 'RELEASE_CONTRACT_MISMATCH';
+      throw error;
+    }
+    if (row) {
+      await client.query(
+        'UPDATE mcp_internal.release_contracts SET deferred_indexes = $2::jsonb, verified_at = clock_timestamp() WHERE release_id = $1',
+        [RELEASE_ID, JSON.stringify(deferredIndexes)],
+      );
+    } else {
+      await client.query(
+        `INSERT INTO mcp_internal.release_contracts
+           (release_id, manifest_digest, required_versions, deferred_indexes)
+         VALUES ($1, $2, $3::jsonb, $4::jsonb)`,
+        [RELEASE_ID, manifestDigest, JSON.stringify(requiredVersions), JSON.stringify(deferredIndexes)],
+      );
+    }
+    await client.query('COMMIT');
+  } catch (error) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw error;
+  }
 }
 
 async function databaseObjectMatches(client, [kind, name, expected, expectedValue]) {
@@ -266,7 +420,7 @@ export async function runMigrations({
         if (entry.transactional) {
           await client.query('BEGIN');
           inTransaction = true;
-          await client.query(unwrapTransaction(entry.sql));
+          await client.query(entry.requiresEnvelope ? unwrapTransaction(entry.sql) : entry.sql);
         } else {
           for (const statement of splitNonTransactionalSql(entry.sql)) {
             await client.query(statement);
@@ -294,6 +448,9 @@ export async function runMigrations({
         ).catch(() => {});
         throw new Error(`迁移执行失败：${entry.fileName}。`, { cause: error });
       }
+    }
+    if (knownVersions.has(RELEASE_CONTRACT_FILE.replace(/\.sql$/i, ''))) {
+      await recordReleaseContract(client, entries, knownVersions);
     }
     return results;
   } finally {
