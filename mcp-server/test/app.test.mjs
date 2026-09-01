@@ -73,6 +73,7 @@ function fakeTransportFactory() {
 function createFixture(overrides = {}) {
   const logs = [];
   const authProvider = overrides.authProvider ?? {
+    async checkReadiness() { return { status: 'ready', releaseId: 'test' }; },
     async authenticate(credentials) {
       assert.equal(credentials.username, 'zhangsan');
       return {
@@ -107,6 +108,7 @@ function createFixture(overrides = {}) {
     createTransport: transportFactory.createTransport,
     createRepository: () => ({}),
     createServer: () => ({ async connect() {}, async close() {} }),
+    readinessGate: overrides.readinessGate,
     logger: { info: (event) => logs.push(event), error: (event) => logs.push(event) },
   });
   return { ...appResult, sessionRegistry, transportFactory, logs };
@@ -129,7 +131,10 @@ test('exposes a health endpoint without authentication', async (t) => {
 });
 
 test('reports dependency readiness separately from the unauthenticated health probe', async (t) => {
-  const fixture = createFixture();
+  const fixture = createFixture({ authProvider: {
+    async authenticate() { throw new Error('not used'); },
+    async refresh(context) { return context; },
+  } });
   const server = await listen(fixture.app);
   t.after(async () => { await server.close(); await fixture.close(); });
 
@@ -138,6 +143,49 @@ test('reports dependency readiness separately from the unauthenticated health pr
   assert.equal(response.status, 503);
   assert.equal(payload.status, 'degraded');
   assert.equal(payload.reason, 'READINESS_CHECK_NOT_CONFIGURED');
+});
+
+test('fails closed for initialize and existing-session methods while readiness is degraded', async (t) => {
+  let readiness = 'ready';
+  const authProvider = {
+    async checkReadiness() { return { status: readiness, reason: readiness === 'ready' ? undefined : 'RELEASE_CONTRACT_MISMATCH' }; },
+    async authenticate() {
+      return {
+        userId: 'user-1', role: 'Employee', departmentId: 'dept-1',
+        accessToken: 'access-1', refreshToken: 'refresh-1', tokenExpiresAt: Date.now() + 60_000,
+      };
+    },
+    async refresh(context) { return context; },
+    createUserClient() { return {}; },
+  };
+  const readinessGate = {
+    async status() { return { status: readiness, reason: readiness === 'ready' ? undefined : 'RELEASE_CONTRACT_MISMATCH' }; },
+    async requireReady() {
+      const value = await this.status();
+      if (value.status !== 'ready') throw new AppError('SERVICE_NOT_READY', undefined, 503, { reason: value.reason });
+      return value;
+    },
+  };
+  const fixture = createFixture({ authProvider, readinessGate });
+  const server = await listen(fixture.app);
+  t.after(async () => { await server.close(); await fixture.close(); });
+
+  const initialized = await fetch(`${server.url}/mcp`, {
+    method: 'POST', headers: { authorization: basic, 'content-type': 'application/json' }, body: JSON.stringify(initializeBody),
+  });
+  assert.equal(initialized.status, 200);
+  const sessionId = initialized.headers.get('mcp-session-id');
+  readiness = 'degraded';
+  for (const request of [
+    () => fetch(`${server.url}/mcp`, { method: 'POST', headers: { authorization: basic, 'content-type': 'application/json' }, body: JSON.stringify(initializeBody) }),
+    () => fetch(`${server.url}/mcp`, { headers: { 'mcp-session-id': sessionId } }),
+    () => fetch(`${server.url}/mcp`, { method: 'DELETE', headers: { 'mcp-session-id': sessionId } }),
+  ]) {
+    const response = await request();
+    const payload = await response.json();
+    assert.equal(response.status, 503);
+    assert.equal(payload.error.code, 'SERVICE_NOT_READY');
+  }
 });
 
 test('requires Basic Auth for MCP initialization', async (t) => {
@@ -157,6 +205,7 @@ test('requires Basic Auth for MCP initialization', async (t) => {
 
 test('returns one safe authentication error for invalid credentials', async (t) => {
   const authProvider = {
+    async checkReadiness() { return { status: 'ready', releaseId: 'test' }; },
     async authenticate() { throw new AppError('AUTHENTICATION_FAILED', '账号或密码错误。', 401); },
     async refresh(context) { return context; },
   };
@@ -226,6 +275,32 @@ test('rejects non-HTTPS proxy traffic when HTTPS is required', async (t) => {
   });
 
   assert.equal(response.status, 426);
+});
+
+test('ignores a spoofed forwarded HTTPS header from an untrusted peer', async (t) => {
+  const fixture = createFixture({ config: { requireHttps: true, trustedProxyAddresses: ['192.0.2.10'] } });
+  const server = await listen(fixture.app);
+  t.after(async () => { await server.close(); await fixture.close(); });
+
+  const response = await fetch(`${server.url}/mcp`, {
+    method: 'POST',
+    headers: { authorization: basic, 'content-type': 'application/json', 'x-forwarded-proto': 'https' },
+    body: JSON.stringify(initializeBody),
+  });
+  assert.equal(response.status, 426);
+});
+
+test('accepts forwarded HTTPS only from a configured loopback proxy', async (t) => {
+  const fixture = createFixture({ config: { requireHttps: true, trustedProxyAddresses: ['127.0.0.1'] } });
+  const server = await listen(fixture.app);
+  t.after(async () => { await server.close(); await fixture.close(); });
+
+  const response = await fetch(`${server.url}/mcp`, {
+    method: 'POST',
+    headers: { authorization: basic, 'content-type': 'application/json', 'x-forwarded-proto': 'https' },
+    body: JSON.stringify(initializeBody),
+  });
+  assert.equal(response.status, 200);
 });
 
 test('rate limits repeated initialization attempts without logging credentials', async (t) => {

@@ -36,6 +36,11 @@ function csv(value, fallback) {
   return [...new Set(items)];
 }
 
+function isLoopbackHost(host) {
+  const normalized = host.trim().toLowerCase().replace(/^\[|\]$/g, '');
+  return normalized === '127.0.0.1' || normalized === '::1' || normalized === '::ffff:127.0.0.1';
+}
+
 const FORBIDDEN_SECRET_ENV_KEYS = Object.freeze([
   'SUPABASE_SERVICE_ROLE_KEY',
   'SUPABASE_SECRET_KEY',
@@ -80,14 +85,28 @@ export function loadConfig(env = process.env) {
 
   const rateLimitWindowMs = positiveInteger(env, 'MCP_RATE_LIMIT_WINDOW_MS', 60 * 1000);
   const rateLimitMax = positiveInteger(env, 'MCP_RATE_LIMIT_MAX', 30);
+  const trustedProxyAddresses = csv(env.MCP_TRUSTED_PROXY_ADDRESSES, '127.0.0.1,::1,::ffff:127.0.0.1');
+  const host = (env.MCP_HOST || '127.0.0.1').trim();
+  const nodeEnv = (env.NODE_ENV || 'development').trim().toLowerCase();
+  const allowNonLoopback = booleanValue(env, 'MCP_ALLOW_NON_LOOPBACK', false);
+  if (!host) throw new Error('MCP_HOST 不能为空');
+  if (!isLoopbackHost(host) && (nodeEnv === 'production' || !allowNonLoopback)) {
+    throw new Error('MCP_HOST 只能绑定 loopback；非生产诊断必须显式启用 MCP_ALLOW_NON_LOOPBACK');
+  }
+  if (nodeEnv === 'production' && trustedProxyAddresses.some((address) => !isLoopbackHost(address))) {
+    throw new Error('生产环境 MCP_TRUSTED_PROXY_ADDRESSES 只能包含 loopback 地址');
+  }
   return Object.freeze({
     supabaseUrl,
     supabasePublishableKey,
-    host: (env.MCP_HOST || '127.0.0.1').trim(),
+    host,
+    nodeEnv,
+    allowNonLoopback,
     port,
     sessionTtlMs: positiveInteger(env, 'MCP_SESSION_TTL_MS', 8 * 60 * 60 * 1000),
     refreshWindowMs: positiveInteger(env, 'MCP_REFRESH_WINDOW_MS', 60 * 1000),
     requestTimeoutMs: positiveInteger(env, 'MCP_REQUEST_TIMEOUT_MS', 15 * 1000),
+    readinessTtlMs: positiveInteger(env, 'MCP_READINESS_TTL_MS', 5 * 1000),
     confirmationTtlMs: boundedPositiveInteger(env, 'MCP_CONFIRMATION_TTL_MS', 10 * 60 * 1000, 60 * 1000),
     enableJsonResponse: booleanValue(env, 'MCP_ENABLE_JSON_RESPONSE', true),
     sseKeepAliveMs: boundedPositiveInteger(env, 'MCP_SSE_KEEP_ALIVE_MS', 15 * 1000, 1000),
@@ -99,5 +118,6 @@ export function loadConfig(env = process.env) {
     drainTimeoutMs: positiveInteger(env, 'MCP_DRAIN_TIMEOUT_MS', 10 * 1000),
     requireHttps: booleanValue(env, 'MCP_REQUIRE_HTTPS', false),
     allowedHosts: csv(env.MCP_ALLOWED_HOSTS, '127.0.0.1,localhost'),
+    trustedProxyAddresses,
   });
 }

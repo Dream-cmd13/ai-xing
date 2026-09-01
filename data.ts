@@ -8,6 +8,7 @@ import { isMissingTaskReviewColumnError, omitTaskReviewColumns, stripTaskReviewF
  */
 
 const handleSupabaseError = (error: any) => {
+  if (error?.code === 'RPC_NOT_CONFIGURED') throw error;
   const message =
     error?.message ||
     (typeof error === 'string' && error.trim().length > 0 ? error : "未知数据库错误");
@@ -31,6 +32,11 @@ const buildDeleteConflictError = (entityLabel: string) =>
 
 const buildPermissionError = (entityLabel: string) =>
   new Error(`您暂无权限保存${entityLabel}，请联系管理员检查权限配置。`);
+
+const buildRpcNotConfiguredError = (featureLabel: string) =>
+  Object.assign(new Error(`${featureLabel}所需数据库接口尚未启用，请先完成当前版本迁移。`), {
+    code: 'RPC_NOT_CONFIGURED'
+  });
 
 const buildDuplicateCreateError = (entityLabel: string) =>
   new Error(`${entityLabel}创建失败，可能是重复提交或记录已存在。`);
@@ -526,7 +532,7 @@ export const getVisibleTasksForScope = async (
   userId: string,
   departmentId: string,
   weekIds: string[],
-  fallbackUsers: User[] = [],
+  _fallbackUsers: User[] = [],
   scope: 'auto' | 'exact' | 'subtree' = 'auto'
 ): Promise<PADEntry[]> => {
   if (!isSupabaseConfigured()) throw new Error("Supabase not configured");
@@ -545,20 +551,24 @@ export const getVisibleTasksForScope = async (
       p_scope: scope,
     });
 
-    const result = isIgnoredMissingFunctionError(scopedResult.error)
-      ? await supabase.rpc('web_get_visible_tasks_scope', {
+    let result = scopedResult;
+    if (isIgnoredMissingFunctionError(scopedResult.error)) {
+      if (scope !== 'exact') {
+        throw buildRpcNotConfiguredError('部门范围任务查询');
+      }
+      result = await supabase.rpc('web_get_visible_tasks_scope', {
         p_department_id: departmentId,
         p_week_ids: weekIds,
         p_limit: 2_000
-      })
-      : scopedResult;
+      });
+    }
 
-    /*
-     * The v2 RPC carries the resolved scope in its response. The legacy RPC
-     * remains the compatibility path for a frontend deployed before the
-     * nested-department migration.
-     */
-    if (result?.error) throw result.error;
+    if (result?.error) {
+      if (isIgnoredMissingFunctionError(result.error)) {
+        throw buildRpcNotConfiguredError('部门范围任务查询');
+      }
+      throw result.error;
+    }
     if (result?.data && typeof result.data === 'object') {
       const payload = result.data as { items?: unknown[]; truncated?: boolean };
       if (!Array.isArray(payload.items) || typeof payload.truncated !== 'boolean') {
@@ -571,19 +581,7 @@ export const getVisibleTasksForScope = async (
       taskScopeCache.set(cacheKey, { tasks, expiresAt: Date.now() + TASK_SCOPE_CACHE_TTL_MS });
       return tasks;
     }
-
-    // Compatibility path for a frontend deployed before the scope migration.
-    const allTasks = await getTasks();
-    const userDepartmentById = new Map(fallbackUsers.map((user) => [user.id, user.departmentId]));
-    const weekSet = new Set(weekIds);
-    const tasks = allTasks.filter((task) => {
-      const taskDepartmentId = task.departmentId || userDepartmentById.get(task.ownerId);
-      return taskDepartmentId === departmentId
-        && Array.isArray(task.targetWeeks)
-        && task.targetWeeks.some((weekId) => weekSet.has(weekId));
-    });
-    taskScopeCache.set(cacheKey, { tasks, expiresAt: Date.now() + TASK_SCOPE_CACHE_TTL_MS });
-    return tasks;
+    throw new Error('任务范围结果格式错误，请检查数据库迁移。');
   } catch (e) {
     handleSupabaseError(e);
     throw e;

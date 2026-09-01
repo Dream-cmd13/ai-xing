@@ -304,7 +304,7 @@ test('maps stable MCP database error prefixes without leaking internal details',
     ['MCP_VERSION_CONFLICT: row mismatch', 'VERSION_CONFLICT'],
     ['MCP_PERMISSION_DENIED: private department', 'PERMISSION_DENIED'],
     ['MCP_REQUEST_IN_FLIGHT: duplicate', 'REQUEST_IN_FLIGHT'],
-    ['MCP_VALIDATION: invalid input', 'INVALID_ARGUMENT'],
+    ['MCP_VALIDATION: invalid input', 'MCP_VALIDATION'],
   ];
 
   for (const [message, code] of prefixes) {

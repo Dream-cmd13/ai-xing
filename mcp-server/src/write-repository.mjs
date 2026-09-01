@@ -51,9 +51,12 @@ function mapRpcError(error) {
   if (message.startsWith('MCP_VERSION_CONFLICT:')) return new AppError('VERSION_CONFLICT');
   if (message.startsWith('MCP_PERMISSION_DENIED:')) return new AppError('PERMISSION_DENIED');
   if (message.startsWith('MCP_REQUEST_IN_FLIGHT:')) return new AppError('REQUEST_IN_FLIGHT');
-  if (message.startsWith('MCP_VALIDATION:')) return new AppError('INVALID_ARGUMENT');
+  if (message.startsWith('MCP_VALIDATION:')) return new AppError('MCP_VALIDATION', undefined, 400);
   if (isMissingRpc(error)) {
-    const appError = new AppError('RPC_NOT_CONFIGURED', undefined, 503);
+    const publicMessage = message.includes('mcp_update_pad_task_with_review_sync')
+      ? '任务复盘同步功能尚未启用，请先完成当前版本迁移后重试。'
+      : undefined;
+    const appError = new AppError('RPC_NOT_CONFIGURED', publicMessage, 503);
     appError.diagnosticCode = 'RPC_NOT_FOUND';
     return appError;
   }

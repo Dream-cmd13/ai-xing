@@ -13,7 +13,8 @@
     "mcp:test": "npm --prefix mcp-server test",
     "mcp:test:live": "npm --prefix mcp-server run test:live",
     "preview": "vite preview",
-    "scan:dist": "node scripts/scan-build-secrets.mjs"
+    "scan:dist": "node scripts/scan-build-secrets.mjs",
+    "package:production": "node scripts/package-production.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.105.4",

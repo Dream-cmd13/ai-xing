@@ -23,6 +23,7 @@ const initializeBody = () => ({
 function buildAuthProvider() {
   return {
     calls: 0,
+    async checkReadiness() { return { status: 'ready', releaseId: 'test' }; },
     async authenticate() {
       this.calls += 1;
       return {

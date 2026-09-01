@@ -83,6 +83,7 @@ AS $$
   )
   SELECT jsonb_build_object(
     'status', CASE WHEN required_migrations AND required_functions AND function_privileges THEN 'ready' ELSE 'degraded' END,
+    'reason', CASE WHEN required_migrations AND required_functions AND function_privileges THEN NULL ELSE 'RELEASE_CONTRACT_MISMATCH' END,
     'releaseId', release_id,
     'migrationVersion', '2026-09-01_mcp_release_contract',
     'manifestDigest', manifest_digest,

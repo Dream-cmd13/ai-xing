@@ -25,6 +25,7 @@ async function listen(app) {
 test('official MCP client initializes, lists fifteen tools, calls one and terminates the session', async (t) => {
   const authProvider = {
     calls: 0,
+    async checkReadiness() { return { status: 'ready', releaseId: 'test' }; },
     async authenticate() {
       this.calls += 1;
       return {
@@ -193,6 +194,7 @@ test('targetWeeks-only creation auto-fills dates and lands in today and this-wee
   const nowMs = Date.parse('2026-08-27T04:00:00.000Z');
   const now = () => nowMs;
   const authProvider = {
+    async checkReadiness() { return { status: 'ready', releaseId: 'test' }; },
     async authenticate() {
       return {
         userId: 'user-1', role: 'Employee', departmentId: 'dept-1',
@@ -300,6 +302,7 @@ test('targetWeeks-only creation auto-fills dates and lands in today and this-wee
 
 test('uses JSON responses for request/response MCP clients', async (t) => {
   const authProvider = {
+    async checkReadiness() { return { status: 'ready', releaseId: 'test' }; },
     async authenticate() {
       return {
         userId: 'user-json', role: 'Employee', departmentId: 'dept-json',

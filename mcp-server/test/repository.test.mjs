@@ -117,6 +117,21 @@ test('reads organization information with a user JWT and omits sensitive departm
   assert.equal('roleMembers' in result.departments[0].subDepartments[0], false);
 });
 
+test('preserves the public read repository method contract', () => {
+  const fake = fakeSupabase();
+  assert.deepEqual(Object.keys(repository(fake).value).sort(), [
+    'getCompanyOkrs',
+    'getDepartmentOkrs',
+    'getDepartmentPeople',
+    'getDepartmentWeeklyPad',
+    'getOrganizationInfo',
+    'getPersonalWorkbench',
+    'getProcessSipoc',
+    'getWeeklyReviewGaps',
+    'searchPadTasks',
+  ]);
+});
+
 test('filters weekly PAD from the existing visible-task RPC and caps the result limit', async () => {
   const fake = fakeSupabase({
     'rpc:get_visible_tasks_full': {
@@ -144,7 +159,7 @@ test('filters weekly PAD from the existing visible-task RPC and caps the result 
   });
   const repo = repository(fake);
 
-  const result = await repo.value.getDepartmentWeeklyPad({ departmentId: 'd1', weekId: '2026-W34', limit: 999 });
+  const result = await repo.value.getDepartmentWeeklyPad({ departmentId: 'd1', scope: 'exact', weekId: '2026-W34', limit: 999 });
 
   assert.deepEqual(result.tasks.map((task) => task.id), ['t1']);
   assert.equal(result.tasks[0].targetWeeks[0], '2026-W34');
@@ -183,7 +198,7 @@ test('filters task search from the existing visible-task RPC without raw PostgRE
   const repo = repository(fake);
 
   const result = await repo.value.searchPadTasks({
-    query: ' 季度复盘 ', departmentId: 'd1', status: 'in-progress', limit: 20, offset: 5,
+    query: ' 季度复盘 ', departmentId: 'd1', scope: 'exact', status: 'in-progress', limit: 20, offset: 5,
   });
 
   assert.deepEqual(result, {
@@ -208,7 +223,7 @@ test('falls back to the bounded direct weekly query only when the visible-task R
   });
   const repo = repository(fake);
 
-  const result = await repo.value.getDepartmentWeeklyPad({ departmentId: 'd1', weekId: '2026-W34', limit: 10 });
+  const result = await repo.value.getDepartmentWeeklyPad({ departmentId: 'd1', scope: 'exact', weekId: '2026-W34', limit: 10 });
 
   assert.equal(result.tasks.length, 1);
   assert.ok(fake.calls.some((call) => call[0] === 'tasks' && call[1] === 'eq' && call[2] === 'department_id' && call[3] === 'd1'));
@@ -661,6 +676,54 @@ test('does not silently downgrade a subtree task search when the scoped RPC is m
   assert.equal(fake.calls.some((call) => call[1] === 'mcp_get_visible_tasks_page'), false);
 });
 
+test('does not downgrade auto task scope even when the resolved department is a leaf', async () => {
+  const fake = fakeSupabase({
+    'rpc:mcp_resolve_department': {
+      data: {
+        department: { id: 'leaf', name: '叶子部门', hasChildren: false },
+        scope: 'exact',
+        ids: ['leaf'],
+      },
+      error: null,
+    },
+    'rpc:mcp_get_department_tasks_page': {
+      data: null,
+      error: { code: 'PGRST202', message: 'Could not find the function' },
+    },
+    'rpc:get_visible_tasks_full': { data: [{ id: 'legacy-task' }], error: null },
+  });
+  const repo = repository(fake);
+
+  await assert.rejects(
+    repo.value.searchPadTasks({ departmentId: 'leaf', scope: 'auto' }),
+    (error) => error.code === 'RPC_NOT_CONFIGURED',
+  );
+  assert.equal(fake.calls.some((call) => call[1] === 'get_visible_tasks_full'), false);
+});
+
+test('does not allow exact compatibility when the resolver reports a subtree', async () => {
+  const fake = fakeSupabase({
+    'rpc:mcp_resolve_department': {
+      data: {
+        department: { id: 'root', name: '根部门', hasChildren: true },
+        scope: 'subtree',
+        ids: ['root', 'child'],
+      },
+      error: null,
+    },
+    'rpc:mcp_get_department_tasks_page': {
+      data: null,
+      error: { code: 'PGRST202', message: 'Could not find the function' },
+    },
+  });
+  const repo = repository(fake);
+
+  await assert.rejects(
+    repo.value.searchPadTasks({ departmentId: 'root', scope: 'exact' }),
+    (error) => error.code === 'RPC_NOT_CONFIGURED',
+  );
+});
+
 test('uses the resolved exact scope when reading people from a leaf department', async () => {
   const fake = fakeSupabase({
     'rpc:mcp_resolve_department': {
@@ -735,6 +798,23 @@ test('reads weekly review gaps from the card state and preserves inconsistency d
   assert.deepEqual(fake.calls.find((call) => call[1] === 'mcp_get_weekly_review_gaps')[2], {
     p_week_id: '2026-W33', p_department_id: null, p_limit: 50, p_offset: 0,
   });
+});
+
+test('requires the scoped weekly review RPC for department queries', async () => {
+  const fake = fakeSupabase({
+    'rpc:mcp_get_weekly_review_gaps_scope_v2': {
+      data: null,
+      error: { code: 'PGRST202', message: 'Could not find the function' },
+    },
+    'rpc:mcp_get_weekly_review_gaps': { data: { groups: [] }, error: null },
+  });
+  const repo = repository(fake);
+
+  await assert.rejects(
+    repo.value.getWeeklyReviewGaps({ weekId: '2026-W33', departmentId: 'd1' }),
+    (error) => error.code === 'RPC_NOT_CONFIGURED',
+  );
+  assert.equal(fake.calls.some((call) => call[1] === 'mcp_get_weekly_review_gaps'), false);
 });
 
 test('fails explicitly when the task people RPC is not installed', async () => {
@@ -816,7 +896,7 @@ test('passes includeTasks=false through to the company OKR RPC', async () => {
 
 test('reads department OKRs by id and maps nested period structures', async () => {
   const fake = fakeSupabase({
-    'rpc:mcp_get_department_okrs': {
+    'rpc:mcp_get_department_okrs_scope_v2': {
       data: {
         year: 2026,
         period: null,
@@ -842,8 +922,9 @@ test('reads department OKRs by id and maps nested period structures', async () =
   assert.equal(result.departments[0].periods.Annual[0].objective, '年度目标');
   assert.equal(result.departments[0].periods.Q3[0].id, 'okr-2');
   assert.equal(result.limit, 50);
-  assert.deepEqual(fake.calls.find((call) => call[1] === 'mcp_get_department_okrs')[2], {
+  assert.deepEqual(fake.calls.find((call) => call[1] === 'mcp_get_department_okrs_scope_v2')[2], {
     p_department_id: 'd1',
+    p_scope: 'auto',
     p_year: 2026,
     p_period: null,
     p_include_tasks: true,
@@ -854,7 +935,7 @@ test('reads department OKRs by id and maps nested period structures', async () =
 test('resolves departmentName before calling the department OKR RPC', async () => {
   const fake = fakeSupabase({
     departments: { data: [{ id: 'd1', name: '市场部' }], error: null },
-    'rpc:mcp_get_department_okrs': { data: { year: 2026, period: 'Q3', departmentCount: 0, hasMore: false, departments: [] }, error: null },
+    'rpc:mcp_get_department_okrs_scope_v2': { data: { year: 2026, period: 'Q3', departmentCount: 0, hasMore: false, departments: [] }, error: null },
   });
   const repo = repository(fake);
 
@@ -862,8 +943,9 @@ test('resolves departmentName before calling the department OKR RPC', async () =
 
   assert.equal(result.period, 'Q3');
   assert.ok(fake.calls.some((call) => call[0] === 'departments' && call[1] === 'eq' && call[2] === 'name' && call[3] === '市场部'));
-  assert.deepEqual(fake.calls.find((call) => call[1] === 'mcp_get_department_okrs')[2], {
+  assert.deepEqual(fake.calls.find((call) => call[1] === 'mcp_get_department_okrs_scope_v2')[2], {
     p_department_id: 'd1',
+    p_scope: 'auto',
     p_year: null,
     p_period: 'Q3',
     p_include_tasks: false,
@@ -889,7 +971,7 @@ test('rejects ambiguous or missing department names for department OKR queries',
 
 test('maps department OKR RPC permission errors to stable public codes', async () => {
   const fake = fakeSupabase({
-    'rpc:mcp_get_department_okrs': { data: null, error: { code: 'P0001', message: 'MCP_PERMISSION_DENIED: department is not visible' } },
+    'rpc:mcp_get_department_okrs_scope_v2': { data: null, error: { code: 'P0001', message: 'MCP_PERMISSION_DENIED: department is not visible' } },
   });
   const repo = repository(fake);
 
@@ -914,6 +996,26 @@ test('fails explicitly when the OKR RPCs are not installed', async () => {
     missingRepo.value.getDepartmentOkrs({}),
     (error) => error.code === 'RPC_NOT_CONFIGURED',
   );
+});
+
+test('does not fall back to the legacy department OKR RPC when scoped v2 is missing', async () => {
+  const fake = fakeSupabase({
+    'rpc:mcp_get_department_okrs_scope_v2': {
+      data: null,
+      error: { code: 'PGRST202', message: 'Could not find the function' },
+    },
+    'rpc:mcp_get_department_okrs': {
+      data: { year: 2026, departmentCount: 0, departments: [] },
+      error: null,
+    },
+  });
+  const repo = repository(fake);
+
+  await assert.rejects(
+    repo.value.getDepartmentOkrs({ departmentId: 'd1', year: 2026 }),
+    (error) => error.code === 'RPC_NOT_CONFIGURED',
+  );
+  assert.equal(fake.calls.some((call) => call[1] === 'mcp_get_department_okrs'), false);
 });
 
 test('maps scoped query permission and missing RPC errors to stable public codes', async () => {

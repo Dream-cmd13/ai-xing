@@ -13,6 +13,7 @@ import { createIdentityRepository } from './identity-repository.mjs';
 import { createWriteRepository } from './write-repository.mjs';
 import { createSessionId } from './session-registry.mjs';
 import { FixedWindowRateLimiter } from './rate-limiter.mjs';
+import { createReadinessGate } from './readiness-gate.mjs';
 
 function jsonRpcSessionError(res, status = 400, code = -32000, message = '无效或已过期的 MCP Session。', dataCode = 'SESSION_EXPIRED') {
   return res.status(status).json({
@@ -32,8 +33,11 @@ function publicHttpError(res, error, extraHeaders = {}) {
   return res.status(error instanceof AppError ? error.status : 500).json({ error: payload });
 }
 
-function isHttpsRequest(req) {
+export function isHttpsRequest(req, trustedProxyAddresses = []) {
   if (req.socket?.encrypted) return true;
+  const remoteAddress = String(req.socket?.remoteAddress || '').trim().toLowerCase();
+  const trusted = new Set(trustedProxyAddresses.map((address) => String(address).trim().toLowerCase()));
+  if (!trusted.has(remoteAddress)) return false;
   const forwarded = req.headers['x-forwarded-proto'];
   const protocol = Array.isArray(forwarded) ? forwarded[0] : forwarded?.split(',')[0];
   return protocol?.trim().toLowerCase() === 'https';
@@ -52,6 +56,7 @@ export function createMcpHttpApp({
   createWriteRepository: createWriteRepositoryFactory = createWriteRepository,
   createServer = createSessionMcpServer,
   confirmationStore = new ConfirmationStore({ ttlMs: config.confirmationTtlMs ?? 10 * 60 * 1000 }),
+  readinessGate: providedReadinessGate,
   logger = console,
 }) {
   sessionRegistry.setOnSessionDestroyed?.((sessionId) => confirmationStore.revokeSession(sessionId));
@@ -66,6 +71,11 @@ export function createMcpHttpApp({
   const writeLimiter = writeRateLimiter ?? new FixedWindowRateLimiter({
     windowMs: config.rateLimitWindowMs ?? 60_000,
     max: config.writeRateLimitMax ?? config.rateLimitMax ?? 30,
+  });
+  const readinessGate = providedReadinessGate ?? createReadinessGate({
+    check: authProvider.checkReadiness?.bind(authProvider),
+    ttlMs: config.readinessTtlMs ?? 5_000,
+    timeoutMs: config.requestTimeoutMs ?? 15_000,
   });
   let draining = false;
   let activeRequests = 0;
@@ -143,27 +153,28 @@ export function createMcpHttpApp({
 
   app.get('/ready', async (_req, res) => {
     if (draining) return res.status(503).json({ status: 'draining' });
-    if (typeof authProvider.checkReadiness !== 'function') {
-      return res.status(503).json({ status: 'degraded', reason: 'READINESS_CHECK_NOT_CONFIGURED' });
-    }
-    try {
-      const readiness = await Promise.race([
-        Promise.resolve(authProvider.checkReadiness()),
-        new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), config.requestTimeoutMs ?? 15_000)),
-      ]);
-      const ready = readiness?.status === 'ready';
-      return res.status(ready ? 200 : 503).json(readiness);
-    } catch {
-      return res.status(503).json({ status: 'degraded', reason: 'READINESS_CHECK_FAILED' });
-    }
+    const readiness = await readinessGate.status();
+    return res.status(readiness.status === 'ready' ? 200 : 503).json(readiness);
   });
 
   app.use('/mcp', (req, res, next) => {
-    if (!config.requireHttps || isHttpsRequest(req)) return next();
+    if (!config.requireHttps || isHttpsRequest(req, config.trustedProxyAddresses ?? ['127.0.0.1', '::1', '::ffff:127.0.0.1'])) return next();
     res.setHeader('Upgrade', 'TLS/1.2');
     return res.status(426).json({
       error: { code: 'HTTPS_REQUIRED', message: 'MCP 只允许通过 HTTPS 访问。' },
     });
+  });
+
+  app.use('/mcp', async (_req, res, next) => {
+    if (draining) {
+      return res.status(503).json({ error: { code: 'SERVICE_DRAINING', message: '服务正在平滑停止，请稍后重试。' } });
+    }
+    try {
+      await readinessGate.requireReady();
+      return next();
+    } catch (error) {
+      return publicHttpError(res, error);
+    }
   });
 
   async function existingSession(req, res, body) {

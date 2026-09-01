@@ -16,6 +16,8 @@ const readTaskCenterView = () => readFile(
   'utf8',
 );
 
+const readDataLayer = () => readFile(path.join(projectRoot, 'data.ts'), 'utf8');
+
 test('task center migration filters the department scope before keyset paging', async () => {
   const sql = await readMigration();
 
@@ -61,4 +63,17 @@ test('task center organization view keeps its own scoped page state', async () =
   assert.match(source, /orgRequestIdRef/);
   assert.match(source, /loadOrgTasks\(false, orgCursor\)/);
   assert.doesNotMatch(source, /getTaskList/);
+});
+
+test('frontend scoped task reads fail closed except for explicit exact compatibility', async () => {
+  const source = await readDataLayer();
+  const start = source.indexOf('export const getVisibleTasksForScope');
+  const end = source.indexOf('export const getTaskUsersForTasks', start);
+  assert.ok(start >= 0 && end > start);
+  const scopedReader = source.slice(start, end);
+
+  assert.match(scopedReader, /if \(scope !== 'exact'\)[\s\S]{0,180}buildRpcNotConfiguredError/);
+  assert.match(scopedReader, /supabase\.rpc\('web_get_visible_tasks_scope'/);
+  assert.doesNotMatch(scopedReader, /const allTasks = await getTasks\(\)/);
+  assert.doesNotMatch(scopedReader, /userDepartmentById/);
 });

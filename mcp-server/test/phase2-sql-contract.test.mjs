@@ -475,6 +475,7 @@ test('release readiness requires the complete ordered transactional manifest and
     assert.match(sql, new RegExp(fileName.replace(/\.sql$/i, '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&')), fileName);
   }
   assert.match(sql, /requiredMigrations/i);
+  assert.match(sql, /'reason'[\s\S]{0,180}'RELEASE_CONTRACT_MISMATCH'/i);
   assert.match(sql, /functionPrivileges/i);
   assert.match(sql, /deferredIndexes/i);
   assert.match(sql, /has_function_privilege\('authenticated'/i);
