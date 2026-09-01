@@ -91,8 +91,8 @@ const WeeklyView: React.FC = () => {
       });
   }, [state.tasks, selectedOwnerId, selectedWeek]);
   const assignableTaskOwners = useMemo(
-    () => getAssignableTaskOwners(currentUser, state.users, state.systemRoles || []),
-    [currentUser, state.users, state.systemRoles]
+    () => getAssignableTaskOwners(currentUser, state.users, state.systemRoles || [], state.departments),
+    [currentUser, state.users, state.systemRoles, state.departments]
   );
   const canCreateForSelectedOwner = useMemo(
     () => assignableTaskOwners.some(user => user.id === selectedOwnerId),
@@ -240,10 +240,9 @@ const WeeklyView: React.FC = () => {
         newData.ownerId = oldTask.ownerId;
       }
     } else if (!currentUserIsAdmin) {
-      if (!canAssignTaskOwner(currentUser, state.users, newData.ownerId, state.systemRoles || [])) {
+      if (!canAssignTaskOwner(currentUser, state.users, newData.ownerId, state.systemRoles || [], state.departments)) {
         newData.ownerId = currentUser.id;
       }
-      newData.departmentId = currentUser.departmentId;
     }
     
     if (taskModal.index !== null) {

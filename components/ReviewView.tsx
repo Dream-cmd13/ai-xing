@@ -10,7 +10,7 @@ import { AppState, Department, ReviewEntry, ObjectiveReview, User, PADEntry, Men
 import { Calendar, Building2, ClipboardCheck, Save, CheckCircle, Loader2, Target, TrendingUp, MessageSquare, FileText, Lock, Download, RefreshCw, ChevronLeft, ChevronRight, PieChart } from 'lucide-react';
 import PageToast from './PageToast';
 import TaskModal from './TaskModal';
-import { getTaskById } from '../data';
+import { getTaskById, getVisibleTasksForScope } from '../data';
 import { getUserFacingError } from '../utils/userFacingError';
 import { canManageReview, canManageTask, getVisibleDepartments, canViewTask, isAdminUser } from '../utils/permissions';
 import { createTaskOkrGroups } from '../utils/taskOkrOptions';
@@ -20,6 +20,7 @@ import { createReviewDraftSnapshot, hasReviewDraftChanges, ReviewDraftSnapshot }
 import { syncTaskReviewsToTasks } from '../utils/taskReviewSync';
 import { useLeaveGuard } from '@/hooks/useLeaveGuard';
 import { createTaskOwnerSections, getDepartmentManagerUserIds } from '../utils/taskOwnerGrouping.js';
+import { collectDepartmentIds, flattenDepartmentTree } from '../utils/departmentTree';
 
 
 
@@ -43,6 +44,9 @@ const ReviewView: React.FC = () => {
   const showSaveSuccess = state.showSaveSuccess;
   const isDirty = state.isDirty;
   const setIsDirty = state.setIsDirty;
+  const setState = state.setState;
+  const setLastSavedTasks = state.setLastSavedTasks;
+  const setBackendError = state.setBackendError;
   const backendError = state.backendError;
   const currentProcessId = state.currentProcessId;
   const setCurrentProcessId = state.setCurrentProcessId;
@@ -53,7 +57,6 @@ const ReviewView: React.FC = () => {
 
   const [activeTab, setActiveTab] = useState<'weekly' | 'monthly' | 'quarterly'>(initialTab || 'monthly');
   const [selectedDeptId, setSelectedDeptId] = useState<string | null>(initialDeptId || null);
-  
   // Weekly State
   const [selectedWeek, setSelectedWeek] = useState<string>(() => {
     if (initialTab === 'weekly' && initialPeriod) return initialPeriod;
@@ -81,6 +84,8 @@ const ReviewView: React.FC = () => {
   const [reviewScore, setReviewScore] = useState(0);
   const [okrReviews, setOkrReviews] = useState<Record<string, ObjectiveReview>>({});
   const [deptTasks, setDeptTasks] = useState<PADEntry[]>([]);
+  const [isTaskScopeLoading, setIsTaskScopeLoading] = useState(false);
+  const [taskScopeError, setTaskScopeError] = useState<string | null>(null);
   const [currentQuarterlyOkrIndex, setCurrentQuarterlyOkrIndex] = useState(0);
   const [reviewSubTab, setReviewSubTab] = useState<'tasks' | 'weekly-records' | 'okrs'>(
     initialTab === 'quarterly' || initialTab === 'monthly' ? 'okrs' : 'tasks'
@@ -199,6 +204,7 @@ const ReviewView: React.FC = () => {
     () => flatDepts.find(d => d.id === selectedDeptId) || null,
     [flatDepts, selectedDeptId]
   );
+  const selectedDepartmentScope = 'exact' as const;
   const canEditReview = useMemo(() => {
     if (!currentUser || !selectedDept || !permissions.update) return false;
     return canManageReview(selectedDept, currentUser, state.systemRoles || [], state.departments);
@@ -246,6 +252,10 @@ const ReviewView: React.FC = () => {
 
     const nextTasks: PADEntry[] = [];
     const seen = new Set<string>();
+    const scopeIndex = flattenDepartmentTree(state.departments, state.users);
+    const scopedDepartmentIds = selectedDeptId
+      ? new Set(collectDepartmentIds(scopeIndex, selectedDeptId, selectedDepartmentScope))
+      : new Set<string>();
 
     (state.tasks || []).forEach(task => {
       const inPeriod = activeTab === 'weekly'
@@ -258,7 +268,7 @@ const ReviewView: React.FC = () => {
       if (!canViewTask(task, currentUser, state.users, state.systemRoles || [], state.departments)) return;
 
       const taskDeptId = task.departmentId || state.users.find(u => u.id === task.ownerId)?.departmentId;
-      if (taskDeptId === selectedDeptId && !seen.has(task.id)) {
+      if (scopedDepartmentIds.has(taskDeptId || '') && !seen.has(task.id)) {
         seen.add(task.id);
         nextTasks.push(task);
       }
@@ -274,6 +284,7 @@ const ReviewView: React.FC = () => {
     currentUser,
     selectedDept,
     selectedDeptId,
+    selectedDepartmentScope,
     selectedMonth,
     selectedWeek,
     state.departments,
@@ -362,7 +373,9 @@ const ReviewView: React.FC = () => {
 
   const changeSelectedDepartment = (nextDeptId: string) => {
     if ((selectedDeptId || '') === nextDeptId) return;
-    attemptLeave(() => setSelectedDeptId(nextDeptId || null));
+    attemptLeave(() => {
+      setSelectedDeptId(nextDeptId || null);
+    });
   };
 
   const changeSelectedMonthValue = (nextMonth: string) => {
@@ -381,6 +394,7 @@ const ReviewView: React.FC = () => {
   };
 
   const submitReview = async () => {
+    if (isTaskScopeLoading) return;
     if (!selectedDeptId) return;
     if (!canEditReview) {
       showToast('当前部门复盘仅可查看，不能修改。', 'info');
@@ -510,7 +524,7 @@ const ReviewView: React.FC = () => {
   // Load tasks automatically when selection changes
   useEffect(() => {
     loadDeptTasks();
-  }, [selectedDeptId, selectedWeek, selectedMonth, selectedQuarter, activeTab, state.tasks, state.users, state.systemRoles, currentUser]);
+  }, [selectedDeptId, selectedDepartmentScope, selectedWeek, selectedMonth, selectedQuarter, activeTab, state.tasks, state.users, state.systemRoles, currentUser]);
 
   const currentPeriodLabel = currentPeriodKey;
 
@@ -534,11 +548,47 @@ const ReviewView: React.FC = () => {
       if (!periods.includes(weekKey)) {
         periods.push(weekKey);
       }
-      cursor.setUTCDate(cursor.getUTCDate() + 7);
+      cursor.setUTCDate(cursor.getUTCDate() + 1);
     }
 
     return periods;
   };
+
+  const reviewWeekIds = useMemo(() => {
+    return activeTab === 'weekly' ? [selectedWeek] : [];
+  }, [activeTab, selectedMonth, selectedWeek]);
+
+  useEffect(() => {
+    if (!currentUser?.id || !selectedDeptId || reviewWeekIds.length === 0) {
+      setIsTaskScopeLoading(false);
+      setTaskScopeError(null);
+      return;
+    }
+
+    let cancelled = false;
+    setIsTaskScopeLoading(true);
+    setTaskScopeError(null);
+
+    getVisibleTasksForScope(currentUser.id, selectedDeptId, reviewWeekIds, state.users, selectedDepartmentScope)
+      .then((loadedTasks) => {
+        if (cancelled) return;
+        setState({ tasks: loadedTasks });
+        setLastSavedTasks(loadedTasks);
+      })
+      .catch((error: any) => {
+        if (cancelled) return;
+        const message = error?.message || '当前周期任务加载失败';
+        setTaskScopeError(message);
+        setBackendError(message);
+      })
+      .finally(() => {
+        if (!cancelled) setIsTaskScopeLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [currentUser?.id, reviewWeekIds, selectedDeptId, selectedDepartmentScope, setBackendError, setLastSavedTasks, setState, state.users]);
 
   const monthlyWeekReviews = useMemo(() => {
     if (!selectedDept || activeTab !== 'monthly') return [];
@@ -739,7 +789,9 @@ const ReviewView: React.FC = () => {
     };
   }, [monthlyWeekReviews]);
   const renderTaskReviewCard = (task: PADEntry) => {
-    const { evaluation, score } = readTaskReviewState(okrReviews, task);
+    const reviewState = readTaskReviewState(okrReviews, task);
+    const { evaluation, score } = reviewState;
+    const reviewDataInvalid = reviewState.state === 'invalid';
     const owner = state.users.find(u => u.id === task.ownerId);
 
     return (
@@ -779,6 +831,12 @@ const ReviewView: React.FC = () => {
             </div>
           </div>
 
+          {reviewDataInvalid && (
+            <div className="rounded-xl border border-red-100 bg-red-50 px-3 py-2 text-xs font-bold text-red-600">
+              复盘数据格式错误（{reviewState.reason}），请先处理该任务的历史数据。
+            </div>
+          )}
+
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="flex-1">
               <div className="mb-2 flex flex-col gap-1 md:flex-row md:items-center md:justify-between">
@@ -788,7 +846,7 @@ const ReviewView: React.FC = () => {
                 placeholder="输入该任务的预期成果..."
                 className="w-full min-h-[100px] max-h-72 resize-y bg-slate-50 border border-slate-100 rounded-2xl px-4 py-3 text-sm font-medium text-slate-700 outline-none focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500 transition-all leading-6"
                 value={task.deliverable || ''}
-                disabled={!canEditReview}
+                disabled={!canEditReview || reviewDataInvalid}
                 onChange={e => {
                   setDeptTasks((prevTasks) => prevTasks.map((entry) => (
                     entry.id === task.id
@@ -807,7 +865,7 @@ const ReviewView: React.FC = () => {
                 placeholder="输入该任务的实际成果..."
                 className="w-full min-h-[100px] max-h-72 resize-y bg-slate-50 border border-slate-100 rounded-2xl px-4 py-3 text-sm font-medium text-slate-700 outline-none focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500 transition-all leading-6"
                 value={evaluation}
-                disabled={!canEditReview}
+                disabled={!canEditReview || reviewDataInvalid}
                 onChange={e => {
                   updateOkrReviews(
                     updateTaskReviewState(okrReviews, task, {
@@ -914,7 +972,7 @@ const ReviewView: React.FC = () => {
           </div>
             <button 
               onClick={submitReview} 
-              disabled={isSaving || !hasUnsavedChanges || !canEditReview} 
+              disabled={isSaving || isTaskScopeLoading || !hasUnsavedChanges || !canEditReview}
               className={`px-6 py-2.5 rounded-xl text-xs font-black uppercase flex items-center gap-2 transition-all shadow-md ${hasUnsavedChanges ? 'bg-brand-600 text-white hover:bg-brand-700 shadow-brand-100' : 'bg-slate-100 text-slate-400 cursor-default'}`}
             >
               {isSaving ? <Loader2 className="animate-spin" size={16}/> : <Save size={16} />} 
@@ -935,7 +993,6 @@ const ReviewView: React.FC = () => {
                       {flatDepts.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
                     </select>
                   </div>
-                  
                   {activeTab === 'monthly' ? (
                     <div className="flex items-center bg-slate-50 border rounded-xl px-4 py-2 gap-2">
                       <Calendar size={14} className="text-slate-400"/>
@@ -992,6 +1049,17 @@ const ReviewView: React.FC = () => {
                </div>
             </div>
 
+            {activeTab !== 'quarterly' && isTaskScopeLoading && (
+              <div className="mb-4 flex items-center gap-2 rounded-xl border border-brand-100 bg-brand-50 px-4 py-3 text-xs font-bold text-brand-600">
+                <Loader2 size={16} className="animate-spin" />
+                <span>正在加载当前周期任务...</span>
+              </div>
+            )}
+            {activeTab !== 'quarterly' && taskScopeError && !isTaskScopeLoading && (
+              <div className="mb-4 rounded-xl border border-red-100 bg-red-50 px-4 py-3 text-xs font-bold text-red-600">
+                {taskScopeError}
+              </div>
+            )}
             {selectedDeptId ? (
               <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4">
                  {/* Overall Review */}

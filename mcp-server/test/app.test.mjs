@@ -31,6 +31,7 @@ async function listen(app) {
 
 function fakeTransportFactory() {
   const transports = [];
+  let sessionSequence = 0;
   const createTransport = (options) => {
     const transport = {
       options,
@@ -40,7 +41,8 @@ function fakeTransportFactory() {
       async handleRequest(req, res, body) {
         this.calls.push({ method: req.method, body });
         if (req.method === 'POST' && body?.method === 'initialize') {
-          this.sessionId = 'session-test';
+          sessionSequence += 1;
+          this.sessionId = sessionSequence === 1 ? 'session-test' : `session-test-${sessionSequence}`;
           options.onsessioninitialized?.(this.sessionId);
           res.setHeader('Mcp-Session-Id', this.sessionId);
           res.status(200).json({
@@ -99,6 +101,9 @@ function createFixture(overrides = {}) {
     authProvider,
     sessionRegistry,
     rateLimiter: overrides.rateLimiter ?? new FixedWindowRateLimiter({ windowMs: 60_000, max: 30 }),
+    initializeRateLimiter: overrides.initializeRateLimiter,
+    readRateLimiter: overrides.readRateLimiter,
+    writeRateLimiter: overrides.writeRateLimiter,
     createTransport: transportFactory.createTransport,
     createRepository: () => ({}),
     createServer: () => ({ async connect() {}, async close() {} }),
@@ -114,7 +119,25 @@ test('exposes a health endpoint without authentication', async (t) => {
 
   const response = await fetch(`${server.url}/health`);
   assert.equal(response.status, 200);
-  assert.deepEqual(await response.json(), { status: 'ok', service: 'ai-xing-okr-mcp', version: '0.1.0' });
+  const payload = await response.json();
+  assert.equal(payload.status, 'ok');
+  assert.equal(payload.service, 'ai-xing-okr-mcp');
+  assert.equal(payload.version, '0.2.0');
+  // port/responseMode 用于 8787/8878 端口漂移诊断，fixture 未传端口时为 null。
+  assert.equal(payload.port, null);
+  assert.equal(payload.responseMode, 'json');
+});
+
+test('reports dependency readiness separately from the unauthenticated health probe', async (t) => {
+  const fixture = createFixture();
+  const server = await listen(fixture.app);
+  t.after(async () => { await server.close(); await fixture.close(); });
+
+  const response = await fetch(`${server.url}/ready`);
+  const payload = await response.json();
+  assert.equal(response.status, 503);
+  assert.equal(payload.status, 'degraded');
+  assert.equal(payload.reason, 'READINESS_CHECK_NOT_CONFIGURED');
 });
 
 test('requires Basic Auth for MCP initialization', async (t) => {
@@ -162,6 +185,8 @@ test('creates a session and routes GET and DELETE to its transport', async (t) =
   assert.equal(initResponse.status, 200);
   assert.equal(initResponse.headers.get('mcp-session-id'), 'session-test');
   assert.equal(fixture.sessionRegistry.size, 1);
+  assert.equal(fixture.transportFactory.transports[0].options.enableJsonResponse, true);
+  assert.equal(fixture.transportFactory.transports[0].options.keepAliveMs, 15_000);
 
   const getResponse = await fetch(`${server.url}/mcp`, { headers: { 'mcp-session-id': 'session-test' } });
   assert.equal(getResponse.status, 200);
@@ -172,7 +197,7 @@ test('creates a session and routes GET and DELETE to its transport', async (t) =
   assert.equal(fixture.sessionRegistry.size, 0);
 });
 
-test('rejects non-initialize calls without a valid MCP session', async (t) => {
+test('rejects non-initialize calls without a valid MCP session using 404', async (t) => {
   const fixture = createFixture();
   const server = await listen(fixture.app);
   t.after(async () => { await server.close(); await fixture.close(); });
@@ -183,7 +208,9 @@ test('rejects non-initialize calls without a valid MCP session', async (t) => {
   });
   const payload = await response.json();
 
-  assert.equal(response.status, 400);
+  // MCP 规范与 SDK validateSession：未知 session 返回 404，客户端据此自动重新 initialize。
+  assert.equal(response.status, 404);
+  assert.equal(payload.error.code, -32001);
   assert.equal(payload.error.data.code, 'SESSION_EXPIRED');
 });
 
@@ -219,4 +246,81 @@ test('rate limits repeated initialization attempts without logging credentials',
   assert.equal(serializedLogs.includes('secret'), false);
   assert.equal(serializedLogs.includes('Basic '), false);
   assert.equal(serializedLogs.includes('access-1'), false);
+});
+
+test('rate limits calls on an established session and returns Retry-After', async (t) => {
+  const fixture = createFixture({
+    readRateLimiter: new FixedWindowRateLimiter({ windowMs: 60_000, max: 1, now: () => 100 }),
+  });
+  const server = await listen(fixture.app);
+  t.after(async () => { await server.close(); await fixture.close(); });
+  const initResponse = await fetch(`${server.url}/mcp`, {
+    method: 'POST', headers: { authorization: basic, 'content-type': 'application/json' }, body: JSON.stringify(initializeBody),
+  });
+  const sessionId = initResponse.headers.get('mcp-session-id');
+  const request = () => fetch(`${server.url}/mcp`, {
+    method: 'POST', headers: { 'mcp-session-id': sessionId, 'content-type': 'application/json' },
+    body: JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'tools/list', params: {} }),
+  });
+
+  assert.equal((await request()).status, 202);
+  const limited = await request();
+  assert.equal(limited.status, 429);
+  assert.equal(Number(limited.headers.get('retry-after')) >= 1, true);
+});
+
+test('does not reset a user rate limit when the same account creates another session', async (t) => {
+  const fixture = createFixture({
+    readRateLimiter: new FixedWindowRateLimiter({ windowMs: 60_000, max: 1, now: () => 100 }),
+  });
+  const server = await listen(fixture.app);
+  t.after(async () => { await server.close(); await fixture.close(); });
+  const initialize = () => fetch(`${server.url}/mcp`, {
+    method: 'POST', headers: { authorization: basic, 'content-type': 'application/json' }, body: JSON.stringify(initializeBody),
+  });
+  const firstSession = (await initialize()).headers.get('mcp-session-id');
+  const secondSession = (await initialize()).headers.get('mcp-session-id');
+  const read = (sessionId) => fetch(`${server.url}/mcp`, {
+    method: 'POST', headers: { 'mcp-session-id': sessionId, 'content-type': 'application/json' },
+    body: JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'tools/list', params: {} }),
+  });
+
+  assert.equal((await read(firstSession)).status, 202);
+  assert.equal((await read(secondSession)).status, 429);
+});
+
+test('applies independent quotas to read and write tool calls', async (t) => {
+  const fixture = createFixture({
+    readRateLimiter: new FixedWindowRateLimiter({ windowMs: 60_000, max: 1, now: () => 100 }),
+    writeRateLimiter: new FixedWindowRateLimiter({ windowMs: 60_000, max: 1, now: () => 100 }),
+  });
+  const server = await listen(fixture.app);
+  t.after(async () => { await server.close(); await fixture.close(); });
+  const initResponse = await fetch(`${server.url}/mcp`, {
+    method: 'POST', headers: { authorization: basic, 'content-type': 'application/json' }, body: JSON.stringify(initializeBody),
+  });
+  const sessionId = initResponse.headers.get('mcp-session-id');
+  const call = (body) => fetch(`${server.url}/mcp`, {
+    method: 'POST', headers: { 'mcp-session-id': sessionId, 'content-type': 'application/json' }, body: JSON.stringify(body),
+  });
+  const readBody = { jsonrpc: '2.0', id: 2, method: 'tools/list', params: {} };
+  const writeBody = { jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name: 'prepare_create_pad_task', arguments: {} } };
+
+  assert.equal((await call(writeBody)).status, 202);
+  assert.equal((await call(readBody)).status, 202);
+  assert.equal((await call(writeBody)).status, 429);
+  assert.equal((await call(readBody)).status, 429);
+});
+
+test('draining rejects new MCP initialization attempts', async (t) => {
+  const fixture = createFixture();
+  const server = await listen(fixture.app);
+  t.after(async () => { await server.close(); await fixture.close(); });
+
+  fixture.setDraining();
+  const response = await fetch(`${server.url}/mcp`, {
+    method: 'POST', headers: { authorization: basic, 'content-type': 'application/json' }, body: JSON.stringify(initializeBody),
+  });
+  assert.equal(response.status, 503);
+  assert.equal((await response.json()).error.code, 'SERVICE_DRAINING');
 });

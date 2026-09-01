@@ -13,6 +13,12 @@ function positiveInteger(env, name, fallback) {
   return parsed;
 }
 
+function boundedPositiveInteger(env, name, fallback, minimum) {
+  const value = positiveInteger(env, name, fallback);
+  if (value < minimum) throw new Error(`${name} 必须大于或等于 ${minimum}`);
+  return value;
+}
+
 function booleanValue(env, name, fallback) {
   const raw = env[name];
   if (raw === undefined || raw === '') return fallback;
@@ -35,6 +41,7 @@ const FORBIDDEN_SECRET_ENV_KEYS = Object.freeze([
   'SUPABASE_SECRET_KEY',
   'SUPABASE_ACCESS_TOKEN',
   'SUPABASE_DB_PASSWORD',
+  'MCP_MIGRATION_DATABASE_URL',
   'DATABASE_URL',
   'POSTGRES_PASSWORD',
 ]);
@@ -71,6 +78,8 @@ export function loadConfig(env = process.env) {
   const port = positiveInteger(env, 'MCP_PORT', 8787);
   if (port > 65_535) throw new Error('MCP_PORT 必须小于或等于 65535');
 
+  const rateLimitWindowMs = positiveInteger(env, 'MCP_RATE_LIMIT_WINDOW_MS', 60 * 1000);
+  const rateLimitMax = positiveInteger(env, 'MCP_RATE_LIMIT_MAX', 30);
   return Object.freeze({
     supabaseUrl,
     supabasePublishableKey,
@@ -79,8 +88,15 @@ export function loadConfig(env = process.env) {
     sessionTtlMs: positiveInteger(env, 'MCP_SESSION_TTL_MS', 8 * 60 * 60 * 1000),
     refreshWindowMs: positiveInteger(env, 'MCP_REFRESH_WINDOW_MS', 60 * 1000),
     requestTimeoutMs: positiveInteger(env, 'MCP_REQUEST_TIMEOUT_MS', 15 * 1000),
-    rateLimitWindowMs: positiveInteger(env, 'MCP_RATE_LIMIT_WINDOW_MS', 60 * 1000),
-    rateLimitMax: positiveInteger(env, 'MCP_RATE_LIMIT_MAX', 30),
+    confirmationTtlMs: boundedPositiveInteger(env, 'MCP_CONFIRMATION_TTL_MS', 10 * 60 * 1000, 60 * 1000),
+    enableJsonResponse: booleanValue(env, 'MCP_ENABLE_JSON_RESPONSE', true),
+    sseKeepAliveMs: boundedPositiveInteger(env, 'MCP_SSE_KEEP_ALIVE_MS', 15 * 1000, 1000),
+    rateLimitWindowMs,
+    rateLimitMax,
+    initializeRateLimitMax: positiveInteger(env, 'MCP_INITIALIZE_RATE_LIMIT_MAX', rateLimitMax),
+    readRateLimitMax: positiveInteger(env, 'MCP_READ_RATE_LIMIT_MAX', rateLimitMax),
+    writeRateLimitMax: positiveInteger(env, 'MCP_WRITE_RATE_LIMIT_MAX', rateLimitMax),
+    drainTimeoutMs: positiveInteger(env, 'MCP_DRAIN_TIMEOUT_MS', 10 * 1000),
     requireHttps: booleanValue(env, 'MCP_REQUIRE_HTTPS', false),
     allowedHosts: csv(env.MCP_ALLOWED_HOSTS, '127.0.0.1,localhost'),
   });

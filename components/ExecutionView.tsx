@@ -9,12 +9,14 @@ import PageToast from './PageToast';
 import PeriodAlignmentView from './PeriodAlignmentView';
 import TaskModal from './TaskModal';
 import OwnerTaskModal from './OwnerTaskModal';
-import { Building2, ChevronDown, ChevronRight, LayoutGrid, Plus, X, Calendar, User as UserIcon, Clock } from 'lucide-react';
+import { Building2, ChevronDown, ChevronRight, LayoutGrid, Plus, X, Calendar, User as UserIcon, Clock, Loader2 } from 'lucide-react';
 import { usePageToast } from '../hooks/usePageToast';
+import { getVisibleTasksForScope } from '../data';
 import { getUserFacingError } from '../utils/userFacingError';
-import { canAssignTaskOwner, canManageDepartment, canManageTask, canViewTask, getAssignableTaskOwners, getVisibleDepartments, isAdminUser, isDepartmentSelfOrAncestor } from '../utils/permissions';
+import { canAssignTaskOwner, canManageDepartment, canManageTask, canViewTask, getAssignableTaskOwners, getVisibleDepartments, isAdminUser } from '../utils/permissions';
 import { ensureTaskTargetWeeks } from '../utils/taskPeriods.js';
 import { createTaskOkrGroups, getWeekDateRange } from '../utils/taskOkrOptions';
+import { flattenDepartmentTree, resolveDepartmentScopeForUser } from '../utils/departmentTree';
 
 
 
@@ -78,6 +80,9 @@ const ExecutionView: React.FC = () => {
     persistTaskEntries, persistTaskDeletion
   } = actions;
   const setIsDirty = state.setIsDirty;
+  const setState = state.setState;
+  const setLastSavedTasks = state.setLastSavedTasks;
+  const setBackendError = state.setBackendError;
   const backendError = state.backendError;
   const currentProcessId = state.currentProcessId;
   const setCurrentProcessId = state.setCurrentProcessId;
@@ -99,6 +104,8 @@ const ExecutionView: React.FC = () => {
   const { toastState, showToast, clearToast } = usePageToast();
 
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [isTaskScopeLoading, setIsTaskScopeLoading] = useState(false);
+  const [taskScopeError, setTaskScopeError] = useState<string | null>(null);
 
   const periodWeeks = useMemo(() => {
     let start = 1;
@@ -158,13 +165,55 @@ const ExecutionView: React.FC = () => {
     const nextDeptId = defaultDeptId && flatDepts.some(d => d.id === defaultDeptId) ? defaultDeptId : null;
     setSelectedDeptId(nextDeptId);
   }, [currentUser.departmentId, flatDepts, selectedDeptId, visibleDepartments]);
+  const executionWeekIds = useMemo(() => periodWeeks.map((week) => week.id), [periodWeeks]);
+  const selectedDepartmentScope = useMemo(() => {
+    if (!selectedDeptId) return 'exact' as const;
+    const resolved = resolveDepartmentScopeForUser(
+      flattenDepartmentTree(state.departments, state.users),
+      { id: selectedDeptId, scope: 'auto' },
+      currentUser?.departmentId
+    );
+    return resolved?.scope || 'exact';
+  }, [selectedDeptId, state.departments, state.users]);
+
+  useEffect(() => {
+    if (!currentUser?.id || !selectedDeptId || executionWeekIds.length === 0) {
+      setIsTaskScopeLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+    setIsTaskScopeLoading(true);
+    setTaskScopeError(null);
+
+    getVisibleTasksForScope(currentUser.id, selectedDeptId, executionWeekIds, state.users, selectedDepartmentScope)
+      .then((loadedTasks) => {
+        if (cancelled) return;
+        setState({ tasks: loadedTasks });
+        setLastSavedTasks(loadedTasks);
+      })
+      .catch((error: any) => {
+        if (cancelled) return;
+        const message = error?.message || '当前周期任务加载失败';
+        setTaskScopeError(message);
+        setBackendError(message);
+      })
+      .finally(() => {
+        if (!cancelled) setIsTaskScopeLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [currentUser?.id, executionWeekIds, selectedDeptId, selectedDepartmentScope, setBackendError, setLastSavedTasks, setState, state.users]);
+
   const currentUserIsAdmin = useMemo(
     () => isAdminUser(currentUser, state.systemRoles || []),
     [currentUser, state.systemRoles]
   );
   const assignableTaskOwners = useMemo(
-    () => getAssignableTaskOwners(currentUser, state.users, state.systemRoles || []),
-    [currentUser, state.users, state.systemRoles]
+    () => getAssignableTaskOwners(currentUser, state.users, state.systemRoles || [], state.departments),
+    [currentUser, state.users, state.systemRoles, state.departments]
   );
 
   const selectedDepartment = useMemo(
@@ -174,11 +223,7 @@ const ExecutionView: React.FC = () => {
   const canManageSelectedDepartment = selectedDepartment
     ? canManageDepartment(selectedDepartment, currentUser, state.systemRoles || [], state.departments)
     : false;
-  const canCreateTaskForSelectedOkr = isDepartmentSelfOrAncestor(
-    state.departments,
-    selectedDeptId || undefined,
-    currentUser.departmentId
-  );
+  const canCreateTaskForSelectedOkr = canManageSelectedDepartment;
   const canCreateExecutionTask = permissions.create && (
     currentUserIsAdmin
       ? canManageSelectedDepartment
@@ -244,7 +289,7 @@ const ExecutionView: React.FC = () => {
         status: 'draft',
         priority: 'medium',
         ownerId: currentUser.id,
-        departmentId: currentUserIsAdmin ? (selectedDeptId || currentUser.departmentId) : currentUser.departmentId,
+        departmentId: selectedDeptId || currentUser.departmentId,
         alignedKrId: alignedKrId,
         targetWeeks: [weekId],
         startDate: weekRange?.startDate ?? Date.now(),
@@ -306,10 +351,9 @@ const ExecutionView: React.FC = () => {
     if (!isNewTask && !currentUserIsAdmin && oldTask) {
       newTask.ownerId = oldTask.ownerId;
     } else if (isNewTask && !currentUserIsAdmin) {
-      if (!canAssignTaskOwner(currentUser, state.users, newTask.ownerId, state.systemRoles || [])) {
+      if (!canAssignTaskOwner(currentUser, state.users, newTask.ownerId, state.systemRoles || [], state.departments)) {
         newTask.ownerId = currentUser.id;
       }
-      newTask.departmentId = currentUser.departmentId;
     }
 
     if (!isNewTask) {
@@ -376,7 +420,7 @@ const ExecutionView: React.FC = () => {
           status: 'draft',
           priority: 'medium',
           ownerId: currentUser.id,
-          departmentId: currentUserIsAdmin ? (selectedDeptId || currentUser.departmentId) : currentUser.departmentId,
+          departmentId: selectedDeptId || currentUser.departmentId,
           alignedKrId: taskModal.data.alignedKrId,
           targetWeeks: taskModal.weekId ? [taskModal.weekId] : [],
           startDate: weekRange?.startDate ?? Date.now(),
@@ -487,7 +531,20 @@ const ExecutionView: React.FC = () => {
              </div>
         </div>
 
-        <div className="flex-1 overflow-hidden p-2 md:p-6">
+        <div className="relative flex-1 overflow-hidden p-2 md:p-6">
+          {isTaskScopeLoading && (
+            <div className="absolute inset-0 z-10 flex items-center justify-center bg-white/75 backdrop-blur-[1px]">
+              <div className="flex items-center gap-2 text-xs font-bold text-slate-500">
+                <Loader2 size={16} className="animate-spin" />
+                <span>正在加载当前周期任务...</span>
+              </div>
+            </div>
+          )}
+          {taskScopeError && !isTaskScopeLoading && (
+            <div className="absolute left-4 right-4 top-4 z-10 rounded-xl border border-red-100 bg-red-50 px-4 py-3 text-xs font-bold text-red-600">
+              {taskScopeError}
+            </div>
+          )}
           {selectedDeptId ? (
             <PeriodAlignmentView
               selectedYear={selectedYear}

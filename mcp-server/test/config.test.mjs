@@ -17,6 +17,9 @@ test('loads safe loopback defaults and trims the Supabase URL', () => {
   assert.equal(config.sessionTtlMs, 28_800_000);
   assert.equal(config.refreshWindowMs, 60_000);
   assert.equal(config.requestTimeoutMs, 15_000);
+  assert.equal(config.confirmationTtlMs, 600_000);
+  assert.equal(config.enableJsonResponse, true);
+  assert.equal(config.sseKeepAliveMs, 15_000);
   assert.equal(config.rateLimitWindowMs, 60_000);
   assert.equal(config.rateLimitMax, 30);
   assert.equal(config.requireHttps, false);
@@ -43,6 +46,7 @@ test('fails closed when high-privilege database or Supabase secrets enter the MC
     'SUPABASE_SECRET_KEY',
     'SUPABASE_ACCESS_TOKEN',
     'SUPABASE_DB_PASSWORD',
+    'MCP_MIGRATION_DATABASE_URL',
     'DATABASE_URL',
     'POSTGRES_PASSWORD',
   ]) {
@@ -58,6 +62,9 @@ test('rejects invalid numeric and boolean settings instead of silently weakening
   assert.throws(() => loadConfig({ ...validEnv, MCP_SESSION_TTL_MS: 'abc' }), /MCP_SESSION_TTL_MS/);
   assert.throws(() => loadConfig({ ...validEnv, MCP_RATE_LIMIT_MAX: '-1' }), /MCP_RATE_LIMIT_MAX/);
   assert.throws(() => loadConfig({ ...validEnv, MCP_REQUIRE_HTTPS: 'sometimes' }), /MCP_REQUIRE_HTTPS/);
+  assert.throws(() => loadConfig({ ...validEnv, MCP_CONFIRMATION_TTL_MS: '59999' }), /MCP_CONFIRMATION_TTL_MS/);
+  assert.throws(() => loadConfig({ ...validEnv, MCP_ENABLE_JSON_RESPONSE: 'sometimes' }), /MCP_ENABLE_JSON_RESPONSE/);
+  assert.throws(() => loadConfig({ ...validEnv, MCP_SSE_KEEP_ALIVE_MS: '999' }), /MCP_SSE_KEEP_ALIVE_MS/);
 });
 
 test('parses explicit production overrides', () => {
@@ -69,6 +76,9 @@ test('parses explicit production overrides', () => {
     MCP_SESSION_TTL_MS: '3600000',
     MCP_REFRESH_WINDOW_MS: '120000',
     MCP_REQUEST_TIMEOUT_MS: '10000',
+    MCP_CONFIRMATION_TTL_MS: '120000',
+    MCP_ENABLE_JSON_RESPONSE: 'false',
+    MCP_SSE_KEEP_ALIVE_MS: '20000',
     MCP_RATE_LIMIT_WINDOW_MS: '30000',
     MCP_RATE_LIMIT_MAX: '10',
     MCP_REQUIRE_HTTPS: 'true',
@@ -78,4 +88,10 @@ test('parses explicit production overrides', () => {
   assert.equal(config.port, 9000);
   assert.deepEqual(config.allowedHosts, ['okr.example.com', 'localhost']);
   assert.equal(config.requireHttps, true);
+  assert.equal(config.confirmationTtlMs, 120_000);
+  assert.equal(config.enableJsonResponse, false);
+  assert.equal(config.sseKeepAliveMs, 20_000);
+  assert.equal(config.initializeRateLimitMax, 10);
+  assert.equal(config.readRateLimitMax, 10);
+  assert.equal(config.writeRateLimitMax, 10);
 });

@@ -1,4 +1,5 @@
 import { User, SystemRole, MenuPermission, Department, PADEntry, UserRole } from '../types';
+import { collectDepartmentIds, flattenDepartmentTree, getAssignableUsersForScope } from './departmentTree';
 
 export const normalizeUserRole = (role: string | undefined): UserRole => {
   if (role === 'Admin' || role === 'Manager' || role === 'Employee') return role;
@@ -36,18 +37,23 @@ export const isManagerUser = (user: User): boolean => normalizeUserRole(user.rol
 export const getAssignableTaskOwners = (
   currentUser: User,
   users: User[],
-  systemRoles: SystemRole[] = []
+  systemRoles: SystemRole[] = [],
+  departments: Department[] = []
 ): User[] => {
   if (isAdminUser(currentUser, systemRoles)) {
     return users;
   }
 
+  if (isManagerUser(currentUser) && currentUser.departmentId && departments.length > 0) {
+    const index = flattenDepartmentTree(departments, users);
+    return getAssignableUsersForScope(currentUser, users, index, false);
+  }
+
   if (isManagerUser(currentUser) && currentUser.departmentId) {
     const sameDepartmentUsers = users.filter(user => user.departmentId === currentUser.departmentId);
-    if (sameDepartmentUsers.some(user => user.id === currentUser.id)) {
-      return sameDepartmentUsers;
-    }
-    return [currentUser, ...sameDepartmentUsers];
+    return sameDepartmentUsers.some(user => user.id === currentUser.id)
+      ? sameDepartmentUsers
+      : [currentUser, ...sameDepartmentUsers];
   }
 
   return users.some(user => user.id === currentUser.id)
@@ -59,10 +65,11 @@ export const canAssignTaskOwner = (
   currentUser: User,
   users: User[],
   targetOwnerId: string | undefined,
-  systemRoles: SystemRole[] = []
+  systemRoles: SystemRole[] = [],
+  departments: Department[] = []
 ): boolean => {
   if (!targetOwnerId) return false;
-  return getAssignableTaskOwners(currentUser, users, systemRoles).some(user => user.id === targetOwnerId);
+  return getAssignableTaskOwners(currentUser, users, systemRoles, departments).some(user => user.id === targetOwnerId);
 };
 
 export const getUserRoleLabel = (role: UserRole): string => {
@@ -101,6 +108,7 @@ const collectManagedDepartments = (
   departments: Department[] = [],
   currentUser: User
 ): Department[] => {
+  if (!isManagerUser(currentUser)) return [];
   const matches: Department[] = [];
 
   departments.forEach((department) => {
@@ -116,16 +124,6 @@ const collectManagedDepartments = (
   });
 
   return matches;
-};
-
-const collectDepartmentIds = (department: Department): string[] => {
-  const ids = [department.id];
-
-  (department.subDepartments || []).forEach((subDepartment) => {
-    ids.push(...collectDepartmentIds(subDepartment));
-  });
-
-  return ids;
 };
 
 const collectAncestorDepartmentIds = (
@@ -164,19 +162,29 @@ const getScopedDepartmentIds = (
   currentUser: User,
   departments: Department[] = []
 ): string[] => {
-  const scopedRoots: Department[] = [];
-  const addDepartmentScope = (departmentId: string | undefined) => {
-    if (!departmentId) return;
-    const department = findDepartmentById(departments, departmentId);
-    if (department) scopedRoots.push(department);
-  };
+  const index = flattenDepartmentTree(departments);
+  const ids: string[] = [];
+  const currentNode = currentUser.departmentId ? index.byId.get(currentUser.departmentId) : undefined;
 
-  addDepartmentScope(currentUser.departmentId);
-  scopedRoots.push(...getManagedDepartments(currentUser, departments));
+  if (currentNode) {
+    // Every member can read their own department and all descendants. Ancestor
+    // nodes are readable as exact nodes so a child employee can inspect the
+    // parent department without receiving sibling tasks.
+    ids.push(...collectDepartmentIds(index, currentNode.id, 'subtree'));
+    ids.push(...currentNode.path.slice(0, -1));
+  } else if (currentUser.departmentId) {
+    ids.push(currentUser.departmentId);
+  }
 
-  return Array.from(
-    new Set(scopedRoots.flatMap((department) => collectDepartmentIds(department)))
-  );
+  normalizeStringArray(currentUser.padPermissions).forEach((departmentId) => {
+    ids.push(departmentId);
+  });
+
+  getManagedDepartments(currentUser, departments).forEach((department) => {
+    ids.push(...collectDepartmentIds(index, department.id, 'subtree'));
+  });
+
+  return Array.from(new Set(ids));
 };
 
 export const getManagedDepartments = (
@@ -187,11 +195,14 @@ export const getManagedDepartments = (
 export const getManagedDepartmentIds = (
   currentUser: User,
   departments: Department[] = []
-): string[] => Array.from(
-  new Set(
-    getManagedDepartments(currentUser, departments).flatMap((department) => collectDepartmentIds(department))
-  )
-);
+): string[] => {
+  const index = flattenDepartmentTree(departments);
+  return Array.from(new Set(
+    getManagedDepartments(currentUser, departments).flatMap((department) => (
+      collectDepartmentIds(index, department.id, 'subtree')
+    ))
+  ));
+};
 
 export const getPrimaryManagedDepartmentId = (
   currentUser: User,
@@ -223,6 +234,8 @@ export const canManageTask = (
   departments: Department[] = []
 ): boolean => {
   if (isAdminUser(currentUser, systemRoles)) return true;
+  if (isManagerUser(currentUser) && task.departmentId
+    && getManagedDepartmentIds(currentUser, departments).includes(task.departmentId)) return true;
   if (task.ownerId === currentUser.id) return true;
   if (task.participantIds?.includes(currentUser.id)) return true;
   return false;
@@ -257,7 +270,7 @@ export const canManageDepartment = (
   departments: Department[] = []
 ): boolean => {
   if (isAdminUser(currentUser, systemRoles)) return true;
-  return getScopedDepartmentIds(currentUser, departments).includes(department.id);
+  return getManagedDepartmentIds(currentUser, departments).includes(department.id);
 };
 
 export const canManageReview = (
@@ -300,33 +313,17 @@ export const getVisibleDepartments = (user: User, allDepartments: Department[], 
   normalizeStringArray(user.padPermissions).forEach(id => visibleIds.add(id));
   getScopedDepartmentIds(user, allDepartments).forEach(id => visibleIds.add(id));
 
-  // Helper to check if a department or any of its ancestors is in visibleIds
-  const isVisible = (dept: Department, path: string[] = []): boolean => {
-    if (visibleIds.has(dept.id)) return true;
-    for (const p of path) {
-      if (visibleIds.has(p)) return true;
-    }
-    return false;
-  };
-
-  const filterTree = (depts: Department[], path: string[] = []): Department[] => {
+  // Keep ancestor nodes as navigation wrappers, but only include children that
+  // are themselves in the allowed set. This prevents a child employee who can
+  // read its parent from seeing the parent's sibling departments.
+  const filterTree = (depts: Department[]): Department[] => {
     return depts.map(d => {
-      const currentPath = [...path, d.id];
-      const visible = isVisible(d, path);
-      
-      // If this department is visible, all its sub-departments are visible
-      // If it's not visible, maybe some sub-department is visible, so we must traverse
-      
-      let filteredSubs: Department[] | undefined;
-      if (d.subDepartments) {
-        filteredSubs = filterTree(d.subDepartments, currentPath);
-        if (filteredSubs.length === 0) filteredSubs = undefined;
-      }
+      const filteredSubs = d.subDepartments ? filterTree(d.subDepartments) : undefined;
 
-      if (visible || (filteredSubs && filteredSubs.length > 0)) {
+      if (visibleIds.has(d.id) || (filteredSubs && filteredSubs.length > 0)) {
         return {
           ...d,
-          subDepartments: filteredSubs
+          subDepartments: filteredSubs && filteredSubs.length > 0 ? filteredSubs : undefined
         };
       }
       return null;

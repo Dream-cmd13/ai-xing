@@ -22,7 +22,10 @@ export const getDepartmentManagerUserIds = (department, users = []) => {
   });
 
   users.forEach((user) => {
-    if (user.role === 'Manager' && user.departmentId === department.id) {
+    const configuredManagerName = department.managerName || '';
+    const matchesConfiguredManager = configuredManagerName
+      && (user.name === configuredManagerName || user.username === configuredManagerName);
+    if ((user.role === 'Manager' && user.departmentId === department.id) || matchesConfiguredManager) {
       managerIds.add(user.id);
     }
   });

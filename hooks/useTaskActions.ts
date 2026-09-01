@@ -1,5 +1,5 @@
 import { MutableRefObject, useCallback, useRef } from 'react';
-import { addTask as addDbTask, updateTask as updateDbTask, deleteTask as deleteDbTask, getTaskById } from '@/data';
+import { addTask as addDbTask, updateTask as updateDbTask, deleteTask as deleteDbTask, getTaskById, invalidateVisibleTaskScopeCache } from '@/data';
 import { AppStoreState, useAppStore } from '@/store/useAppStore';
 import { PADEntry, User } from '@/types';
 import { isAdminUser } from '@/utils/permissions';
@@ -89,7 +89,8 @@ export const useTaskActions = ({
           store.users || [],
           store.systemRoles || [],
           mode,
-          currentUserIsAdmin
+          currentUserIsAdmin,
+          store.departments || []
         ));
       }
 
@@ -116,6 +117,7 @@ export const useTaskActions = ({
 
         store.setState({ tasks: mergedTasks });
         store.setLastSavedTasks(mergedLastSavedTasks);
+        invalidateVisibleTaskScopeCache(currentUser?.id);
         showSaveSuccessFeedback(['tasks']);
         syncStateRef();
         return savedEntries;
@@ -155,6 +157,7 @@ export const useTaskActions = ({
 
         const mergedLastSavedTasks = removeTasksById(previousLastSavedTasks, taskIds);
         store.setLastSavedTasks(mergedLastSavedTasks);
+        invalidateVisibleTaskScopeCache(currentUser?.id);
         showSaveSuccessFeedback(['tasks']);
         syncStateRef();
       } catch (error: any) {

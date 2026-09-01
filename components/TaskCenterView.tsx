@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useAppStore } from '../store/useAppStore';
 import { useAuthStore } from '../store/useAuthStore';
 import { useAppActions } from '../hooks/useAppActions';
@@ -17,7 +17,7 @@ import { getUserFacingError } from '../utils/userFacingError';
 import { canAssignTaskOwner, canManageTask, canViewTask, getAssignableTaskOwners, getVisibleDepartments, isAdminUser } from '../utils/permissions';
 import { ensureTaskTargetWeeks } from '../utils/taskPeriods.js';
 import { createTaskOkrGroups, getWeekDateRange } from '../utils/taskOkrOptions';
-import { getTaskById, getTaskList, getTaskUsersForTasks } from '../data';
+import { getTaskById, getTaskCenterPage, getTaskUsersForTasks, TaskCenterCursor } from '../data';
 
 
 
@@ -37,10 +37,9 @@ const TaskCenterView: React.FC = () => {
     persistTaskEntries, persistTaskDeletion
   } = actions;
   const setBackendError = state.setBackendError;
+  const setAppState = state.setState;
   const setLastSavedTasks = state.setLastSavedTasks;
   const setLastSavedUsers = state.setLastSavedUsers;
-  const setTaskLoadMode = state.setTaskLoadMode;
-  const setTaskLoadScope = state.setTaskLoadScope;
 
   const flatAllDepartments = useMemo(() => {
     const list: Department[] = [];
@@ -56,8 +55,8 @@ const TaskCenterView: React.FC = () => {
   const usersById = useMemo(() => new Map(users.map(u => [u.id, u])), [users]);
   const deptsById = useMemo(() => new Map(flatAllDepartments.map(d => [d.id, d])), [flatAllDepartments]);
   const assignableTaskOwners = useMemo(
-    () => getAssignableTaskOwners(currentUser, users, state.systemRoles || []),
-    [currentUser, users, state.systemRoles]
+    () => getAssignableTaskOwners(currentUser, users, state.systemRoles || [], state.departments),
+    [currentUser, users, state.systemRoles, state.departments]
   );
 
   const today = useMemo(() => new Date(), []);
@@ -70,50 +69,104 @@ const TaskCenterView: React.FC = () => {
     return `${year}-W${week.toString().padStart(2, '0')}`;
   }, [today]);
 
-  const [filterType, setFilterType] = useState<'my' | 'org' | 'all'>('my');
+  const [filterType, setFilterType] = useState<'my' | 'org'>('my');
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [priorityFilter, setPriorityFilter] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState<string>('');
+  const [selectedOrgDeptId, setSelectedOrgDeptId] = useState<string | null>(null);
+  const [orgTasks, setOrgTasks] = useState<PADEntry[]>([]);
+  const [orgTotal, setOrgTotal] = useState(0);
+  const [orgHasMore, setOrgHasMore] = useState(false);
+  const [orgCursor, setOrgCursor] = useState<TaskCenterCursor | null>(null);
   const [taskModal, setTaskModal] = useState<{ isOpen: boolean, weekId: string | null, padId: string | null, mode: 'create' | 'edit', data: Partial<PADEntry> }>({ isOpen: false, weekId: null, padId: null, mode: 'create', data: {} });
   const [isOrgTasksLoading, setIsOrgTasksLoading] = useState(false);
+  const orgRequestIdRef = useRef(0);
+  const orgLoadingRef = useRef(false);
+  const orgCursorRef = useRef<TaskCenterCursor | null>(null);
+  const orgHasMoreRef = useRef(false);
   const { toastState, showToast, clearToast } = usePageToast();
 
   useEffect(() => {
     clearToast();
   }, [clearToast, filterType, statusFilter, priorityFilter]);
 
-  const loadOrgTasks = async () => {
-    if (state.taskLoadScope === 'org' || isOrgTasksLoading) return;
+  const loadOrgTasks = useCallback(async (reset = true, requestedCursor?: TaskCenterCursor | null) => {
+    if (!currentUser?.id) return;
+    if (!reset && (orgLoadingRef.current || !orgHasMoreRef.current)) return;
 
+    const requestId = orgRequestIdRef.current + 1;
+    orgRequestIdRef.current = requestId;
+    orgLoadingRef.current = true;
     setIsOrgTasksLoading(true);
-    try {
-      const loadedTasks = await getTaskList();
-      const taskUsers = loadedTasks.length > 0
-        ? await getTaskUsersForTasks(loadedTasks.map(task => task.id))
-        : [];
-      const currentUsers = useAppStore.getState().users || [];
-      const mergedUsersById = new Map(currentUsers.map(user => [user.id, user]));
-      taskUsers.forEach(user => mergedUsersById.set(user.id, user));
-      const mergedUsers = Array.from(mergedUsersById.values());
+    if (reset) {
+      orgCursorRef.current = null;
+      orgHasMoreRef.current = false;
+      setOrgTasks([]);
+      setOrgTotal(0);
+      setOrgCursor(null);
+      setOrgHasMore(false);
+    }
 
-      state.setState({ tasks: loadedTasks, users: mergedUsers });
-      setLastSavedTasks(loadedTasks);
-      setLastSavedUsers(mergedUsers);
-      setTaskLoadMode('list');
-      setTaskLoadScope('org');
+    try {
+      const page = await getTaskCenterPage({
+        departmentId: selectedOrgDeptId,
+        scope: selectedOrgDeptId ? 'subtree' : 'all',
+        status: statusFilter,
+        priority: priorityFilter,
+        search: searchQuery,
+        limit: 100,
+        cursor: reset ? null : (requestedCursor ?? orgCursorRef.current),
+      });
+      if (requestId !== orgRequestIdRef.current) return;
+
+      setOrgTasks((previous) => {
+        if (reset) return page.tasks;
+        const byId = new Map(previous.map((task) => [task.id, task]));
+        page.tasks.forEach((task) => byId.set(task.id, task));
+        return Array.from(byId.values());
+      });
+      setOrgTotal(page.total);
+      orgHasMoreRef.current = page.hasMore;
+      orgCursorRef.current = page.nextCursor;
+      setOrgHasMore(page.hasMore);
+      setOrgCursor(page.nextCursor);
+
+      const currentUsers = useAppStore.getState().users || [];
+      const knownUserIds = new Set(currentUsers.map(user => user.id));
+      const taskIdsNeedingUsers = page.tasks
+        .filter((task) => [task.createdBy, task.ownerId, ...(task.participantIds || []), ...(task.approverIds || [])]
+          .some((userId) => userId && !knownUserIds.has(userId)))
+        .map(task => task.id);
+      if (taskIdsNeedingUsers.length > 0) {
+        void getTaskUsersForTasks(taskIdsNeedingUsers).then((taskUsers) => {
+          if (requestId !== orgRequestIdRef.current) return;
+          const latestUsers = useAppStore.getState().users || currentUsers;
+          const mergedUsersById = new Map(latestUsers.map(user => [user.id, user]));
+          taskUsers.forEach(user => mergedUsersById.set(user.id, user));
+          const mergedUsers = Array.from(mergedUsersById.values());
+          setAppState({ users: mergedUsers });
+          setLastSavedUsers(mergedUsers);
+        }).catch((error) => console.warn('Task user enrichment failed; continuing with task data', error));
+      }
     } catch (error: any) {
+      if (requestId !== orgRequestIdRef.current) return;
       setBackendError(null);
       showToast(getUserFacingError(error, '组织任务加载失败，请稍后重试'), 'error');
     } finally {
-      setIsOrgTasksLoading(false);
+      if (requestId === orgRequestIdRef.current) {
+        orgLoadingRef.current = false;
+        setIsOrgTasksLoading(false);
+      }
     }
-  };
+  }, [currentUser?.id, selectedOrgDeptId, statusFilter, priorityFilter, searchQuery, setBackendError, showToast, setAppState, setLastSavedUsers]);
+
+  useEffect(() => {
+    if (filterType !== 'org') return;
+    void loadOrgTasks(true);
+  }, [filterType, loadOrgTasks]);
 
   const handleFilterTypeChange = (nextFilterType: 'my' | 'org') => {
     setFilterType(nextFilterType);
-    if (nextFilterType === 'org') {
-      void loadOrgTasks();
-    }
   };
 
   const handleTaskClick = async (task: PADEntry, padId: string) => {
@@ -130,7 +183,7 @@ const TaskCenterView: React.FC = () => {
       const nextTasks = currentTasks.some(item => item.id === fullTask.id)
         ? currentTasks.map(item => item.id === fullTask.id ? fullTask : item)
         : [fullTask, ...currentTasks];
-      state.setState({ tasks: nextTasks });
+      setAppState({ tasks: nextTasks });
       setLastSavedTasks(nextTasks);
 
       const weekId = fullTask.targetWeeks?.[0] || null;
@@ -165,10 +218,9 @@ const TaskCenterView: React.FC = () => {
         newTask.ownerId = oldTask.ownerId;
       }
     } else if (!currentUserIsAdmin) {
-      if (!canAssignTaskOwner(currentUser, state.users, newTask.ownerId, state.systemRoles || [])) {
+      if (!canAssignTaskOwner(currentUser, state.users, newTask.ownerId, state.systemRoles || [], state.departments)) {
         newTask.ownerId = currentUser.id;
       }
-      newTask.departmentId = currentUser.departmentId;
     }
 
     if (!isNewTask) {
@@ -211,6 +263,9 @@ const TaskCenterView: React.FC = () => {
 
     try {
       await persistTaskEntries(nextTasks, entriesToAdd, isNewTask ? 'create' : 'update');
+      if (filterType === 'org') {
+        void loadOrgTasks(true);
+      }
 
       if (keepOpen) {
         const weekRange = getWeekDateRange(taskModal.weekId);
@@ -225,7 +280,7 @@ const TaskCenterView: React.FC = () => {
             status: 'draft',
             priority: 'medium',
             ownerId: currentUser.id,
-            departmentId: currentUser.departmentId,
+                      departmentId: selectedOrgDeptId || currentUser.departmentId,
             startDate: weekRange?.startDate ?? Date.now(),
             dueDate: weekRange?.dueDate ?? (Date.now() + 86400000),
             action: '',
@@ -259,6 +314,9 @@ const TaskCenterView: React.FC = () => {
 
     try {
       await persistTaskDeletion(nextTasks, [taskId]);
+      if (filterType === 'org') {
+        void loadOrgTasks(true);
+      }
       setTaskModal({ isOpen: false, weekId: null, padId: null, mode: 'create', data: {} });
       showToast('任务已删除', 'info');
     } catch (error: any) {
@@ -293,8 +351,9 @@ const TaskCenterView: React.FC = () => {
 
   const allTasks = useMemo(() => {
     const tasks: { padId: string, entry: PADEntry, owner: User | undefined, dept: Department | undefined }[] = [];
-    
-    state.tasks.forEach(entry => {
+
+    const sourceTasks = filterType === 'org' ? orgTasks : state.tasks;
+    sourceTasks.forEach(entry => {
       if (!canViewTask(entry, currentUser, users, state.systemRoles || [], departments)) return;
 
       const owner = usersById.get(entry.ownerId);
@@ -308,9 +367,7 @@ const TaskCenterView: React.FC = () => {
       });
     });
     return tasks;
-  }, [state.tasks, users, departments, currentUser, usersById, deptsById]);
-
-  const [selectedOrgDeptId, setSelectedOrgDeptId] = useState<string | null>(null);
+  }, [filterType, orgTasks, state.tasks, users, departments, currentUser, state.systemRoles, usersById, deptsById]);
 
   const visibleDepartments = useMemo(() => getVisibleDepartments(currentUser, departments, state.systemRoles || []), [currentUser, departments, state.systemRoles]);
 
@@ -366,7 +423,7 @@ const TaskCenterView: React.FC = () => {
   };
 
   const filteredTasks = useMemo(() => {
-    return allTasks.filter(item => {
+    const result = allTasks.filter(item => {
       const { entry, owner } = item;
       
       // Type Filter
@@ -409,13 +466,13 @@ const TaskCenterView: React.FC = () => {
       }
 
       return true;
-    })
-    // Sort by creation time descending (newest first)
-    .sort((a, b) => {
+    });
+
+    if (filterType === 'org') return result;
+    return result.sort((a, b) => {
       const timeA = getTaskCreatedAt(a.entry.id);
       const timeB = getTaskCreatedAt(b.entry.id);
       if (timeB !== timeA) return timeB - timeA;
-      // Fallback: sort by startDate descending
       return (b.entry.startDate ?? 0) - (a.entry.startDate ?? 0);
     });
   }, [allTasks, filterType, statusFilter, priorityFilter, searchQuery, currentUser, selectedOrgDeptId, departments]);
@@ -486,7 +543,7 @@ const TaskCenterView: React.FC = () => {
                       status: 'draft',
                       priority: 'medium',
                       ownerId: currentUser.id,
-                      departmentId: currentUser.departmentId,
+            departmentId: selectedOrgDeptId || currentUser.departmentId,
                       startDate: weekRange?.startDate ?? Date.now(),
                       dueDate: weekRange?.dueDate ?? (Date.now() + 86400000),
                       action: '',
@@ -577,8 +634,8 @@ const TaskCenterView: React.FC = () => {
               <p className="text-sm font-bold">暂无任务</p>
             </div>
           ) : (
-            filteredTasks.map(({ padId, entry, owner, dept }, idx) => (
-              <div key={idx} onClick={() => handleTaskClick(entry, padId)} className="bg-white border rounded-2xl p-4 hover:shadow-md transition-shadow flex items-start gap-4 group cursor-pointer">
+            filteredTasks.map(({ padId, entry, owner, dept }) => (
+              <div key={entry.id} onClick={() => handleTaskClick(entry, padId)} className="bg-white border rounded-2xl p-4 hover:shadow-md transition-shadow flex items-start gap-4 group cursor-pointer">
                 <div className={`w-2 h-full rounded-full self-stretch ${getPriorityColor(entry.priority || 'low').replace('text-', 'bg-').replace('bg-', 'bg-opacity-20 ')}`}></div>
                 
                 <div className="min-w-0 flex-1">
@@ -628,6 +685,16 @@ const TaskCenterView: React.FC = () => {
                 </div>
               </div>
             ))
+          )}
+          {filterType === 'org' && orgHasMore && (
+            <button
+              type="button"
+              onClick={() => void loadOrgTasks(false, orgCursor)}
+              disabled={isOrgTasksLoading}
+              className="w-full py-3 border border-slate-200 rounded-xl text-xs font-black text-slate-500 hover:bg-slate-50 disabled:opacity-50"
+            >
+              {isOrgTasksLoading ? '加载中...' : `加载更多（已加载 ${orgTasks.length} / ${orgTotal}）`}
+            </button>
           )}
         </div>
       </div>

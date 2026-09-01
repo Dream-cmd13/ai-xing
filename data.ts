@@ -131,10 +131,15 @@ const mapUserRow = (u: any): User => {
   };
 };
 
-const mapDepartmentRow = (d: any): Department => {
+const mapDepartmentRow = (d: any, depth = 0, path = new Set<string>()): Department => {
+  if (!d || typeof d !== 'object' || depth > 100 || typeof d.id !== 'string' || path.has(d.id)) {
+    throw new Error('部门树包含无效或循环节点。');
+  }
+  const nextPath = new Set(path);
+  nextPath.add(d.id);
   const roleMembers: Record<string, string[]> = {};
-  if (d.role_members) {
-    Object.assign(roleMembers, d.role_members);
+  if (d.roleMembers || d.role_members) {
+    Object.assign(roleMembers, d.roleMembers ?? d.role_members);
   }
 
   const reviewsMap: Record<string, any[]> = {};
@@ -145,17 +150,25 @@ const mapDepartmentRow = (d: any): Department => {
   return {
     id: d.id,
     name: d.name,
-    managerName: d.manager_name ?? '',
-    managerUserId: d.manager_user_id ?? undefined,
+    managerName: d.managerName ?? d.manager_name ?? '',
+    managerUserId: d.managerUserId ?? d.manager_user_id ?? undefined,
     responsibilities: d.responsibilities ?? '',
     roles: d.roles || [],
     roleMembers,
     attributes: d.attributes ?? '',
-    subDepartments: d.sub_departments || [],
+    subDepartments: (Array.isArray(d.subDepartments)
+      ? d.subDepartments
+      : (Array.isArray(d.sub_departments) ? d.sub_departments : []))
+      .flatMap((child: any) => (
+        child && typeof child === 'object' && typeof child.id === 'string'
+          && depth < 100 && !nextPath.has(child.id)
+          ? [mapDepartmentRow(child, depth + 1, nextPath)]
+          : []
+      )),
     okrs: d.okrs || {},
     reviews: reviewsMap,
-    updatedAt: d.updated_at,
-    rowVersion: normalizeRowVersion(d.row_version)
+    updatedAt: d.updatedAt ?? d.updated_at,
+    rowVersion: normalizeRowVersion(d.rowVersion ?? d.row_version)
   };
 };
 
@@ -253,6 +266,29 @@ export interface TaskListPage {
   hasMore: boolean;
 }
 
+export interface TaskCenterCursor {
+  updatedAt: number;
+  id: string;
+}
+
+export interface TaskCenterPage {
+  tasks: PADEntry[];
+  total: number;
+  hasMore: boolean;
+  nextCursor: TaskCenterCursor | null;
+  scope: string;
+}
+
+export interface TaskCenterPageOptions {
+  departmentId?: string | null;
+  scope?: 'all' | 'auto' | 'exact' | 'subtree';
+  status?: string | null;
+  priority?: string | null;
+  search?: string | null;
+  limit?: number;
+  cursor?: TaskCenterCursor | null;
+}
+
 const isIgnoredNoRowsError = (error: any) => error?.code === 'PGRST116';
 const isIgnoredMissingTableError = (error: any) => error?.code === '42P01';
 const isIgnoredMissingFunctionError = (error: any) =>
@@ -277,6 +313,19 @@ const buildDefaultStrategy = (): CompanyStrategy => ({
   companyOKRs: {},
   rowVersion: 0
 });
+
+const TASK_SCOPE_CACHE_TTL_MS = 30_000;
+const taskScopeCache = new Map<string, { tasks: PADEntry[]; expiresAt: number }>();
+
+export const invalidateVisibleTaskScopeCache = (userId?: string) => {
+  if (!userId) {
+    taskScopeCache.clear();
+    return;
+  }
+  for (const key of taskScopeCache.keys()) {
+    if (key.startsWith(`${userId}:`)) taskScopeCache.delete(key);
+  }
+};
 
 const fetchSettingsRow = async () => {
   const { data, error } = await supabase
@@ -371,7 +420,7 @@ export const getDepartments = async (): Promise<Department[]> => {
   try {
     const { data, error } = await supabase.from('departments').select(DEPARTMENTS_SELECT_FIELDS);
     if (error && !isIgnoredMissingTableError(error)) throw error;
-    return (data || []).map(mapDepartmentRow);
+    return (data || []).map((row) => mapDepartmentRow(row));
   } catch (e) {
     handleSupabaseError(e);
     throw e;
@@ -440,7 +489,22 @@ export const getTasks = async (): Promise<PADEntry[]> => {
     let data: any[] | null = null;
     let error: any = null;
 
-    ({ data, error } = await supabase.rpc('get_visible_tasks_full'));
+    const webResult = await supabase.rpc('web_get_visible_tasks_full', {
+      p_limit: 10_000
+    });
+    if (!isIgnoredMissingFunctionError(webResult.error)) {
+      if (webResult.error) throw webResult.error;
+      const payload = webResult.data && typeof webResult.data === 'object' ? webResult.data : null;
+      if (!payload || !Array.isArray(payload.items) || typeof payload.truncated !== 'boolean') {
+        throw new Error('网页任务结果格式错误，请检查数据库迁移。');
+      }
+      if (payload.truncated || payload.items.length > 10_000) {
+        throw new Error('可见任务超过 10000 条安全上限，请缩小任务范围。');
+      }
+      data = payload.items;
+    } else {
+      ({ data, error } = await supabase.rpc('get_visible_tasks_full'));
+    }
 
     if (isIgnoredMissingFunctionError(error)) {
       ({ data, error } = await supabase.from('tasks').select(TASKS_SELECT_FIELDS));
@@ -458,15 +522,97 @@ export const getTasks = async (): Promise<PADEntry[]> => {
   }
 };
 
+export const getVisibleTasksForScope = async (
+  userId: string,
+  departmentId: string,
+  weekIds: string[],
+  fallbackUsers: User[] = [],
+  scope: 'auto' | 'exact' | 'subtree' = 'auto'
+): Promise<PADEntry[]> => {
+  if (!isSupabaseConfigured()) throw new Error("Supabase not configured");
+  if (!userId || !departmentId || weekIds.length === 0) return [];
+
+  try {
+    const cacheKey = `${userId}:${departmentId}:${scope}:${weekIds.join(',')}`;
+    const cached = taskScopeCache.get(cacheKey);
+    if (cached && cached.expiresAt > Date.now()) return cached.tasks;
+    if (cached) taskScopeCache.delete(cacheKey);
+
+    const scopedResult = await supabase.rpc('web_get_visible_tasks_scope_v2', {
+      p_department_id: departmentId,
+      p_week_ids: weekIds,
+      p_limit: 2_000,
+      p_scope: scope,
+    });
+
+    const result = isIgnoredMissingFunctionError(scopedResult.error)
+      ? await supabase.rpc('web_get_visible_tasks_scope', {
+        p_department_id: departmentId,
+        p_week_ids: weekIds,
+        p_limit: 2_000
+      })
+      : scopedResult;
+
+    /*
+     * The v2 RPC carries the resolved scope in its response. The legacy RPC
+     * remains the compatibility path for a frontend deployed before the
+     * nested-department migration.
+     */
+    if (result?.error) throw result.error;
+    if (result?.data && typeof result.data === 'object') {
+      const payload = result.data as { items?: unknown[]; truncated?: boolean };
+      if (!Array.isArray(payload.items) || typeof payload.truncated !== 'boolean') {
+        throw new Error('任务范围结果格式错误，请检查数据库迁移。');
+      }
+      if (payload.truncated || payload.items.length > 2_000) {
+        throw new Error('当前部门周期任务超过 2000 条安全上限，请缩小范围。');
+      }
+      const tasks = payload.items.map(mapTaskRow);
+      taskScopeCache.set(cacheKey, { tasks, expiresAt: Date.now() + TASK_SCOPE_CACHE_TTL_MS });
+      return tasks;
+    }
+
+    // Compatibility path for a frontend deployed before the scope migration.
+    const allTasks = await getTasks();
+    const userDepartmentById = new Map(fallbackUsers.map((user) => [user.id, user.departmentId]));
+    const weekSet = new Set(weekIds);
+    const tasks = allTasks.filter((task) => {
+      const taskDepartmentId = task.departmentId || userDepartmentById.get(task.ownerId);
+      return taskDepartmentId === departmentId
+        && Array.isArray(task.targetWeeks)
+        && task.targetWeeks.some((weekId) => weekSet.has(weekId));
+    });
+    taskScopeCache.set(cacheKey, { tasks, expiresAt: Date.now() + TASK_SCOPE_CACHE_TTL_MS });
+    return tasks;
+  } catch (e) {
+    handleSupabaseError(e);
+    throw e;
+  }
+};
+
 export const getTaskUsersForTasks = async (taskIds: string[]): Promise<User[]> => {
   if (!isSupabaseConfigured()) throw new Error("Supabase not configured");
   if (taskIds.length === 0) return [];
   try {
-    const { data, error } = await supabase.rpc('get_current_user_task_users_for_tasks', {
-      p_task_ids: taskIds
-    });
-    if (error) throw error;
-    return (data || []).map(mapUserRow);
+    const uniqueTaskIds = Array.from(new Set(taskIds.filter(Boolean)));
+    const batches: string[][] = [];
+    for (let index = 0; index < uniqueTaskIds.length; index += 100) {
+      batches.push(uniqueTaskIds.slice(index, index + 100));
+    }
+    const usersById = new Map<string, User>();
+    for (let index = 0; index < batches.length; index += 4) {
+      const results = await Promise.all(batches.slice(index, index + 4).map((batch) =>
+        supabase.rpc('get_current_user_task_users_for_tasks', { p_task_ids: batch })
+      ));
+      results.forEach(({ data, error }) => {
+        if (error) throw error;
+        (data || []).forEach((row: any) => {
+          const user = mapUserRow(row);
+          usersById.set(user.id, user);
+        });
+      });
+    }
+    return Array.from(usersById.values());
   } catch (e) {
     handleSupabaseError(e);
     throw e;
@@ -588,11 +734,156 @@ export const getTaskById = async (taskId: string): Promise<PADEntry> => {
   }
 };
 
+const getIsoWeekIdForDate = (input: Date): string => {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit'
+  }).formatToParts(input);
+  const read = (type: string) => Number(parts.find((part) => part.type === type)?.value);
+  const date = new Date(Date.UTC(read('year'), read('month') - 1, read('day')));
+  date.setUTCDate(date.getUTCDate() + 4 - (date.getUTCDay() || 7));
+  const isoYear = date.getUTCFullYear();
+  const yearStart = new Date(Date.UTC(isoYear, 0, 1));
+  const week = Math.ceil((((date.getTime() - yearStart.getTime()) / 86400000) + 1) / 7);
+  return `${isoYear}-W${String(week).padStart(2, '0')}`;
+};
+
+const parseTaskCenterCursor = (value: any): TaskCenterCursor | null => {
+  if (!value || typeof value !== 'object') return null;
+  const updatedAt = Number(value.updatedAt ?? value.updated_at);
+  const id = typeof value.id === 'string' ? value.id : '';
+  if (!Number.isSafeInteger(updatedAt) || updatedAt < 0 || id.length === 0) return null;
+  return { updatedAt, id };
+};
+
+export const getTaskCenterPage = async ({
+  departmentId = null,
+  scope = 'all',
+  status = null,
+  priority = null,
+  search = null,
+  limit = TASK_LIST_PAGE_SIZE,
+  cursor = null,
+}: TaskCenterPageOptions = {}): Promise<TaskCenterPage> => {
+  if (!isSupabaseConfigured()) throw new Error("Supabase not configured");
+
+  try {
+    const result = await supabase.rpc('web_get_task_center_page', {
+      p_department_id: departmentId || null,
+      p_scope: scope,
+      p_status: status && status !== 'all' ? status : null,
+      p_priority: priority && priority !== 'all' ? priority : null,
+      p_query: search?.trim() || null,
+      p_limit: limit,
+      p_cursor_updated_at: cursor?.updatedAt ?? null,
+      p_cursor_id: cursor?.id ?? null,
+    });
+
+    if (isIgnoredMissingFunctionError(result.error)) {
+      throw new Error('组织任务查询接口尚未部署，请先完成任务中心分页迁移。');
+    }
+    if (result.error) throw result.error;
+
+    const payload = result.data && typeof result.data === 'object' ? result.data as Record<string, any> : null;
+    const total = Number(payload?.total);
+    const rawHasMore = payload?.hasMore ?? payload?.has_more;
+    const hasMore = rawHasMore === true;
+    const items = payload?.items;
+    const nextCursor = parseTaskCenterCursor(payload?.nextCursor ?? payload?.next_cursor);
+    if (!payload || !Array.isArray(items) || !Number.isSafeInteger(total) || total < 0
+      || typeof rawHasMore !== 'boolean'
+      || (payload.hasMore !== undefined && typeof payload.hasMore !== 'boolean')
+      || (payload.has_more !== undefined && typeof payload.has_more !== 'boolean')
+      || (hasMore && !nextCursor)) {
+      throw new Error('任务中心分页结果格式错误，请检查数据库迁移。');
+    }
+
+    return {
+      tasks: items.map(mapTaskRow),
+      total,
+      hasMore,
+      nextCursor: hasMore ? nextCursor : null,
+      scope: typeof payload.scope === 'string' ? payload.scope : scope,
+    };
+  } catch (e) {
+    handleSupabaseError(e);
+    throw e;
+  }
+};
+
 export const getWorkbenchTasks = async (_userId: string): Promise<PADEntry[]> => {
   if (!isSupabaseConfigured()) throw new Error("Supabase not configured");
   try {
     let data: any[] | null = null;
     let error: any = null;
+
+    const today = new Date();
+    const currentWeekId = getIsoWeekIdForDate(today);
+    const nextWeekId = getIsoWeekIdForDate(new Date(today.getTime() + (7 * 24 * 60 * 60 * 1000)));
+    const rowsById = new Map<string, any>();
+    const cursors: Record<'today' | 'thisWeek' | 'nextWeek', any> = {
+      today: null, thisWeek: null, nextWeek: null
+    };
+    const done: Record<'today' | 'thisWeek' | 'nextWeek', boolean> = {
+      today: false, thisWeek: false, nextWeek: false
+    };
+    let fetchedCount = 0;
+    let pageRpcAvailable = true;
+
+    while (Object.values(done).some((value) => !value)) {
+      const cursorArgs = (key: 'today' | 'thisWeek' | 'nextWeek') => done[key]
+        ? { updatedAt: -1, id: '' }
+        : (cursors[key] || { updatedAt: null, id: null });
+      const todayCursor = cursorArgs('today');
+      const thisWeekCursor = cursorArgs('thisWeek');
+      const nextWeekCursor = cursorArgs('nextWeek');
+      const result = await supabase.rpc('mcp_get_personal_workbench_page', {
+        p_limit: 50,
+        p_today_cursor_updated_at: todayCursor.updatedAt,
+        p_today_cursor_id: todayCursor.id,
+        p_this_week_id: currentWeekId,
+        p_this_week_cursor_updated_at: thisWeekCursor.updatedAt,
+        p_this_week_cursor_id: thisWeekCursor.id,
+        p_next_week_id: nextWeekId,
+        p_next_week_cursor_updated_at: nextWeekCursor.updatedAt,
+        p_next_week_cursor_id: nextWeekCursor.id,
+      });
+      if (isIgnoredMissingFunctionError(result.error)) {
+        pageRpcAvailable = false;
+        break;
+      }
+      if (result.error) throw result.error;
+      const payload = result.data && typeof result.data === 'object' ? result.data : null;
+      if (!payload || !['today', 'thisWeek', 'nextWeek'].every((key) => payload[key] && Array.isArray(payload[key].items))) {
+        throw new Error('工作台分页结果格式错误，请检查数据库迁移。');
+      }
+      let pageProgress = 0;
+      for (const key of ['today', 'thisWeek', 'nextWeek'] as const) {
+        if (done[key]) continue;
+        const page = payload[key];
+        for (const row of page.items) {
+          pageProgress += 1;
+          fetchedCount += 1;
+          if (row?.id) rowsById.set(row.id, row);
+        }
+        if (page.hasMore === true) {
+          if (!page.nextCursor || !Number.isSafeInteger(Number(page.nextCursor.updatedAt))
+            || typeof page.nextCursor.id !== 'string' || page.nextCursor.id.length === 0) {
+            throw new Error('工作台分页游标无效，请检查数据库迁移。');
+          }
+          cursors[key] = page.nextCursor;
+        } else {
+          done[key] = true;
+        }
+      }
+      if (fetchedCount > 10_000) {
+        throw new Error('工作台任务超过 10000 条安全上限，请缩小任务范围。');
+      }
+      if (pageProgress === 0 && Object.values(done).some((value) => !value)) {
+        throw new Error('工作台分页未取得进展，请检查数据库游标。');
+      }
+    }
+
+    if (pageRpcAvailable) return [...rowsById.values()].map(mapTaskRow);
 
     ({ data, error } = await supabase.rpc('get_my_workbench_tasks'));
 

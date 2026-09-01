@@ -155,33 +155,23 @@ export const RouteDataLayout: React.FC = () => {
         const loadTasks = taskRouteNeedsFullData ? getTasks : getTaskList;
         const taskPage = taskRouteIsTaskCenter ? await getMyTaskListPage(currentUserId) : null;
         const loadedTasks = taskPage ? taskPage.tasks : await loadTasks();
-        const loadedTaskUsers = loadedTasks.length > 0
-          ? await getTaskUsersForTasks(loadedTasks.map(task => task.id))
-          : [];
         const taskResult = taskPage
           ? {
             tasks: loadedTasks,
-            taskUsers: loadedTaskUsers,
             nextOffset: taskPage.nextOffset,
             hasMore: taskPage.hasMore
           }
           : {
             tasks: loadedTasks,
-            taskUsers: loadedTaskUsers,
             nextOffset: loadedTasks.length,
             hasMore: false
           };
         const tasks = taskResult.tasks;
-        const taskUsers = taskResult.taskUsers;
         if (routeLoadKeyRef.current !== routeLoadKey) return;
         if (domainRequestVersionRef.current.tasks !== requestVersions.tasks) return;
         const currentUsers = useAppStore.getState().users || [];
-        const mergedUsersById = new Map(currentUsers.map(user => [user.id, user]));
-        taskUsers.forEach(user => mergedUsersById.set(user.id, user));
-        const mergedUsers = Array.from(mergedUsersById.values());
-        setState({ tasks, users: mergedUsers });
+        setState({ tasks });
         setLastSavedTasks(tasks);
-        setLastSavedUsers(mergedUsers);
         setTaskLoadMode(taskRouteNeedsFullData ? 'full' : 'list');
         setTaskLoadScope(taskRouteNeedsFullData ? 'full' : (taskRouteIsTaskCenter ? 'mine' : 'org'));
         setTaskListPagination({
@@ -189,6 +179,21 @@ export const RouteDataLayout: React.FC = () => {
           hasMore: taskResult.hasMore
         });
         setDomainLoadState('tasks', { loaded: true });
+        const knownUserIds = new Set(currentUsers.map(user => user.id));
+        const taskIdsNeedingUsers = tasks
+          .filter((task) => [task.createdBy, task.ownerId, ...(task.participantIds || []), ...(task.approverIds || [])]
+            .some((userId) => userId && !knownUserIds.has(userId)))
+          .map(task => task.id);
+        if (taskIdsNeedingUsers.length > 0) {
+          void getTaskUsersForTasks(taskIdsNeedingUsers).then((taskUsers) => {
+            const latestUsers = useAppStore.getState().users || currentUsers;
+            const mergedUsersById = new Map(latestUsers.map(user => [user.id, user]));
+            taskUsers.forEach(user => mergedUsersById.set(user.id, user));
+            const mergedUsers = Array.from(mergedUsersById.values());
+            setState({ users: mergedUsers });
+            setLastSavedUsers(mergedUsers);
+          }).catch((error) => console.warn('Task user enrichment failed; continuing with task data', error));
+        }
       }
     };
 

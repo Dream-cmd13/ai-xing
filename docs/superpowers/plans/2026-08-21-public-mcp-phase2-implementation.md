@@ -3,14 +3,16 @@
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 >
 > **修订 v1.1（2026-08-21）：** 合入计划评审 8 项修正——①令牌失败重试状态机；②Manager 范围对齐现有触发器（不修改触发器）；③复盘目标部门权限校验；④创建任务必填字段与默认值闭合；⑤禁止经 MCP 移动任务部门；⑥RPC 信任边界声明；⑦统一会话销毁钩子；⑧回滚分级。
+>
+> **修订 v1.2（2026-08-21）：** 应用户确认「系统权限设计保持不变」，移除 processes 表 RLS 收紧（原 Task 1）——阶段二所有 SQL 迁移均为纯新增对象，不修改任何既有 RLS 策略、权限函数或触发器（见关键设计决策 12）。
 
-**Goal:** 在已验收的第一阶段只读 MCP 服务上增加六个写入工具（创建/更新 PAD 任务、提交任务、保存复盘记录），实现两步确认、乐观锁、幂等和审计四层写入安全，同时收紧 processes 表过于宽松的 RLS 策略，使 TRAE 用户能用个人系统账号安全写入业务数据。
+**Goal:** 在已验收的第一阶段只读 MCP 服务上增加六个写入工具（创建/更新 PAD 任务、提交任务、保存复盘记录），实现两步确认、乐观锁、幂等和审计四层写入安全，使 TRAE 用户能用个人系统账号安全写入业务数据。不修改系统任何既有权限设计——RLS 策略、权限函数、触发器全部保持现状。
 
 **前置条件（开工闸门）：** 用户已明确回复「第一阶段验收通过，同意开始第二阶段」。未收到该回复前不得修改任何生产代码（总体方案 4.5、第 8 节）。
 
-**Architecture:** 所有写入固定走两步链路：`prepare / 首次调用（只读预览 + 签发确认令牌） → 用户在 TRAE 对话中明确确认 → commit / 携带令牌二次调用（Supabase RPC 单事务执行）`。确认令牌保存在 MCP 进程内存并绑定「用户 + MCP 会话 + 工具名 + 参数摘要 + 过期时间」，令牌状态机为 `issued → in_flight → 终态删除`（可重试失败回滚 issued，业务失败删除）。权限判定、乐观锁、幂等和审计全部下沉到数据库 RPC（SECURITY DEFINER + 显式权限校验），复用网站现有权限函数（`is_admin`、`is_manager`、`is_department_manager`、`current_user_can_manage_task`），复盘保存新增共享函数 `current_user_can_edit_department_reviews`（谓词与网站 `save_departments_atomic` 对齐）。**权限总原则：MCP 写入能力 ⊆ 网站现有能力**——MCP 与网站共用同一权限体系，任何一侧收紧对两侧同时生效。
+**Architecture:** 所有写入固定走两步链路：`prepare / 首次调用（只读预览 + 签发确认令牌） → 用户在 TRAE 对话中明确确认 → commit / 携带令牌二次调用（Supabase RPC 单事务执行）`。确认令牌保存在 MCP 进程内存并绑定「用户 + MCP 会话 + 工具名 + 参数摘要 + 过期时间」，令牌状态机为 `issued → in_flight → 终态删除`（可重试失败回滚 issued，业务失败删除）。权限判定、乐观锁、幂等和审计全部下沉到数据库 RPC（SECURITY DEFINER + 显式权限校验），复用网站现有权限函数（`is_admin`、`is_manager`、`is_department_manager`、`current_user_can_manage_task`），复盘保存新增共享函数 `current_user_can_edit_department_reviews`（谓词与网站 `save_departments_atomic` 对齐）。**权限总原则：MCP 写入能力 ⊆ 网站现有能力**——MCP 与网站共用同一权限体系，任何一侧收紧对两侧同时生效。本阶段全部数据库变更为纯新增对象（两张日志表、一个权限谓词组合函数、五个写入 RPC），不修改任何既有 RLS 策略、权限函数或触发器。
 
-**Tech Stack:** 与第一阶段一致（Node.js 20+、ES Modules、`@modelcontextprotocol/sdk@1.30.0`、Express 5、Zod 4、`@supabase/supabase-js@2.105.4`、Node Test Runner、Nginx），新增 `node:crypto`（令牌与参数摘要）和三个 Supabase SQL 迁移。
+**Tech Stack:** 与第一阶段一致（Node.js 20+、ES Modules、`@modelcontextprotocol/sdk@1.30.0`、Express 5、Zod 4、`@supabase/supabase-js@2.105.4`、Node Test Runner、Nginx），新增 `node:crypto`（令牌与参数摘要）和两个 Supabase SQL 迁移。
 
 ---
 
@@ -28,11 +30,11 @@
 8. **任务部门不可经 MCP 移动**：`department_id` 不进入 MCP 更新白名单，任何角色（含 Admin）都不能通过 MCP 修改任务部门——`current_user_can_manage_task` 只判负责人/参与人，不校验目标部门范围，开放部门移动即引入越权移动风险。组织级调整留给后续阶段评估。
 9. **复盘保存使用目标部门范围校验**：`current_user_can_save_departments()`（00_one_click_schema.sql:734）只查菜单权限、不接收目标部门参数，单独使用会导致持有菜单权限的普通用户越权修改非授权部门复盘。新增共享函数 `current_user_can_edit_department_reviews(p_department_id)`，谓词与网站 `save_departments_atomic` 更新分支（00_one_click_schema.sql:1575-1585）逐字对齐（Admin / `current_user_can_manage_department_tree(目标部门)` / 目标部门=本部门 / 本部门 ∈ 目标部门子树），叠加菜单权限与 `row_version` 校验。`save_departments_atomic` 本阶段不动（避免网站回归），验收要求两条路径在三类测试账号上判定等价。
 10. **RPC 信任边界**：MCP 接口层强制两步确认；数据库 RPC 层强制权限/事务/乐观锁/幂等/审计。持有用户 JWT 直接调用 `mcp_*` RPC 不属于 MCP 客户端流程——绕过的只是确认步骤，绕不过权限与审计（与网站 `save_*_atomic` 同一信任模型）。本阶段不引入 RPC 签名机制，该边界声明固定写入验收文档。
-11. **回滚分级**：L1 应用回滚（默认）= 回退 mcp-server 至第一阶段构建并重启，SQL 对象全部保留，无数据损失；L2 数据库回滚 = 恢复 processes 策略 + DROP FUNCTION + DROP TABLE，仅当用户明确确认不再需要审计数据时执行，执行前必须先导出 `mcp_audit_log`，禁止作为自动回滚步骤。
+11. **回滚分级**：L1 应用回滚（默认）= 回退 mcp-server 至第一阶段构建并重启，SQL 对象全部保留，无数据损失；L2 数据库回滚 = DROP FUNCTION + DROP TABLE（均为本阶段新增对象，不涉及任何既有权限对象），仅当用户明确确认不再需要审计数据时执行，执行前必须先导出 `mcp_audit_log`，禁止作为自动回滚步骤。
+12. **不修改系统既有权限设计**：应用户确认，系统权限设计保持不变，本阶段全部数据库变更为纯新增对象。原总体方案 5.2 步骤 2 的「收紧 processes 表 RLS」移出阶段二：processes 写策略维持 `USING (true)` 现状（阶段二无 processes 写工具，MCP 不新增该表暴露；如需收紧，作为独立的系统加固变更另行评估）。写入 RPC 的权限判定 = 在函数体内调用既有权限函数（与 tasks_insert / tasks_update RLS 策略、网站 `save_*_atomic` 使用的同一批函数）；`current_user_can_edit_department_reviews` 仅为网站现有内联检查的可复用提取，不改变任何现有判定。既有 RLS 策略、权限函数、`enforce_task_owner_scope` 触发器一律不动。维护提醒：将来修改权限函数本身时 RPC 自动跟随；若修改 tasks 表 RLS 策略的组合方式（增删 OR 分支），RPC 内镜像组合需同步更新。
 
 ## 文件结构
 
-- `sql/2026-08-21_tighten_processes_rls.sql`：收紧 processes 表写策略。
 - `sql/2026-08-21_mcp_write_infra_tables.sql`：`mcp_write_log`、`mcp_audit_log` 表和 RLS。
 - `sql/2026-08-21_mcp_write_rpc.sql`：共享权限函数 `current_user_can_edit_department_reviews` + 四个写入 RPC + 失败审计 RPC。
 - `mcp-server/src/confirmation-store.mjs`：三态确认令牌的签发、状态流转和清理。
@@ -49,70 +51,7 @@
 - `docs/mcp-phase2-acceptance.md`：人工验收清单和测试矩阵。
 - `mcp-server/src/tools.mjs` / `repository.mjs`：**不修改**（第一阶段只读工具保持原样）。
 
-## Task 1：收紧 processes 表 RLS（SQL 迁移）
-
-**Files:**
-- Create: `sql/2026-08-21_tighten_processes_rls.sql`
-
-**背景：** `00_one_click_schema.sql` 中 processes 四条策略均为 `USING (true)`，任何 authenticated 用户可增删改流程（总体方案 5.2 步骤 2 点名的问题）。收紧目标与网站前端 `canPersistProcess` / `canManageProcess` 判定一致：Admin 全局、持有 process 菜单权限者、管理该部门的 Manager；更新额外允许创建人本人。
-
-- [ ] **Step 1：编写迁移 SQL**
-
-```sql
-BEGIN;
-
-DROP POLICY IF EXISTS processes_insert ON public.processes;
-DROP POLICY IF EXISTS processes_update ON public.processes;
-DROP POLICY IF EXISTS processes_delete ON public.processes;
-
--- 与前端 canPersistProcess 对齐：Admin / process 菜单权限 / 本部门 Manager
-CREATE POLICY processes_insert ON public.processes FOR INSERT TO authenticated
-  WITH CHECK (
-    public.is_admin()
-    OR public.has_menu_permission('process', 'create')
-    OR public.has_menu_permission('process', 'update')
-    OR (public.is_manager() AND public.is_department_manager(department_id))
-  );
-
--- 更新：以上范围 + 创建人本人（与 canManageTask 的 owner 语义一致）
-CREATE POLICY processes_update ON public.processes FOR UPDATE TO authenticated
-  USING (
-    public.is_admin()
-    OR public.has_menu_permission('process', 'update')
-    OR (public.is_manager() AND public.is_department_manager(department_id))
-    OR created_by = public.current_user_id()
-  )
-  WITH CHECK (
-    public.is_admin()
-    OR public.has_menu_permission('process', 'update')
-    OR (public.is_manager() AND public.is_department_manager(department_id))
-    OR created_by = public.current_user_id()
-  );
-
--- 删除不放开给创建人：删除属于重操作，仅 Admin / 权限持有者 / 部门 Manager
-CREATE POLICY processes_delete ON public.processes FOR DELETE TO authenticated
-  USING (
-    public.is_admin()
-    OR public.has_menu_permission('process', 'update')
-    OR (public.is_manager() AND public.is_department_manager(department_id))
-  );
-
-COMMIT;
-```
-
-- [ ] **Step 2：写回滚 SQL 并记入部署文档（归入 L2 数据库回滚）**
-
-回滚为恢复 `00_one_click_schema.sql` 第 2278-2281 行的四条 `USING (true)` 原策略。该操作会重新开放所有 authenticated 用户对流程表的写权限、影响网站行为，归入 L2 数据库回滚：仅在用户明确确认后执行，完整语句与执行条件写入 `docs/mcp-phase2-deployment.md` 回滚章节，禁止作为自动回滚步骤（见关键设计决策 11）。
-
-- [ ] **Step 3：人工核对不破坏网站现有流程编辑路径**
-
-确认 `save_processes_atomic`（SECURITY INVOKER，走 RLS）的调用方（网站流程页）在收紧后仍可保存：核对现有测试账号是否持有 `process` 菜单权限或 Manager 身份。若存在无权限却在编辑流程的真实用户，列入部署文档「已知行为变化」并请用户确认。
-
-- [ ] **Step 4：在 Supabase SQL 编辑器应用并验证**
-
-应用后用三类测试账号验证：Employee 直插 processes 被拒、Manager 限本部门、Admin 全局。结果记录到 `docs/mcp-phase2-acceptance.md`。
-
-## Task 2：新增写入基础设施表（SQL 迁移）
+## Task 1：新增写入基础设施表（SQL 迁移）
 
 **Files:**
 - Create: `sql/2026-08-21_mcp_write_infra_tables.sql`
@@ -171,7 +110,7 @@ COMMIT;
 
 用 Employee 账号执行 `UPDATE public.mcp_audit_log ...` 必须被 RLS 拒绝（无 UPDATE 策略）。记录到验收文档。
 
-## Task 3：实现写入 RPC（SQL 迁移）
+## Task 2：实现写入 RPC（SQL 迁移）
 
 **Files:**
 - Create: `sql/2026-08-21_mcp_write_rpc.sql`
@@ -239,7 +178,7 @@ END IF;
 
 迁移整体包在 `BEGIN/COMMIT`。在 Supabase 应用后逐个 RPC 做冒烟：成功、重复 requestId 幂等返回、权限拒绝、版本冲突、失败回滚不留 pending 记录；创建缺省值（不传 ownerId/departmentId）、禁止字段（changes 含 department_id / owner_id 变更）、用户存在性校验、`target_weeks` W00/W99 拒绝；`current_user_can_edit_department_reviews` 与 `save_departments_atomic` 更新分支在 Admin/Manager/Employee 三类账号上的判定等价性核对。结果记入验收文档。
 
-## Task 4：确认令牌存储 ConfirmationStore（TDD）
+## Task 3：确认令牌存储 ConfirmationStore（TDD）
 
 **Files:**
 - Create: `mcp-server/test/confirmation-store.test.mjs`
@@ -285,7 +224,7 @@ Run: `npm --prefix mcp-server test -- test/confirmation-store.test.mjs`
 
 Expected: PASS。
 
-## Task 5：写入 Repository（TDD）
+## Task 4：写入 Repository（TDD）
 
 **Files:**
 - Create: `mcp-server/test/write-repository.test.mjs`
@@ -332,7 +271,7 @@ Run: `npm --prefix mcp-server test -- test/write-repository.test.mjs`
 
 Expected: PASS。
 
-## Task 6：注册六个写入 MCP 工具（TDD）
+## Task 5：注册六个写入 MCP 工具（TDD）
 
 **Files:**
 - Create: `mcp-server/test/write-tools.test.mjs`
@@ -415,7 +354,7 @@ Run: `npm --prefix mcp-server test -- test/write-tools.test.mjs`
 
 Expected: PASS。
 
-## Task 7：集成到会话服务器与失败审计
+## Task 6：集成到会话服务器与失败审计
 
 **Files:**
 - Modify: `mcp-server/src/config.mjs`
@@ -447,7 +386,7 @@ Run: `npm --prefix mcp-server test -- test/app.test.mjs test/protocol.integratio
 
 Expected: PASS。
 
-## Task 8：真实环境冒烟、部署与验收文档
+## Task 7：真实环境冒烟、部署与验收文档
 
 **Files:**
 - Modify: `mcp-server/scripts/live-smoke.mjs`
@@ -469,13 +408,13 @@ Expected: PASS。
 
 - [ ] **Step 2：编写部署文档（含分级回滚）**
 
-内容：SQL 应用顺序（Task 1 → 2 → 3，逐个执行并验证）；mcp-server 更新与 systemd 重启；Nginx 不变；**回滚分级**（关键设计决策 11）——L1 应用回滚（默认）：回退 mcp-server 至第一阶段构建并重启，全部 SQL 对象保留，无数据损失；L2 数据库回滚：恢复 processes 四条 `USING (true)` 策略 + `DROP FUNCTION`（五个 RPC 与 `current_user_can_edit_department_reviews`）+ `DROP TABLE mcp_write_log/mcp_audit_log`，仅当用户明确确认不再需要审计数据时执行，执行前必须先导出 `mcp_audit_log`，禁止作为自动回滚步骤；已知限制（内存确认存储重启即清、单实例、Basic Auth 保留至第四阶段、Manager 不能在子部门建任务、任务部门不可经 MCP 移动）。
+内容：SQL 应用顺序（两个迁移依次执行并验证，均为纯新增对象，不修改任何既有权限对象）；mcp-server 更新与 systemd 重启；Nginx 不变；**回滚分级**（关键设计决策 11）——L1 应用回滚（默认）：回退 mcp-server 至第一阶段构建并重启，全部 SQL 对象保留，无数据损失；L2 数据库回滚：`DROP FUNCTION`（五个 RPC 与 `current_user_can_edit_department_reviews`）+ `DROP TABLE mcp_write_log/mcp_audit_log`（均为阶段二新增对象，不涉及任何既有权限对象），仅当用户明确确认不再需要审计数据时执行，执行前必须先导出 `mcp_audit_log`，禁止作为自动回滚步骤；已知限制（内存确认存储重启即清、单实例、Basic Auth 保留至第四阶段、Manager 不能在子部门建任务、任务部门不可经 MCP 移动、processes 表写策略维持 `USING (true)` 现状——应用户确认不修改系统既有权限设计，见关键设计决策 12）。
 
 - [ ] **Step 3：编写验收文档**
 
 按总体方案 5.3 五类测试建矩阵（写入权限 / 确认机制 / 并发 / 幂等事务 / 审计），标注「本地自动化已证」与「等待真实环境 / 真实账号」；固定写入 RPC 信任边界声明（关键设计决策 10）：「MCP 接口层强制两步确认；数据库 RPC 层强制权限/事务/乐观锁/幂等/审计；持有用户 JWT 直接调用 `mcp_*` RPC 不属于 MCP 客户端流程」；附 Admin/Manager/Employee 三账号 TRAE 人工验收步骤（总体方案 §8 材料 6），其中包含 `current_user_can_edit_department_reviews` 与 `save_departments_atomic` 两条路径在三类账号上的判定等价性核对；本地无法证明的项目一律标「等待用户验收」，不得伪报通过。
 
-## Task 9：全量验证与阶段交付
+## Task 8：全量验证与阶段交付
 
 **Files:**
 - Modify: `docs/mcp-phase2-acceptance.md`

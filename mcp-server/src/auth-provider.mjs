@@ -29,6 +29,12 @@ export function createSupabaseAuthProvider({ config, createClient = createSupaba
   );
 
   return {
+    async checkReadiness() {
+      const result = await publicClient().rpc('mcp_get_readiness');
+      if (result?.error) throw new Error('readiness rpc unavailable');
+      return result?.data && typeof result.data === 'object' ? result.data : { status: 'degraded' };
+    },
+
     async authenticate({ email, password }) {
       const client = publicClient();
       let authResult;

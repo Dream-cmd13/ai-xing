@@ -124,3 +124,57 @@ test('closes every active session during shutdown', async () => {
   assert.equal(first.transport.calls, 1);
   assert.equal(second.server.calls, 1);
 });
+
+test('notifies session destruction exactly once after explicit removal', async () => {
+  const destroyed = [];
+  const registry = new SessionRegistry({
+    ttlMs: 1000,
+    refreshWindowMs: 50,
+    now: () => 100,
+    onSessionDestroyed(sessionId) { destroyed.push(sessionId); },
+  });
+  registry.register('session-1', { transport: closable(), server: closable(), context: context() });
+
+  assert.equal(await registry.remove('session-1'), true);
+  assert.equal(await registry.remove('session-1'), false);
+  assert.deepEqual(destroyed, ['session-1']);
+});
+
+test('notifies session destruction after transport close without closing resources again', () => {
+  const destroyed = [];
+  const transport = closable();
+  const server = closable();
+  const registry = new SessionRegistry({
+    ttlMs: 1000,
+    refreshWindowMs: 50,
+    now: () => 100,
+    onSessionDestroyed(sessionId) { destroyed.push(sessionId); },
+  });
+  registry.register('session-1', { transport, server, context: context() });
+
+  assert.equal(registry.handleTransportClosed('session-1'), true);
+  assert.equal(registry.handleTransportClosed('session-1'), false);
+  assert.deepEqual(destroyed, ['session-1']);
+  assert.equal(transport.calls, 0);
+  assert.equal(server.calls, 0);
+});
+
+test('notifies session destruction after TTL cleanup and shutdown cleanup', async () => {
+  let now = 100;
+  const destroyed = [];
+  const registry = new SessionRegistry({
+    ttlMs: 1000,
+    refreshWindowMs: 50,
+    now: () => now,
+    onSessionDestroyed(sessionId) { destroyed.push(sessionId); },
+  });
+  registry.register('expired-session', { transport: closable(), server: closable(), context: context() });
+  now = 1_101;
+  await registry.cleanupExpired();
+
+  now = 1_200;
+  registry.register('shutdown-session', { transport: closable(), server: closable(), context: context() });
+  await registry.closeAll();
+
+  assert.deepEqual(destroyed, ['expired-session', 'shutdown-session']);
+});

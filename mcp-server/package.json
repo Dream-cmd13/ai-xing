@@ -1,13 +1,14 @@
 {
   "name": "ai-xing-public-mcp",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.2.0",
   "type": "module",
   "engines": {
     "node": ">=20"
   },
   "scripts": {
     "start": "node src/index.mjs",
+    "migrate": "node scripts/migrate.mjs",
     "test": "node --test --test-concurrency=1",
     "test:live": "node scripts/live-smoke.mjs"
   },
@@ -16,6 +17,7 @@
     "@supabase/supabase-js": "2.105.4",
     "dotenv": "17.4.2",
     "express": "5.2.1",
+    "pg": "8.16.3",
     "zod": "4.4.3"
   }
 }
