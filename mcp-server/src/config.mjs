@@ -96,6 +96,10 @@ export function loadConfig(env = process.env) {
   if (nodeEnv === 'production' && trustedProxyAddresses.some((address) => !isLoopbackHost(address))) {
     throw new Error('生产环境 MCP_TRUSTED_PROXY_ADDRESSES 只能包含 loopback 地址');
   }
+  const requireHttps = booleanValue(env, 'MCP_REQUIRE_HTTPS', false);
+  if (nodeEnv === 'production' && !requireHttps) {
+    throw new Error('生产环境必须启用 MCP_REQUIRE_HTTPS');
+  }
   return Object.freeze({
     supabaseUrl,
     supabasePublishableKey,
@@ -116,7 +120,7 @@ export function loadConfig(env = process.env) {
     readRateLimitMax: positiveInteger(env, 'MCP_READ_RATE_LIMIT_MAX', rateLimitMax),
     writeRateLimitMax: positiveInteger(env, 'MCP_WRITE_RATE_LIMIT_MAX', rateLimitMax),
     drainTimeoutMs: positiveInteger(env, 'MCP_DRAIN_TIMEOUT_MS', 10 * 1000),
-    requireHttps: booleanValue(env, 'MCP_REQUIRE_HTTPS', false),
+    requireHttps,
     allowedHosts: csv(env.MCP_ALLOWED_HOSTS, '127.0.0.1,localhost'),
     trustedProxyAddresses,
   });

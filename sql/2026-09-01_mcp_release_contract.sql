@@ -23,7 +23,9 @@ STABLE
 SET search_path = public
 AS $$
   WITH expected AS (
-    SELECT '2026-09-01'::TEXT AS release_id, '[
+    SELECT '2026-09-01'::TEXT AS release_id,
+      '47a58a1fbf69cea7564a2e2a67a0fde594924b957f4b5953e04344e5990757f8'::TEXT AS manifest_digest,
+      '[
       "2026-08-21_mcp_write_infra_tables",
       "2026-08-21_mcp_write_rpc",
       "2026-08-25_mcp_name_identity_queries",
@@ -61,7 +63,7 @@ AS $$
       contract.manifest_digest,
       COALESCE(contract.deferred_indexes, '{}'::JSONB) AS deferred_indexes,
       contract.required_versions = expected.required_versions
-        AND contract.manifest_digest ~ '^[0-9a-f]{64}$'
+        AND contract.manifest_digest = expected.manifest_digest
         AND NOT EXISTS (
           SELECT 1
           FROM jsonb_array_elements_text(expected.required_versions) required(version)

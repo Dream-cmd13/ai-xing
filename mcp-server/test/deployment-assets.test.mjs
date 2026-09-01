@@ -24,5 +24,7 @@ test('production environment example fixes loopback, readiness and trusted proxy
   assert.match(example, /^MCP_ALLOW_NON_LOOPBACK=false$/m);
   assert.match(example, /^MCP_READINESS_TTL_MS=5000$/m);
   assert.match(example, /^MCP_TRUSTED_PROXY_ADDRESSES=127\.0\.0\.1,::1,::ffff:127\.0\.0\.1$/m);
+  assert.match(example, /^MCP_ALLOWED_HOSTS=your-mcp-domain\.example\.com,127\.0\.0\.1,localhost$/m);
+  assert.match(example, /^MCP_REQUIRE_HTTPS=true$/m);
   assert.doesNotMatch(example, /(?:SERVICE_ROLE|SECRET_KEY|DATABASE_URL|PASSWORD)=\S+/i);
 });

@@ -333,6 +333,8 @@ export const invalidateVisibleTaskScopeCache = (userId?: string) => {
   }
 };
 
+const TASK_PEOPLE_BATCH_SIZE = 50;
+
 const fetchSettingsRow = async () => {
   const { data, error } = await supabase
     .from('settings')
@@ -594,9 +596,8 @@ export const getTaskUsersForTasks = async (taskIds: string[]): Promise<User[]> =
   try {
     const uniqueTaskIds = Array.from(new Set(taskIds.filter(Boolean)));
     const batches: string[][] = [];
-    const taskPeopleBatchSize = 50;
-    for (let index = 0; index < uniqueTaskIds.length; index += taskPeopleBatchSize) {
-      batches.push(uniqueTaskIds.slice(index, index + taskPeopleBatchSize));
+    for (let index = 0; index < uniqueTaskIds.length; index += TASK_PEOPLE_BATCH_SIZE) {
+      batches.push(uniqueTaskIds.slice(index, index + TASK_PEOPLE_BATCH_SIZE));
     }
     const usersById = new Map<string, User>();
     for (let index = 0; index < batches.length; index += 4) {

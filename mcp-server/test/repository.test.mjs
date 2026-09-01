@@ -313,6 +313,36 @@ test('enriches 150 workbench candidates in bounded people batches', async () => 
   assert.deepEqual(peopleCalls.map((batch) => batch.length), [50, 50, 50]);
 });
 
+test('splits 51 workbench candidates into 50 and 1 people batches', async () => {
+  const sourceRows = Array.from({ length: 51 }, (_, index) => ({
+    id: `task-${index}`, title: `任务${index}`, department_id: 'd1', target_weeks: ['2026-W34'],
+  }));
+  const fake = fakeSupabase();
+  const peopleCalls = [];
+  fake.client.rpc = async (name, args) => {
+    fake.calls.push(['rpc', name, args]);
+    if (name === 'mcp_get_personal_workbench_page') {
+      const page = (items) => ({ items, hasMore: false, nextCursor: null, truncated: false });
+      return { data: {
+        today: page(sourceRows.slice(0, 50)),
+        thisWeek: page(sourceRows.slice(50)),
+        nextWeek: page([]),
+      }, error: null };
+    }
+    if (name === 'mcp_get_task_people') {
+      peopleCalls.push(args.p_task_ids);
+      return { data: { tasks: args.p_task_ids.map((id) => ({ task_id: id, owner: null, participants: [], approvers: [] })) }, error: null };
+    }
+    return { data: [], error: null };
+  };
+  const repo = repository(fake);
+
+  const result = await repo.value.getPersonalWorkbench({ limit: 50 });
+
+  assert.equal(result.tasks.length, 51);
+  assert.deepEqual(peopleCalls.map((batch) => batch.length), [50, 1]);
+});
+
 test('keeps one task repeated in today, this-week and next-week groups', async () => {
   const now = Date.UTC(2026, 7, 26, 4);
   const currentWeekId = getCurrentIsoWeekPeriod(now).weekId;

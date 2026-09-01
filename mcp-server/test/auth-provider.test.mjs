@@ -182,3 +182,23 @@ test('creates RLS clients with only the publishable key and the current user JWT
   assert.equal(calls[0][2].global.headers.Authorization, 'Bearer user-jwt');
   assert.equal(JSON.stringify(calls).includes('service'), false);
 });
+
+test('fails readiness closed unless the complete release contract matches the code', async () => {
+  const responses = [
+    { status: 'ready', releaseId: '2026-09-01', manifestDigest: 'wrong', requiredMigrations: true, functionPrivileges: true },
+    { status: 'ready', releaseId: 'old-release', manifestDigest: '47a58a1fbf69cea7564a2e2a67a0fde594924b957f4b5953e04344e5990757f8', requiredMigrations: true, functionPrivileges: true },
+    { status: 'ready', releaseId: '2026-09-01', manifestDigest: '47a58a1fbf69cea7564a2e2a67a0fde594924b957f4b5953e04344e5990757f8', requiredMigrations: true, functionPrivileges: true },
+  ];
+  for (const [index, responseData] of responses.entries()) {
+    const provider = createSupabaseAuthProvider({
+      config,
+      createClient: () => ({ rpc: async () => ({ data: responseData, error: null }) }),
+    });
+    const readiness = await provider.checkReadiness();
+    if (index < responses.length - 1) {
+      assert.deepEqual(readiness, { status: 'degraded', reason: 'RELEASE_CONTRACT_MISMATCH' });
+    } else {
+      assert.deepEqual(readiness, responseData);
+    }
+  }
+});

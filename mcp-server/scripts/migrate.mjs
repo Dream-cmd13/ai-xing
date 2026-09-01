@@ -4,8 +4,14 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import pg from 'pg';
+import {
+  EXPECTED_MANIFEST_DIGEST,
+  RELEASE_ID,
+} from '../src/release-contract.mjs';
 
 const { Client } = pg;
+
+export { EXPECTED_MANIFEST_DIGEST, RELEASE_ID };
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 
 export const BASELINE_VERSION = 'aab58c6';
@@ -45,7 +51,6 @@ const NON_TRANSACTIONAL = new Set(['2026-08-27_mcp_task_indexes.sql']);
 // The runner still wraps it in its own transaction; every later transactional
 // migration must carry and pass the strict outer-envelope validation.
 const LEGACY_UNWRAPPED_TRANSACTIONAL = new Set(['2026-08-27_mcp_readiness.sql']);
-export const RELEASE_ID = '2026-09-01';
 const RELEASE_CONTRACT_FILE = '2026-09-01_mcp_release_contract.sql';
 const LOCK_KEY = 'ai-xing:mcp:migrations:v1';
 const LEGACY_ADOPTION_CHECKS = Object.freeze({
@@ -231,6 +236,11 @@ async function recordReleaseContract(client, entries, knownVersions) {
   }
   const requiredVersions = requiredEntries.map((entry) => entry.version);
   const manifestDigest = releaseManifestDigest(entries);
+  if (manifestDigest !== EXPECTED_MANIFEST_DIGEST) {
+    const error = new Error('发布 manifest 摘要与代码中的 release contract 不一致。');
+    error.code = 'RELEASE_CONTRACT_MISMATCH';
+    throw error;
+  }
   const deferredIndexes = Object.fromEntries(entries
     .filter((entry) => !entry.transactional)
     .map((entry) => [entry.version, knownVersions.has(entry.version) ? 'ready' : 'pending']));

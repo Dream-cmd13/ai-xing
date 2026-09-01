@@ -4,7 +4,7 @@ import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 
-import { MIGRATION_MANIFEST } from '../scripts/migrate.mjs';
+import { EXPECTED_MANIFEST_DIGEST, MIGRATION_MANIFEST } from '../scripts/migrate.mjs';
 
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 
@@ -425,6 +425,7 @@ test('OKR readiness stays degraded until both attachment fixes are recorded', as
 
 test('review data preflight is read-only and returns identifiers instead of review content', async () => {
   const sql = await migration('2026-08-27_mcp_review_data_scan.sql');
+  assert.equal(MIGRATION_MANIFEST.includes('2026-08-27_mcp_review_data_scan.sql'), false);
 
   assert.match(sql, /ALIGNED_KR_ID_INVALID/i);
   assert.match(sql, /REVIEW_PERIOD_FORMAT_INVALID/i);
@@ -467,6 +468,8 @@ test('release readiness requires the complete ordered transactional manifest and
   assertTransactional(sql);
   assert.match(sql, /CREATE TABLE IF NOT EXISTS mcp_internal\.release_contracts/i);
   assert.match(sql, /manifest_digest TEXT NOT NULL CHECK/i);
+  assert.match(sql, new RegExp(EXPECTED_MANIFEST_DIGEST));
+  assert.match(sql, /contract\.manifest_digest\s*=\s*expected\.manifest_digest/i);
   assert.match(sql, /required_versions JSONB NOT NULL CHECK/i);
   assert.match(sql, /REVOKE ALL ON TABLE mcp_internal\.release_contracts FROM PUBLIC, anon, authenticated, service_role/i);
   for (const fileName of MIGRATION_MANIFEST.filter((name) => (

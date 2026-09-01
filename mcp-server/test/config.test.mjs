@@ -115,7 +115,7 @@ test('rejects non-loopback binding in production', () => {
     }),
     /loopback/,
   );
-  assert.equal(loadConfig({ ...validEnv, NODE_ENV: 'production', MCP_HOST: '::1' }).host, '::1');
+  assert.equal(loadConfig({ ...validEnv, NODE_ENV: 'production', MCP_HOST: '::1', MCP_REQUIRE_HTTPS: 'true' }).host, '::1');
 });
 
 test('requires an explicit dangerous override for non-production non-loopback binding', () => {
@@ -134,4 +134,13 @@ test('rejects non-loopback trusted proxies in production', () => {
     }),
     /TRUSTED_PROXY_ADDRESSES/,
   );
+});
+
+test('requires HTTPS in production', () => {
+  assert.throws(
+    () => loadConfig({ ...validEnv, NODE_ENV: 'production', MCP_REQUIRE_HTTPS: 'false' }),
+    /MCP_REQUIRE_HTTPS/,
+  );
+  const config = loadConfig({ ...validEnv, NODE_ENV: 'production', MCP_REQUIRE_HTTPS: 'true' });
+  assert.equal(config.requireHttps, true);
 });

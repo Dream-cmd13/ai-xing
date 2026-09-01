@@ -1,6 +1,7 @@
 import { createClient as createSupabaseClient } from '@supabase/supabase-js';
 
 import { authenticationFailed, sessionExpired } from './errors.mjs';
+import { hasExpectedReleaseContract } from './release-contract.mjs';
 
 const PROFILE_FIELDS = 'id,auth_id,username,name,role,department_id';
 
@@ -32,7 +33,10 @@ export function createSupabaseAuthProvider({ config, createClient = createSupaba
     async checkReadiness() {
       const result = await publicClient().rpc('mcp_get_readiness');
       if (result?.error) throw new Error('readiness rpc unavailable');
-      return result?.data && typeof result.data === 'object' ? result.data : { status: 'degraded' };
+      if (!result?.data || typeof result.data !== 'object' || !hasExpectedReleaseContract(result.data)) {
+        return { status: 'degraded', reason: 'RELEASE_CONTRACT_MISMATCH' };
+      }
+      return result.data;
     },
 
     async authenticate({ email, password }) {

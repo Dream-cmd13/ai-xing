@@ -28,6 +28,11 @@ const ALLOWED_FILES = Object.freeze([
   'deploy/nginx/mcp-location.conf.example',
   'docs/mcp-production-deployment-preparation.md',
 ]);
+// Read-only production preflight SQL is shipped as an inspection asset, but it
+// is deliberately kept outside MIGRATION_MANIFEST and the migration ledger.
+const READ_ONLY_PREFLIGHT_FILES = Object.freeze([
+  'sql/2026-08-27_mcp_review_data_scan.sql',
+]);
 const ALLOWED_DIRECTORIES = Object.freeze(['dist', 'mcp-server/src']);
 const TEXT_EXTENSIONS = new Set(['.conf', '.css', '.example', '.html', '.ini', '.js', '.json', '.md', '.mjs', '.sql', '.svg', '.txt']);
 const SENSITIVE_RULES = Object.freeze([
@@ -84,7 +89,10 @@ async function getGitState(projectRoot) {
 
 async function validatePackage(outputRoot) {
   const files = await listFiles(outputRoot);
-  const allowedSql = new Set(MIGRATION_MANIFEST.map((name) => `sql/${name}`));
+  const allowedSql = new Set([
+    ...MIGRATION_MANIFEST.map((name) => `sql/${name}`),
+    ...READ_ONLY_PREFLIGHT_FILES,
+  ]);
   const findings = [];
   for (const file of files) {
     const relative = normalizeRelative(path.relative(outputRoot, file));
@@ -140,6 +148,9 @@ export async function packageProduction({
   }
   for (const fileName of MIGRATION_MANIFEST) {
     await copyRelativeFile(resolvedProjectRoot, outputRoot, path.join('sql', fileName));
+  }
+  for (const relativePath of READ_ONLY_PREFLIGHT_FILES) {
+    await copyRelativeFile(resolvedProjectRoot, outputRoot, relativePath);
   }
 
   const files = await validatePackage(outputRoot);

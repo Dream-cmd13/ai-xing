@@ -1,12 +1,19 @@
 # 正式服上线阻断项完整修复 Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox syntax for tracking.
 
 **Goal:** 修复提交 `bbba13e` 审查发现的代码、SQL、依赖、运行时和部署资产阻断项，使项目达到进入正式环境只读预检的条件。
 
 **Architecture:** 使用前向 SQL 迁移固化数据库验证和发布契约，MCP 在依赖不就绪或新版 RPC 缺失时失败关闭，前端以规范任务集合加页面作用域 ID 保持状态一致。发布侧使用 loopback MCP、Nginx、systemd 自动恢复和 allowlist 制品脚本；正式库和正式服务器仍由单独授权的现场步骤完成。
 
 **Tech Stack:** React 19、TypeScript、Vite、Supabase/PostgreSQL、Node.js ESM、Express、MCP SDK、Node test runner、systemd、Nginx。
+
+## 当前执行状态（2026-09-01）
+
+- 本地代码、SQL 契约、MCP 运行时、发布脚本和 CentOS 7 模板已完成；本计划的本地步骤以 `[x]` 标记。
+- Task 1 的 18 个 TypeScript 错误和生产依赖审计失败是修复前的历史证据；当前不得重新制造失败，最新门禁结果以 Task 9 和独立部署准备文档为准。
+- 发布契约固定为 `releaseId=2026-09-01`，有序事务 manifest 摘要由代码、迁移器和 SQL readiness 共同校验；只读正式库预检 SQL 是发布资产，不属于 28 项迁移 manifest。
+- `[x]` 仅表示本地实现或文档证据完成，不表示正式库迁移、正式服务启动或正式发布已获授权。正式环境现场门禁仍以部署准备文档第 1、9、10、11、12 节为准。
 
 ---
 
@@ -33,23 +40,23 @@
 - Modify: `docs/superpowers/plans/2026-09-01-production-release-blocker-remediation.md`
 - Read-only: Git state and current test output
 
-- [ ] **Step 1: 记录权威基线**
+- [x] **Step 1: 记录权威基线**
 
 Run: `git status --short; git rev-parse --short HEAD; git log -3 --oneline`
 
 Expected: 仅本计划文件未提交，设计提交为 `69703ca`，不出现未知用户修改。
 
-- [ ] **Step 2: 保存现有失败证据**
+- [x] **Step 2: 保存现有失败证据**
 
 Run: `npm run lint:app`
 
-Expected: 仅 `ProcessView.tsx`、`StrategyView.tsx`、`WeeklyView.tsx` 的 18 个已知错误。
+Expected（修复前历史证据）: 仅 `ProcessView.tsx`、`StrategyView.tsx`、`WeeklyView.tsx` 的 18 个已知错误；修复后不应复现。
 
-- [ ] **Step 3: 确认安全审计失败**
+- [x] **Step 3: 确认安全审计失败**
 
 Run: `npm audit --omit=dev --registry=https://registry.npmjs.org`
 
-Expected: 根项目存在 critical/high 漏洞；`npm --prefix mcp-server audit --omit=dev --registry=https://registry.npmjs.org` 为零。
+Expected（修复前历史证据）: 根项目存在 critical/high 漏洞；`npm --prefix mcp-server audit --omit=dev --registry=https://registry.npmjs.org` 为零。修复后两套生产依赖审计均应为零漏洞。
 
 ### Task 2: 清理前端供应链和密钥注入
 
@@ -60,7 +67,7 @@ Expected: 根项目存在 critical/high 漏洞；`npm --prefix mcp-server audit 
 - Modify: `vite.config.ts`
 - Create: `scripts/scan-build-secrets.mjs`
 
-- [ ] **Step 1: 写构建扫描脚本**
+- [x] **Step 1: 写构建扫描脚本**
 
 实现只输出规则名和相对文件名的扫描器：
 
@@ -75,11 +82,11 @@ const rules = [
 
 脚本递归读取 `dist/` 文本资产，命中时设置非零退出码，不打印命中内容。
 
-- [ ] **Step 2: 删除浏览器密钥定义和未使用 import map**
+- [x] **Step 2: 删除浏览器密钥定义和未使用 import map**
 
 `vite.config.ts` 只保留 React 插件、路径别名和现有非敏感构建配置，不再调用 `loadEnv` 注入模型密钥。`index.html` 删除 `@google/genai` 映射。
 
-- [ ] **Step 3: 更新依赖锁**
+- [x] **Step 3: 更新依赖锁**
 
 Run: `npm uninstall @google/genai lodash @types/lodash`
 
@@ -87,7 +94,7 @@ Run: `npm install --save-exact react-router-dom@7.18.2`
 
 如果官方审计仍报告 Router 漏洞，安装当日最新兼容安全补丁并把确切版本写入 `package.json` 和锁文件。
 
-- [ ] **Step 4: 增加脚本门禁**
+- [x] **Step 4: 增加脚本门禁**
 
 在 `package.json` 增加：
 
@@ -96,7 +103,7 @@ Run: `npm install --save-exact react-router-dom@7.18.2`
 "build:secure": "npm run build && npm run scan:dist"
 ```
 
-- [ ] **Step 5: 验证供应链**
+- [x] **Step 5: 验证供应链**
 
 Run: `npm run build:secure`
 
@@ -116,7 +123,7 @@ Expected: 构建和扫描通过，生产依赖漏洞为零。
 - Modify: `components/WeeklyView.tsx`
 - Modify: `mcp-server/test/repository.test.mjs` or create focused root tests using the existing test mechanism
 
-- [ ] **Step 1: 增加作用域合并辅助函数测试**
+- [x] **Step 1: 增加作用域合并辅助函数测试**
 
 测试规范：
 
@@ -129,7 +136,7 @@ assert.deepEqual(
 
 基线集合执行同一合并，不删除未加载任务。
 
-- [ ] **Step 2: 页面保存作用域 ID 并合并任务**
+- [x] **Step 2: 页面保存作用域 ID 并合并任务**
 
 页面加载成功后执行等价逻辑：
 
@@ -142,7 +149,7 @@ setLastSavedTasks((current) => upsertTasksById(current, loadedTasks));
 
 渲染使用 `tasks.filter(task => scopedTaskIds.has(task.id))`。加载空结果时页面为空，但全局集合不被清空。
 
-- [ ] **Step 3: 人员补全改为 50 条**
+- [x] **Step 3: 人员补全改为 50 条**
 
 `data.ts` 使用常量：
 
@@ -155,11 +162,11 @@ for (let index = 0; index < uniqueTaskIds.length; index += TASK_PEOPLE_BATCH_SIZ
 
 测试断言 51 条拆成 50+1，150 条拆成三批。
 
-- [ ] **Step 4: 修复 18 个类型错误**
+- [x] **Step 4: 修复 18 个类型错误**
 
 `ProcessView` 将字符串真值判断显式转换为 Boolean；`StrategyView` 统一 AI 建议状态类型中的 `id/text/score/suggestions` 并把模式值统一为 `annual | quarterly`；`WeeklyView` 为 modal 状态补全 `mode`，使 `index` 类型允许 `null`，删除被字面量 `user` 永久收窄后的不可达 `dept` 比较或改用真实状态来源。
 
-- [ ] **Step 5: 验证**
+- [x] **Step 5: 验证**
 
 Run: `npm run lint:app; npm run build:secure`
 
@@ -173,7 +180,7 @@ Expected: TypeScript 零错误，构建和扫描通过。
 - Modify: `mcp-server/test/phase2-sql-contract.test.mjs`
 - Modify: `mcp-server/test/migration-runner.test.mjs`
 
-- [ ] **Step 1: 先写 SQL 静态契约测试**
+- [x] **Step 1: 先写 SQL 静态契约测试**
 
 断言新迁移包含：
 
@@ -186,7 +193,7 @@ assert.match(sql, /GRANT EXECUTE .* TO authenticated/i);
 
 并检查三个更新 RPC 均调用 `mcp_validate_task_changes`。
 
-- [ ] **Step 2: 实现规范校验辅助函数**
+- [x] **Step 2: 实现规范校验辅助函数**
 
 函数签名：
 
@@ -199,7 +206,7 @@ SET search_path = public
 
 函数对白名单字段逐一检查 JSON 类型、枚举、长度、ISO 周、日期顺序、数组数量和 KR 下标；失败统一抛出 `MCP_VALIDATION:` 前缀。
 
-- [ ] **Step 3: 前向替换三个 RPC**
+- [x] **Step 3: 前向替换三个 RPC**
 
 复制当前已入账函数的完整定义，在写入前调用：
 
@@ -209,7 +216,7 @@ PERFORM public.mcp_validate_task_changes(p_changes, FALSE);
 
 复盘同步入口传入其实际允许的提交状态，保留权限、行锁、row_version、审计和幂等逻辑。
 
-- [ ] **Step 4: 加固人员函数**
+- [x] **Step 4: 加固人员函数**
 
 在同一迁移中按当前函数体重新创建并添加固定搜索路径，然后执行：
 
@@ -218,7 +225,7 @@ REVOKE ALL ON FUNCTION public.get_current_user_task_users_for_tasks(TEXT[]) FROM
 GRANT EXECUTE ON FUNCTION public.get_current_user_task_users_for_tasks(TEXT[]) TO authenticated;
 ```
 
-- [ ] **Step 5: 加入 manifest 并验证**
+- [x] **Step 5: 加入 manifest 并验证**
 
 Run: `node --test mcp-server/test/phase2-sql-contract.test.mjs mcp-server/test/migration-runner.test.mjs`
 
@@ -232,7 +239,7 @@ Expected: manifest 数量增加一，SQL 文件与清单一致，静态契约通
 - Modify: `mcp-server/test/migration-runner.test.mjs`
 - Modify: `mcp-server/test/phase2-sql-contract.test.mjs`
 
-- [ ] **Step 1: 写事务外壳失败测试**
+- [x] **Step 1: 写事务外壳失败测试**
 
 覆盖前导注释、块注释、字符串中的 `BEGIN/COMMIT`、重复外壳、缺失终止和外壳外可执行语句。正常 SQL 发送给 fake client 后不得匹配：
 
@@ -240,11 +247,11 @@ Expected: manifest 数量增加一，SQL 文件与清单一致，静态契约通
 assert.doesNotMatch(executedSql, /^\s*BEGIN\b|\bCOMMIT\s*;\s*$/i);
 ```
 
-- [ ] **Step 2: 实现词法级外壳解析**
+- [x] **Step 2: 实现词法级外壳解析**
 
 解析器逐字符识别单引号、双引号、美元引号、行注释和块注释，只记录顶层语句。事务型文件必须第一条为 `BEGIN`、最后一条为 `COMMIT` 且各出现一次，否则抛出 `MIGRATION_ENVELOPE_INVALID`。
 
-- [ ] **Step 3: 写发布契约迁移**
+- [x] **Step 3: 写发布契约迁移**
 
 新增 `mcp_internal.release_contracts`，并让 `public.mcp_get_readiness()` 检查固定 release ID、manifest digest、必需版本成功状态、关键 RPC 签名和权限。结果保留现有 `companyOkrsRpc` 等兼容布尔字段，并新增：
 
@@ -252,11 +259,11 @@ assert.doesNotMatch(executedSql, /^\s*BEGIN\b|\bCOMMIT\s*;\s*$/i);
 {"releaseId":"2026-09-01","manifestDigest":"...","requiredMigrations":true,"functionPrivileges":true,"deferredIndexes":"ready|pending|failed"}
 ```
 
-- [ ] **Step 4: 迁移器记录契约**
+- [x] **Step 4: 迁移器记录契约**
 
 执行完全部事务迁移后，在同一受控连接写入 release ID 和由有序 `version:checksum` 计算的 SHA-256。deferred 索引不影响事务发布 digest，但独立记录状态。
 
-- [ ] **Step 5: 验证**
+- [x] **Step 5: 验证**
 
 Run: `node --test mcp-server/test/migration-runner.test.mjs mcp-server/test/phase2-sql-contract.test.mjs`
 
@@ -273,7 +280,7 @@ Expected: 所有外壳、digest、顺序、回滚 fake 测试通过。
 - Modify: `mcp-server/test/config.test.mjs`
 - Modify: `mcp-server/test/session-resilience.test.mjs`
 
-- [ ] **Step 1: 写 readiness gate 单元/集成测试**
+- [x] **Step 1: 写 readiness gate 单元/集成测试**
 
 测试 degraded、超时、并发去重、TTL 后恢复、新 initialize、已有 Session、GET 和 DELETE。失败响应统一为 HTTP 503：
 
@@ -281,19 +288,19 @@ Expected: 所有外壳、digest、顺序、回滚 fake 测试通过。
 {"error":{"code":"SERVICE_NOT_READY","message":"服务依赖尚未就绪，请稍后重试。"}}
 ```
 
-- [ ] **Step 2: 实现共享门禁**
+- [x] **Step 2: 实现共享门禁**
 
 `createReadinessGate({ check, ttlMs, timeoutMs, now })` 缓存最近结果并保存单个 in-flight Promise；异常和超时映射为 degraded，不泄漏底层错误。
 
-- [ ] **Step 3: 应用到全部 `/mcp` 方法**
+- [x] **Step 3: 应用到全部 `/mcp` 方法**
 
 在 POST/GET/DELETE `/mcp` 路由的第一段调用 `await readinessGate.requireReady()`；`/ready` 使用 `readinessGate.status()`，`/health` 保持不变。
 
-- [ ] **Step 4: 强制生产 loopback 和可信代理**
+- [x] **Step 4: 强制生产 loopback 和可信代理**
 
 `config.mjs` 在 `NODE_ENV=production` 时拒绝非 `127.0.0.1`/`::1` 主机。`isHttpsRequest` 只有在 `req.socket.remoteAddress` 属于配置的 loopback 可信代理时读取 `X-Forwarded-Proto`，否则只使用直接 TLS 状态。
 
-- [ ] **Step 5: 验证**
+- [x] **Step 5: 验证**
 
 Run: `node --test mcp-server/test/app.test.mjs mcp-server/test/config.test.mjs mcp-server/test/session-resilience.test.mjs`
 
@@ -313,15 +320,15 @@ Expected: readiness 和伪造转发头测试通过。
 - Modify: `data.ts`
 - Modify: `mcp-server/test/repository.test.mjs`
 
-- [ ] **Step 1: 先锁定公共 API**
+- [x] **Step 1: 先锁定公共 API**
 
 测试 `createRepository()` 返回的现有方法名集合、输入和输出不变。为缺少 v2 RPC 增加断言：`auto/subtree`、周复盘和部门 OKR 抛出公开码 `RPC_NOT_CONFIGURED`，不调用旧 RPC。
 
-- [ ] **Step 2: 提取共享基础设施**
+- [x] **Step 2: 提取共享基础设施**
 
 `repository-helpers.mjs` 只导出 timeout、错误映射、游标和缺失函数识别；每个领域 factory 接收 `execute/client/context`，不互相读内部状态。
 
-- [ ] **Step 3: 机械迁移领域方法**
+- [x] **Step 3: 机械迁移领域方法**
 
 按组织、任务、人员、OKR、复盘、流程依次移动现有实现。`repository.mjs` 最终只构建共享依赖并返回：
 
@@ -336,11 +343,11 @@ return {
 };
 ```
 
-- [ ] **Step 4: 前端作用域查询失败关闭**
+- [x] **Step 4: 前端作用域查询失败关闭**
 
 `data.ts` 对 `scope=auto|subtree` 缺少 `web_get_visible_tasks_scope_v2` 时抛出可识别配置错误；`scope=exact` 只有静态契约证明旧 RPC 等价时才允许兼容调用。删除全量任务再按 departmentId 过滤的兜底。
 
-- [ ] **Step 5: 验证**
+- [x] **Step 5: 验证**
 
 Run: `node --test mcp-server/test/repository.test.mjs mcp-server/test/tools.test.mjs mcp-server/test/protocol.integration.test.mjs`
 
@@ -355,7 +362,7 @@ Expected: 公共工具契约不变，缺少必需 RPC 时稳定失败关闭，`r
 - Modify: `docs/mcp-production-deployment-preparation.md`
 - Create: `local-test-files/package-production.test.mjs` if no reusable root test runner exists
 
-- [ ] **Step 1: 更新 systemd 模板**
+- [x] **Step 1: 更新 systemd 模板**
 
 使用：
 
@@ -369,19 +376,19 @@ LimitNOFILE=65536
 
 文档说明 `systemctl enable`、告警和人工停止语义，不执行任何服务命令。
 
-- [ ] **Step 2: 实现 allowlist 打包**
+- [x] **Step 2: 实现 allowlist 打包**
 
 脚本从显式数组复制根前端运行文件、`dist/`、MCP `src/`、运行依赖锁、部署模板和 manifest 中 SQL。输出目录必须由命令行显式给出且位于工作区内的 `release-output/`；已存在目录时拒绝覆盖。
 
-- [ ] **Step 3: 添加制品验证**
+- [x] **Step 3: 添加制品验证**
 
 脚本拒绝 `.env`、`local-test-files`、诊断/回填/live-smoke、日志和未知 SQL；生成 `SHA256SUMS.json`，内容为相对路径和摘要，不含本机绝对路径。
 
-- [ ] **Step 4: 更新独立部署文档**
+- [x] **Step 4: 更新独立部署文档**
 
 将旧 `HEAD=113f868` 替换为“构建时从 Git 读取候选提交”，记录 CentOS 7 两条运行时路径、正式库只读预检、45 条异常数据处置、备份恢复、权限验收和最终标签条件。
 
-- [ ] **Step 5: 验证打包但不生成正式制品**
+- [x] **Step 5: 验证打包但不生成正式制品**
 
 在临时目录运行脚本测试，断言禁止文件不存在、摘要覆盖全部文件；测试后删除临时目录。
 
@@ -390,7 +397,7 @@ LimitNOFILE=65536
 **Files:**
 - Modify: `docs/mcp-production-deployment-preparation.md` only for final local evidence
 
-- [ ] **Step 1: 全量自动化**
+- [x] **Step 1: 全量自动化**
 
 Run: `npm run lint:app`
 
@@ -402,7 +409,7 @@ Run: `Get-ChildItem mcp-server -Recurse -Filter *.mjs | ForEach-Object { node --
 
 Run: `git diff --check`
 
-- [ ] **Step 2: 双依赖审计**
+- [x] **Step 2: 双依赖审计**
 
 Run: `npm audit --omit=dev --registry=https://registry.npmjs.org`
 
@@ -410,15 +417,14 @@ Run: `npm --prefix mcp-server audit --omit=dev --registry=https://registry.npmjs
 
 Expected: 两者生产漏洞均为零。
 
-- [ ] **Step 3: 清单和敏感信息审计**
+- [x] **Step 3: 清单和敏感信息审计**
 
 验证迁移 manifest 与 SQL 文件一一对应；扫描源代码、构建产物和临时制品时只输出规则与文件，不输出任何命中内容。
 
-- [ ] **Step 4: 逐项核对设计**
+- [x] **Step 4: 逐项核对设计**
 
 对设计文档第 4 到第 9 节逐项关联测试或文件证据。任何未验证项保持为阻断，不用局部绿色测试替代整体完成声明。
 
-- [ ] **Step 5: 记录仍需现场授权项**
+- [x] **Step 5: 记录仍需现场授权项**
 
 正式库、45 条历史数据、备份恢复、正式迁移、CentOS 7 真机、Nginx/HTTPS、防火墙和角色验收保持未完成，直到用户另行授权并取得真实证据。
-

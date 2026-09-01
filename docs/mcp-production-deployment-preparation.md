@@ -63,11 +63,11 @@ npm run package:production -- release-output/<candidate>
 - 工作区干净；
 - 输出位于工作区 `release-output/` 下的新目录；
 - 输出目录不存在，拒绝覆盖；
-- 仅复制显式 allowlist 中的 `dist/`、MCP `src/`、运行依赖锁、迁移器、部署模板、本文和 manifest SQL；
+- 仅复制显式 allowlist 中的 `dist/`、MCP `src/`、运行依赖锁、迁移器、部署模板、本文、28 项 manifest SQL 和只读正式库预检 SQL；
 - 生成只含相对路径、SHA-256 和候选提交号的 `SHA256SUMS.json`；
 - 安全扫描失败时不得继续发布。
 
-打包脚本不会包含 `.env`、`local-test-files/`、诊断脚本、回填脚本、live smoke、日志或 manifest 之外的 SQL。
+打包脚本不会包含 `.env`、`local-test-files/`、诊断脚本、回填脚本、live smoke、日志或上述两类资产之外的 SQL。`2026-08-27_mcp_review_data_scan.sql` 仅用于只读预检，不得交给迁移器，也不会写入迁移账本。
 
 ## 5. 已实现的本地门禁
 
@@ -75,12 +75,14 @@ npm run package:production -- release-output/<candidate>
 
 - `npm run lint:app`：通过，TypeScript 零错误；
 - `npm run build:secure`：通过，40 个文本构建资产敏感模式扫描通过，仅保留既有大 chunk 警告；
-- `npm run mcp:test`：281/281 通过；
+- `npm run mcp:test`：284/284 通过；
 - 根项目和 `mcp-server` 的生产依赖审计：均为 0 vulnerabilities；
 - MCP `src/`、`scripts/` 和根发布脚本 `.mjs`：`node --check` 全部通过；
 - `git diff --check`：通过；
-- manifest/SQL 对齐：28 项，无缺失、无额外未登记 MCP 迁移；
+- manifest/SQL 对齐：28 项迁移无缺失、无额外未登记 MCP 迁移；只读预检 SQL 单独作为发布资产，不进入迁移账本；
 - allowlist 打包测试：2/2 通过，测试目录已清理且未生成正式制品；
+- release contract 摘要由迁移器、Node readiness 校验和 SQL readiness 等值固定为当前候选摘要；摘要不匹配时返回 `RELEASE_CONTRACT_MISMATCH`；
+- production 配置模板要求正式域名、loopback、可信 loopback 代理和 `MCP_REQUIRE_HTTPS=true`，错误配置会在启动时失败关闭；
 - 本轮未连接任何正式环境，未执行数据库迁移或写入，未启动、停止或重启服务。
 
 已实现内容：
@@ -141,6 +143,17 @@ MCP_TRUSTED_PROXY_ADDRESSES=127.0.0.1,::1,::ffff:127.0.0.1
 ```
 
 真实 Supabase 公共配置只放在权限为 600 的服务器环境文件中，不写入 Git、制品清单或验收记录。
+
+### 7.1 正式配置交付方式
+
+不要把正式配置原文粘贴到聊天窗口，也不要把正式值写入项目根目录 `.env`、`mcp-server/.env`、Git、工单附件或发布包。建议采用以下交付路径：
+
+1. 在本地仅使用 `mcp-server/.env.example` 生成字段清单；聊天或工单中最多提供脱敏后的域名、端口、Node/systemd/Nginx 版本和配置键名，所有值只保留占位符。
+2. 由有权限的部署人员通过受控 SSH/堡垒机登录正式服务器，在服务器上创建 `/etc/ai-xing/mcp.env`，写入真实的 Supabase URL 和 Publishable/Anon Key 以及本节规定的非秘密运行参数。
+3. 写入后立即执行 `chown root:ai-xing /etc/ai-xing/mcp.env` 和 `chmod 600 /etc/ai-xing/mcp.env`；systemd 仅通过 `EnvironmentFile=/etc/ai-xing/mcp.env` 读取，禁止复制回代码目录。
+4. 验收时只核对“文件存在、权限为 600、必需键存在、禁止键不存在、`MCP_REQUIRE_HTTPS=true`”等布尔结果，不打印值。若通过密码管理器或 Secret Manager 注入，也必须最终满足同样的文件权限和日志脱敏要求。
+
+如需我协助核对配置，请发送脱敏模板（例如 `SUPABASE_URL=https://<project>.supabase.co`、`SUPABASE_PUBLISHABLE_KEY=<redacted>`）和键名/布尔检查结果，不要发送任何真实凭据。
 
 ## 8. systemd 准备
 
