@@ -111,7 +111,7 @@ BEGIN
   FOREACH v_key IN ARRAY ARRAY['participant_ids', 'approver_ids'] LOOP
     IF p_changes ? v_key THEN
       IF jsonb_typeof(p_changes->v_key) <> 'array'
-         OR jsonb_array_length(p_changes->v_key) > CASE WHEN v_key = 'participant_ids' THEN 50 ELSE 20 END THEN
+         OR jsonb_array_length(p_changes->v_key) > (CASE WHEN v_key = 'participant_ids' THEN 50 ELSE 20 END) THEN
         RAISE EXCEPTION 'MCP_VALIDATION: % 数组长度无效', v_key;
       END IF;
       FOR v_item IN SELECT value FROM jsonb_array_elements(p_changes->v_key) LOOP

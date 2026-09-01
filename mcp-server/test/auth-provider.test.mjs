@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { createSupabaseAuthProvider } from '../src/auth-provider.mjs';
+import { EXPECTED_MANIFEST_DIGEST, RELEASE_ID } from '../src/release-contract.mjs';
 
 const config = {
   supabaseUrl: 'https://project.supabase.co',
@@ -185,9 +186,9 @@ test('creates RLS clients with only the publishable key and the current user JWT
 
 test('fails readiness closed unless the complete release contract matches the code', async () => {
   const responses = [
-    { status: 'ready', releaseId: '2026-09-01', manifestDigest: 'wrong', requiredMigrations: true, functionPrivileges: true },
-    { status: 'ready', releaseId: 'old-release', manifestDigest: '47a58a1fbf69cea7564a2e2a67a0fde594924b957f4b5953e04344e5990757f8', requiredMigrations: true, functionPrivileges: true },
-    { status: 'ready', releaseId: '2026-09-01', manifestDigest: '47a58a1fbf69cea7564a2e2a67a0fde594924b957f4b5953e04344e5990757f8', requiredMigrations: true, functionPrivileges: true },
+    { status: 'ready', releaseId: RELEASE_ID, manifestDigest: 'wrong', requiredMigrations: true, functionPrivileges: true },
+    { status: 'ready', releaseId: 'old-release', manifestDigest: EXPECTED_MANIFEST_DIGEST, requiredMigrations: true, functionPrivileges: true },
+    { status: 'ready', releaseId: RELEASE_ID, manifestDigest: EXPECTED_MANIFEST_DIGEST, requiredMigrations: true, functionPrivileges: true },
   ];
   for (const [index, responseData] of responses.entries()) {
     const provider = createSupabaseAuthProvider({

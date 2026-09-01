@@ -444,6 +444,8 @@ test('task validation migration protects every update path and the people enrich
   assert.match(sql, /target_weeks 不允许重复/i);
   assert.match(sql, /task_review_score 必须是 0 到 100 的整数/i);
   assert.match(sql, /due_date 不能早于 start_date/i);
+  assert.match(sql, />\s*\(CASE WHEN v_key = 'participant_ids' THEN 50 ELSE 20 END\)\s*THEN/i);
+  assert.doesNotMatch(sql, />\s*CASE WHEN v_key = 'participant_ids' THEN 50 ELSE 20 END\s*THEN/i);
   assert.match(sql, /CREATE TRIGGER mcp_validate_task_row_contract_trigger/i);
   for (const functionName of [
     'mcp_update_pad_task',

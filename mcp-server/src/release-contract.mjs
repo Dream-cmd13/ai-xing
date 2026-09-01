@@ -2,7 +2,7 @@
 // digest covers the ordered transactional manifest, excluding the contract
 // migration itself and deferred indexes.
 export const RELEASE_ID = '2026-09-01';
-export const EXPECTED_MANIFEST_DIGEST = '47a58a1fbf69cea7564a2e2a67a0fde594924b957f4b5953e04344e5990757f8';
+export const EXPECTED_MANIFEST_DIGEST = '284d74705f7c31ab645f834f868b349ef7568077ea667502afdf10066a728c0d';
 
 export function hasExpectedReleaseContract(value) {
   return Boolean(value)

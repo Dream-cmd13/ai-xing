@@ -24,7 +24,7 @@ SET search_path = public
 AS $$
   WITH expected AS (
     SELECT '2026-09-01'::TEXT AS release_id,
-      '47a58a1fbf69cea7564a2e2a67a0fde594924b957f4b5953e04344e5990757f8'::TEXT AS manifest_digest,
+      '284d74705f7c31ab645f834f868b349ef7568077ea667502afdf10066a728c0d'::TEXT AS manifest_digest,
       '[
       "2026-08-21_mcp_write_infra_tables",
       "2026-08-21_mcp_write_rpc",

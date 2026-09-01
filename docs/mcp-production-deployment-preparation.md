@@ -203,6 +203,171 @@ systemd-analyze verify /etc/systemd/system/ai-xing-mcp.service
 - `--adopt-existing` 只允许在历史对象逐项核验完全一致后单独授权，禁止用来掩盖失败；
 - 迁移连接变量不得进入 MCP systemd 环境。
 
+### 10.1 宝塔/CentOS 7 正式库迁移命令
+
+以下命令应在宝塔面板的 **终端** 或受控 SSH 会话中执行，不能在 SQL Editor 中手工逐个粘贴迁移文件。`<release-root>`、`<candidate>`、备份路径和数据库目标必须由现场负责人替换并二次核对。
+
+#### 1. 核对候选制品和运行时
+
+```bash
+export MCP_RELEASE_ROOT=/www/wwwroot/<site>/releases/<candidate>
+cd "$MCP_RELEASE_ROOT/mcp-server"
+node --version                 # 必须满足 mcp-server/package.json 的 Node >=20
+npm --version
+command -v psql
+psql --version
+sha256sum "$MCP_RELEASE_ROOT"/SHA256SUMS.json
+```
+
+正式库若使用 Supabase，迁移连接必须使用 Direct 或 Session Pooler 的 PostgreSQL 连接（通常为 5432，并启用 SSL），不要使用 Transaction Pooler 的 6543 端口；迁移器依赖同一会话中的 advisory lock 和事务。
+
+#### 2. 以不回显方式建立一次性迁移会话
+
+不要把连接串写进命令历史、`/etc/ai-xing/mcp.env`、systemd 或日志。下面的变量只在当前终端临时存在：
+
+```bash
+set +x
+read -r -s -p '请输入正式 PostgreSQL 连接串（不会回显）: ' MCP_DB_URI_INPUT
+printf '\n'
+export MCP_MIGRATION_DATABASE_URL="$MCP_DB_URI_INPUT"
+export PGDATABASE="$MCP_DB_URI_INPUT"
+unset MCP_DB_URI_INPUT
+```
+
+MCP 服务仍只能使用公共 URL 和 Publishable/Anon Key；`MCP_MIGRATION_DATABASE_URL` 只给迁移器使用，严禁放入 MCP 运行环境。
+
+#### 3. 正式库只读预检
+
+先确认输出中的数据库、角色、时区和服务器版本确实是正式目标，再继续：
+
+```bash
+psql -X -v ON_ERROR_STOP=1 <<'SQL'
+BEGIN READ ONLY;
+SELECT current_database() AS database_name,
+       current_user AS role_name,
+       current_setting('TimeZone') AS timezone,
+       current_setting('server_version') AS server_version;
+SELECT table_name, column_name, data_type
+FROM information_schema.columns
+WHERE table_schema = 'public'
+  AND table_name IN ('tasks', 'departments', 'users', 'strategy')
+ORDER BY table_name, ordinal_position;
+SELECT n.nspname AS schema_name,
+       c.relname AS table_name,
+       c.relrowsecurity,
+       c.relforcerowsecurity
+FROM pg_class AS c
+JOIN pg_namespace AS n ON n.oid = c.relnamespace
+WHERE n.nspname = 'public'
+  AND c.relname IN ('tasks', 'departments', 'users', 'strategy')
+ORDER BY c.relname;
+SELECT event_object_table, trigger_name, action_timing, event_manipulation
+FROM information_schema.triggers
+WHERE event_object_schema = 'public'
+  AND event_object_table IN ('tasks', 'departments', 'users', 'strategy')
+ORDER BY event_object_table, trigger_name;
+SELECT p.oid::regprocedure AS function_signature,
+       p.prosecdef AS security_definer,
+       pg_get_userbyid(p.proowner) AS owner_name,
+       p.proconfig AS configuration
+FROM pg_proc AS p
+JOIN pg_namespace AS n ON n.oid = p.pronamespace
+WHERE n.nspname = 'public'
+  AND p.proname IN ('mcp_get_readiness', 'mcp_update_pad_task',
+                    'mcp_update_pad_task_scoped',
+                    'mcp_update_pad_task_with_review_sync_scoped',
+                    'get_current_user_task_users_for_tasks')
+ORDER BY function_signature::text;
+SELECT to_regclass('mcp_internal.schema_migrations') AS migration_ledger,
+       to_regclass('mcp_internal.release_contracts') AS release_contract;
+ROLLBACK;
+SQL
+```
+
+如果 `migration_ledger` 已存在，再执行以下只读查询并核对版本、文件名、状态和 checksum；出现 `failed`、校验和不一致或后续版本已存在而前序缺失时立即停止：
+
+```bash
+psql -X -v ON_ERROR_STOP=1 -c \
+  "SELECT version, file_name, status, source_kind, checksum FROM mcp_internal.schema_migrations ORDER BY applied_at, version"
+```
+
+执行只读历史复盘扫描，结果只包含对象 ID、JSON 路径和原因码：
+
+```bash
+umask 077
+mkdir -p /var/backups/ai-xing
+psql -X -v ON_ERROR_STOP=1 \
+  -f "$MCP_RELEASE_ROOT/sql/2026-08-27_mcp_review_data_scan.sql" \
+  > "/var/backups/ai-xing/review-data-scan-$(date +%Y%m%d-%H%M%S).txt"
+```
+
+预期仍为已知的 45 条 `REVIEW_PERIOD_KEY_INVALID`，不得在迁移前自动修复；数量变化或出现其他原因码时，先形成书面处置决定。
+
+#### 4. 备份和恢复演练
+
+若是自建 PostgreSQL，在独立备份目录执行（备份文件权限设为 600），并把恢复目标指定为隔离数据库，绝不能填正式库：
+
+```bash
+MCP_BACKUP_FILE="/var/backups/ai-xing/ai-xing-$(date +%Y%m%d-%H%M%S).dump"
+pg_dump --format=custom --no-owner --no-acl --file "$MCP_BACKUP_FILE"
+chmod 600 "$MCP_BACKUP_FILE"
+pg_restore --list "$MCP_BACKUP_FILE" > "$MCP_BACKUP_FILE.list"
+chmod 600 "$MCP_BACKUP_FILE.list"
+```
+
+若是 Supabase 托管库，使用平台备份/恢复能力恢复到独立项目或隔离实例，完成抽样校验后再进入迁移窗口。没有可验证的备份和恢复结果，不得继续。
+
+#### 5. 执行受控迁移（首次不带任何可选参数）
+
+确认前四步证据通过、已进入维护窗口后，在候选制品的 `mcp-server` 目录执行：
+
+```bash
+cd "$MCP_RELEASE_ROOT/mcp-server"
+npm ci --omit=dev
+set -o pipefail
+npm run migrate 2>&1 | tee "/var/backups/ai-xing/mcp-migrate-$(date +%Y%m%d-%H%M%S).log"
+MCP_MIGRATION_STATUS=${PIPESTATUS[0]}
+set +o pipefail
+if [ "$MCP_MIGRATION_STATUS" -ne 0 ]; then
+  echo "迁移失败，停止后续操作。退出码：$MCP_MIGRATION_STATUS" >&2
+  unset MCP_MIGRATION_DATABASE_URL PGDATABASE MCP_RELEASE_ROOT MCP_MIGRATION_STATUS
+  exit "$MCP_MIGRATION_STATUS"
+fi
+```
+
+首次执行不要添加 `--include-indexes` 或 `--adopt-existing`。正常首次结果是事务迁移按 manifest 顺序 `applied`，已存在且 checksum 相同的版本为 `skipped`，`2026-08-27_mcp_task_indexes` 为 `deferred`；迁移器随后记录 release contract。
+
+#### 6. 迁移后核对
+
+```bash
+psql -X -v ON_ERROR_STOP=1 <<'SQL'
+SELECT version, file_name, status, source_kind, checksum
+FROM mcp_internal.schema_migrations
+ORDER BY applied_at, version;
+SELECT release_id, manifest_digest, required_versions, deferred_indexes
+FROM mcp_internal.release_contracts
+WHERE release_id = '2026-09-01';
+SELECT public.mcp_get_readiness();
+SQL
+```
+
+必须同时满足：所有必需事务版本为 `success`，文件名和 checksum 与候选制品一致；`release_id` 为 `2026-09-01` 且 digest 一致；readiness 返回 `status=ready`、`requiredMigrations=true`、`functionPrivileges=true`，OKR 和任务中心兼容标志为 true。`deferredIndexes` 为 `pending` 可以接受，索引是否执行必须另行评估。
+
+迁移失败时只查询失败记录和安全错误码，禁止手工修改账本、删除失败记录或直接粘贴 SQL 重跑：
+
+```bash
+psql -X -v ON_ERROR_STOP=1 -c \
+  "SELECT version, file_name, status, error_code FROM mcp_internal.schema_migrations WHERE status = 'failed' ORDER BY applied_at"
+```
+
+只有取得单独授权并完成锁竞争/性能评估后，才允许在同一候选制品上执行 `npm run migrate -- --include-indexes`。`--adopt-existing` 仅适用于只读预检已证明对象定义完全一致、但账本缺失的历史场景，不能用于绕过失败。
+
+迁移和核对完成后清除一次性连接变量：
+
+```bash
+unset MCP_MIGRATION_DATABASE_URL PGDATABASE MCP_RELEASE_ROOT MCP_BACKUP_FILE MCP_MIGRATION_STATUS
+```
+
 ## 11. 授权后的部署顺序
 
 1. 冻结候选提交并通过第 4 节全部门禁；
