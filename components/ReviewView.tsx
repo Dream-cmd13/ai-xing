@@ -21,6 +21,7 @@ import { syncTaskReviewsToTasks } from '../utils/taskReviewSync';
 import { useLeaveGuard } from '@/hooks/useLeaveGuard';
 import { createTaskOwnerSections, getDepartmentManagerUserIds } from '../utils/taskOwnerGrouping.js';
 import { collectDepartmentIds, flattenDepartmentTree } from '../utils/departmentTree';
+import { upsertTasksById } from '../utils/taskSyncState.js';
 
 
 
@@ -86,6 +87,7 @@ const ReviewView: React.FC = () => {
   const [deptTasks, setDeptTasks] = useState<PADEntry[]>([]);
   const [isTaskScopeLoading, setIsTaskScopeLoading] = useState(false);
   const [taskScopeError, setTaskScopeError] = useState<string | null>(null);
+  const [scopedTaskIds, setScopedTaskIds] = useState<Set<string>>(new Set());
   const [currentQuarterlyOkrIndex, setCurrentQuarterlyOkrIndex] = useState(0);
   const [reviewSubTab, setReviewSubTab] = useState<'tasks' | 'weekly-records' | 'okrs'>(
     initialTab === 'quarterly' || initialTab === 'monthly' ? 'okrs' : 'tasks'
@@ -258,6 +260,7 @@ const ReviewView: React.FC = () => {
       : new Set<string>();
 
     (state.tasks || []).forEach(task => {
+      if (activeTab === 'weekly' && !scopedTaskIds.has(task.id)) return;
       const inPeriod = activeTab === 'weekly'
         ? isTaskInWeeklyPeriod(task.targetWeeks, selectedWeek)
         : activeTab === 'monthly'
@@ -287,6 +290,7 @@ const ReviewView: React.FC = () => {
     selectedDepartmentScope,
     selectedMonth,
     selectedWeek,
+    scopedTaskIds,
     state.departments,
     state.systemRoles,
     state.tasks,
@@ -562,18 +566,22 @@ const ReviewView: React.FC = () => {
     if (!currentUser?.id || !selectedDeptId || reviewWeekIds.length === 0) {
       setIsTaskScopeLoading(false);
       setTaskScopeError(null);
+      if (activeTab === 'weekly') setScopedTaskIds(new Set());
       return;
     }
 
     let cancelled = false;
     setIsTaskScopeLoading(true);
     setTaskScopeError(null);
+    setScopedTaskIds(new Set());
 
     getVisibleTasksForScope(currentUser.id, selectedDeptId, reviewWeekIds, state.users, selectedDepartmentScope)
       .then((loadedTasks) => {
         if (cancelled) return;
-        setState({ tasks: loadedTasks });
-        setLastSavedTasks(loadedTasks);
+        const currentStore = useAppStore.getState();
+        setScopedTaskIds(new Set(loadedTasks.map((task) => task.id)));
+        setState({ tasks: upsertTasksById(currentStore.tasks, loadedTasks) });
+        setLastSavedTasks(upsertTasksById(currentStore.lastSavedTasks, loadedTasks));
       })
       .catch((error: any) => {
         if (cancelled) return;
@@ -588,7 +596,7 @@ const ReviewView: React.FC = () => {
     return () => {
       cancelled = true;
     };
-  }, [currentUser?.id, reviewWeekIds, selectedDeptId, selectedDepartmentScope, setBackendError, setLastSavedTasks, setState, state.users]);
+  }, [activeTab, currentUser?.id, reviewWeekIds, selectedDeptId, selectedDepartmentScope, setBackendError, setLastSavedTasks, setState, state.users]);
 
   const monthlyWeekReviews = useMemo(() => {
     if (!selectedDept || activeTab !== 'monthly') return [];

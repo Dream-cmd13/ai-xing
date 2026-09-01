@@ -596,8 +596,9 @@ export const getTaskUsersForTasks = async (taskIds: string[]): Promise<User[]> =
   try {
     const uniqueTaskIds = Array.from(new Set(taskIds.filter(Boolean)));
     const batches: string[][] = [];
-    for (let index = 0; index < uniqueTaskIds.length; index += 100) {
-      batches.push(uniqueTaskIds.slice(index, index + 100));
+    const taskPeopleBatchSize = 50;
+    for (let index = 0; index < uniqueTaskIds.length; index += taskPeopleBatchSize) {
+      batches.push(uniqueTaskIds.slice(index, index + taskPeopleBatchSize));
     }
     const usersById = new Map<string, User>();
     for (let index = 0; index < batches.length; index += 4) {

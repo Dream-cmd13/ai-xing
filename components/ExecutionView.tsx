@@ -17,6 +17,7 @@ import { canAssignTaskOwner, canManageDepartment, canManageTask, canViewTask, ge
 import { ensureTaskTargetWeeks } from '../utils/taskPeriods.js';
 import { createTaskOkrGroups, getWeekDateRange } from '../utils/taskOkrOptions';
 import { flattenDepartmentTree, resolveDepartmentScopeForUser } from '../utils/departmentTree';
+import { upsertTasksById } from '../utils/taskSyncState.js';
 
 
 
@@ -106,6 +107,7 @@ const ExecutionView: React.FC = () => {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isTaskScopeLoading, setIsTaskScopeLoading] = useState(false);
   const [taskScopeError, setTaskScopeError] = useState<string | null>(null);
+  const [scopedTaskIds, setScopedTaskIds] = useState<Set<string>>(new Set());
 
   const periodWeeks = useMemo(() => {
     let start = 1;
@@ -179,18 +181,22 @@ const ExecutionView: React.FC = () => {
   useEffect(() => {
     if (!currentUser?.id || !selectedDeptId || executionWeekIds.length === 0) {
       setIsTaskScopeLoading(false);
+      setScopedTaskIds(new Set());
       return;
     }
 
     let cancelled = false;
     setIsTaskScopeLoading(true);
     setTaskScopeError(null);
+    setScopedTaskIds(new Set());
 
     getVisibleTasksForScope(currentUser.id, selectedDeptId, executionWeekIds, state.users, selectedDepartmentScope)
       .then((loadedTasks) => {
         if (cancelled) return;
-        setState({ tasks: loadedTasks });
-        setLastSavedTasks(loadedTasks);
+        const currentStore = useAppStore.getState();
+        setScopedTaskIds(new Set(loadedTasks.map((task) => task.id)));
+        setState({ tasks: upsertTasksById(currentStore.tasks, loadedTasks) });
+        setLastSavedTasks(upsertTasksById(currentStore.lastSavedTasks, loadedTasks));
       })
       .catch((error: any) => {
         if (cancelled) return;
@@ -397,6 +403,7 @@ const ExecutionView: React.FC = () => {
 
     try {
       await persistTaskEntries(nextTasks, entriesToAdd, isNewTask ? 'create' : 'update');
+      setScopedTaskIds((current) => new Set(current).add(newTask.id));
     } catch (error: any) {
       showToast(getUserFacingError(error, '任务保存失败，请稍后重试'), 'error');
       return;
@@ -447,6 +454,11 @@ const ExecutionView: React.FC = () => {
 
     try {
       await persistTaskDeletion(updatedTasks, [taskId]);
+      setScopedTaskIds((current) => {
+        const next = new Set(current);
+        next.delete(taskId);
+        return next;
+      });
       setTaskModal({ ...taskModal, isOpen: false });
       showToast('任务已删除', 'info');
     } catch (error: any) {
@@ -550,6 +562,7 @@ const ExecutionView: React.FC = () => {
               selectedYear={selectedYear}
               selectedPeriod={selectedPeriod}
               selectedDeptId={selectedDeptId}
+              visibleTaskIds={scopedTaskIds}
               canCreateTask={canCreateExecutionTask}
               canEditTask={canEditExecutionTask}
               onAddTask={handleAddTask}

@@ -16,6 +16,7 @@ interface PeriodAlignmentViewProps {
   selectedYear: number;
   selectedPeriod: string;
   selectedDeptId: string | null;
+  visibleTaskIds?: ReadonlySet<string> | null;
   canCreateTask: boolean;
   canEditTask: boolean;
   onAddTask: (deptId: string, krId?: string, weekId?: string) => void;
@@ -27,6 +28,7 @@ const PeriodAlignmentView: React.FC<PeriodAlignmentViewProps> = ({
   selectedYear,
   selectedPeriod,
   selectedDeptId,
+  visibleTaskIds = null,
   canCreateTask,
   canEditTask,
   onAddTask,
@@ -136,6 +138,7 @@ const PeriodAlignmentView: React.FC<PeriodAlignmentViewProps> = ({
     const map: Record<string, Record<string, PADEntry[]>> = {};
 
     state.tasks.forEach(e => {
+      if (visibleTaskIds && !visibleTaskIds.has(e.id)) return;
       if (!canViewTask(e, currentUser, state.users, state.systemRoles || [], state.departments)) return;
 
       if (e.alignedKrId) {
@@ -161,7 +164,7 @@ const PeriodAlignmentView: React.FC<PeriodAlignmentViewProps> = ({
     });
 
     return map;
-  }, [state.tasks, currentUser, state.users, state.systemRoles, state.departments]);
+  }, [state.tasks, currentUser, state.users, state.systemRoles, state.departments, visibleTaskIds]);
 
   // Get tasks for the weeks
   const getTasksForCell = (weekId: string, krId: string) => {

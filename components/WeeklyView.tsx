@@ -296,6 +296,7 @@ const WeeklyView: React.FC = () => {
       setTaskModal({ 
         isOpen: true, 
         index: null, 
+        mode: 'create',
         data: { 
           id: `task-${Date.now()}`,
           title: '', 
@@ -316,29 +317,11 @@ const WeeklyView: React.FC = () => {
         } 
       });
     } else {
-      setTaskModal({ isOpen: false, index: null, data: {} });
+      setTaskModal({ isOpen: false, index: null, mode: 'create', data: {} });
     }
   };
 
 
-
-  const renderDeptTree = (depts: Department[], depth = 0) => {
-    return depts.map(d => (
-      <div key={d.id} className="mb-1">
-        <div 
-          onClick={() => {
-            if (activeTab === 'dept') setSelectedOwnerId(d.id);
-          }}
-          className={`flex items-center gap-2 px-3 py-2 rounded-xl cursor-pointer transition-colors ${activeTab === 'dept' && selectedOwnerId === d.id ? 'bg-brand-50 text-brand-600 font-bold' : 'text-slate-600 hover:bg-slate-50'}`}
-          style={{ paddingLeft: `${depth * 12 + 12}px` }}
-        >
-          <Building2 size={14} className={activeTab === 'dept' && selectedOwnerId === d.id ? 'text-brand-600' : 'text-slate-400'}/>
-          <span className="text-xs truncate">{d.name}</span>
-        </div>
-        {d.subDepartments && renderDeptTree(d.subDepartments, depth + 1)}
-      </div>
-    ));
-  };
 
   const usersByDept = useMemo(() => {
     const map: Record<string, User[]> = {};
