@@ -59,9 +59,9 @@ npm --prefix mcp-server ci --omit=dev
 
 宝塔网站的运行目录应指向该 dist 目录。
 
-## 三、正式库预检、回填和迁移
+## 三、正式库预检、迁移、回填和核对
 
-项目自带迁移器会从基线 aab58c6 开始，按照固定的 32 项清单执行后续迁移。不要在宝塔 SQL Editor 中逐个执行 SQL 文件。任务周期必须先完成只读预检和受控回填，再执行最终周期契约迁移；顺序不能颠倒。
+项目自带迁移器会从基线 aab58c6 开始，按照固定的 32 项清单执行后续迁移。不要在宝塔 SQL Editor 中逐个执行 SQL 文件。任务周期应先做只读预检和 dry-run，完成备份后先执行迁移，再执行受控回填，最后核对 readiness；顺序不能颠倒。回填器依赖迁移创建的任务校验触发器，不能在迁移前执行回填。
 
 ### 1. 临时输入正式数据库连接串
 
@@ -74,11 +74,18 @@ set +x
 read -r -s -p '请输入正式数据库连接串（不会回显）: ' MCP_DB_URI_INPUT
 printf '\n'
 export MCP_MIGRATION_DATABASE_URL="$MCP_DB_URI_INPUT"
-export PGDATABASE="$MCP_DB_URI_INPUT"
+# 迁移器不会自行 SET ROLE；连接用户必须是数据库所有者，或具备切换到 postgres 的权限。
+export PGOPTIONS='-c role=postgres'
 unset MCP_DB_URI_INPUT
 ~~~
 
-连接变量只在当前受控终端会话中临时存在，不得写入项目 `.env` 或 `/etc/ai-xing/mcp.env`。
+连接变量和 `PGOPTIONS` 只在当前受控终端会话中临时存在，不得写入项目 `.env` 或 `/etc/ai-xing/mcp.env`。继续前先确认输出中的 `current_user` 为 `postgres`：
+
+~~~bash
+psql "$MCP_MIGRATION_DATABASE_URL" -X -v ON_ERROR_STOP=1 -c 'SELECT session_user, current_user;'
+~~~
+
+若无法切换到 `postgres`，停止发布并改用数据库所有者连接。
 
 ### 2. 执行只读预检和周期 dry-run
 
@@ -88,11 +95,11 @@ unset MCP_DB_URI_INPUT
 sudo install -d -m 700 /var/backups/ai-xing
 cd /www/wwwroot/ai-xing
 
-psql -X -v ON_ERROR_STOP=1 \
+psql "$MCP_MIGRATION_DATABASE_URL" -X -v ON_ERROR_STOP=1 \
   -f sql/2026-08-27_mcp_review_data_scan.sql \
   > "/var/backups/ai-xing/review-scan-$(date +%Y%m%d-%H%M%S).txt"
 
-psql -X -v ON_ERROR_STOP=1 \
+psql "$MCP_MIGRATION_DATABASE_URL" -X -v ON_ERROR_STOP=1 \
   -f sql/preflight/2026-09-01_review_task_period_consistency.sql \
   > "/var/backups/ai-xing/task-period-scan-$(date +%Y%m%d-%H%M%S).txt"
 
@@ -105,7 +112,7 @@ set +o pipefail
 unset MCP_BACKFILL_DATABASE_URL
 if [ "$MCP_PERIOD_DRY_RUN_STATUS" -ne 0 ]; then
   echo '任务周期 dry-run 失败，停止发布。' >&2
-  unset MCP_PERIOD_DRY_RUN_STATUS MCP_MIGRATION_DATABASE_URL PGDATABASE
+  unset MCP_PERIOD_DRY_RUN_STATUS MCP_MIGRATION_DATABASE_URL PGOPTIONS
   exit 1
 fi
 unset MCP_PERIOD_DRY_RUN_STATUS
@@ -120,17 +127,45 @@ unset MCP_PERIOD_DRY_RUN_STATUS
 - 不根据旧周、标题、创建时间或复盘内容猜测日期；
 - 历史复盘引用只形成处置记录，不在本步骤自动移动、删除或改写。
 
-任一条件不满足，停止发布。`planned` 可以大于 0，它表示备份完成后需要执行确定性周索引回填。
+任一条件不满足，停止发布。`planned` 可以大于 0，它表示迁移完成后需要执行确定性周索引回填。
 
 ### 3. 完成备份和隔离恢复演练
 
 在正式写入前，使用数据库平台的备份能力完成备份，并恢复到独立项目或隔离数据库进行抽样验证。不得把恢复目标指向正式库。没有可验证的备份和恢复结果，不得继续。
 
-### 4. 执行受控任务周期回填
+### 4. 执行迁移（首次不带任何可选参数）
 
-本步骤会写正式库，只能在取得本次正式库写入独立授权后执行。如果 dry-run 的 `planned=0`，跳过执行模式，直接再次 dry-run 确认 `planned=0`、`exceptions=0`。
+~~~bash
+npm --prefix mcp-server run migrate
+MIGRATION_STATUS=$?
 
-`planned` 大于 0 时，人工输入刚才同一正式库 dry-run 的数量和摘要：
+if [ "$MIGRATION_STATUS" -ne 0 ]; then
+  echo "数据库迁移失败，停止部署。退出码：$MIGRATION_STATUS" >&2
+  unset MIGRATION_STATUS MCP_MIGRATION_DATABASE_URL MCP_BACKFILL_DATABASE_URL PGOPTIONS
+  exit 1
+fi
+
+unset MIGRATION_STATUS
+~~~
+
+正常结果：
+
+- 新迁移显示 migration_applied；
+- 已执行迁移显示 migration_skipped；
+- 2026-08-27_mcp_task_indexes 显示 migration_deferred，这是正常状态；
+- 命令退出码为 0。
+
+首次迁移不要执行以下命令：
+
+~~~bash
+# 不要执行
+npm --prefix mcp-server run migrate -- --include-indexes
+npm --prefix mcp-server run migrate -- --adopt-existing
+~~~
+
+### 5. 执行受控任务周期回填
+
+本步骤会写正式库，只能在取得本次正式库写入独立授权后执行；必须在第 4 步迁移成功后执行，因为回填器需要迁移创建的任务校验触发器。如果第 2 步 dry-run 的 `planned=0`，跳过执行模式，直接再次 dry-run 确认 `planned=0`、`exceptions=0`。`planned` 大于 0 时，人工输入同一正式库 dry-run 的数量和摘要：
 
 ~~~bash
 cd /www/wwwroot/ai-xing
@@ -156,36 +191,12 @@ fi
 unset MCP_PERIOD_BACKFILL_STATUS
 ~~~
 
-回填只允许修改 `target_weeks` 并递增 `row_version`。执行后重新运行第 2 步的 dry-run，结果必须为 `planned=0`、`exceptions=0`；否则禁止迁移。
+回填只允许修改 `target_weeks` 并递增 `row_version`。执行后重新运行第 2 步的 dry-run，结果必须为 `planned=0`、`exceptions=0`；否则停止发布并保留失败证据。
 
-### 5. 执行迁移
-
-~~~bash
-npm --prefix mcp-server run migrate
-MIGRATION_STATUS=$?
-
-unset MCP_MIGRATION_DATABASE_URL
-
-if [ "$MIGRATION_STATUS" -ne 0 ]; then
-  echo "数据库迁移失败，停止部署。退出码：$MIGRATION_STATUS" >&2
-  unset MIGRATION_STATUS PGDATABASE
-  exit 1
-fi
-
-unset MIGRATION_STATUS
-~~~
-
-正常结果：
-
-- 新迁移显示 migration_applied；
-- 已执行迁移显示 migration_skipped；
-- 2026-08-27_mcp_task_indexes 显示 migration_deferred，这是正常状态；
-- 命令退出码为 0。
-
-迁移完成后只读核对最终发布契约：
+### 6. 迁移后只读核对最终发布契约
 
 ~~~bash
-psql -X -v ON_ERROR_STOP=1 -c 'SELECT public.mcp_get_readiness();'
+psql "$MCP_MIGRATION_DATABASE_URL" -X -v ON_ERROR_STOP=1 -c 'SELECT public.mcp_get_readiness();'
 ~~~
 
 必须返回 `status=ready`，并包含：
@@ -198,15 +209,7 @@ psql -X -v ON_ERROR_STOP=1 -c 'SELECT public.mcp_get_readiness();'
 完成核对后清除一次性变量：
 
 ~~~bash
-unset MCP_MIGRATION_DATABASE_URL PGDATABASE
-~~~
-
-首次迁移不要执行以下命令：
-
-~~~bash
-# 不要执行
-npm --prefix mcp-server run migrate -- --include-indexes
-npm --prefix mcp-server run migrate -- --adopt-existing
+unset MCP_MIGRATION_DATABASE_URL MCP_BACKFILL_DATABASE_URL PGOPTIONS
 ~~~
 
 迁移失败时停止部署。不要手工修改迁移账本，不要删除失败记录，也不要把 SQL 文件复制到宝塔 SQL Editor 重跑。
@@ -363,7 +366,7 @@ sudo journalctl -u ai-xing-mcp -n 100 --no-pager
 
 ## 八、以后更新代码的固定顺序
 
-后续每次发布都按以下顺序。只要候选 manifest 或数据契约变化，必须重新执行第三节的只读预检、备份、必要回填和迁移；不能直接跳到重启：
+后续每次发布都按以下顺序。只要候选 manifest 或数据契约变化，必须重新执行第三节的只读预检、备份、迁移和必要回填；不能直接跳到重启：
 
 ~~~bash
 cd /www/wwwroot/ai-xing

@@ -247,18 +247,25 @@ set +x
 read -r -s -p '请输入正式 PostgreSQL 连接串（不会回显）: ' MCP_DB_URI_INPUT
 printf '\n'
 export MCP_MIGRATION_DATABASE_URL="$MCP_DB_URI_INPUT"
-export PGDATABASE="$MCP_DB_URI_INPUT"
+# 迁移器不会自行 SET ROLE；连接用户必须是数据库所有者，或具备切换到 postgres 的权限。
+export PGOPTIONS='-c role=postgres'
 unset MCP_DB_URI_INPUT
 ```
 
-MCP 服务仍只能使用公共 URL 和 Publishable/Anon Key；`MCP_MIGRATION_DATABASE_URL` 只给迁移器使用，严禁放入 MCP 运行环境。
+连接变量和 `PGOPTIONS` 只在当前受控终端会话中临时存在。MCP 服务仍只能使用公共 URL 和 Publishable/Anon Key；`MCP_MIGRATION_DATABASE_URL` 只给迁移器使用，严禁放入 MCP 运行环境。继续前先确认：
+
+```bash
+psql "$MCP_MIGRATION_DATABASE_URL" -X -v ON_ERROR_STOP=1 -c 'SELECT session_user, current_user;'
+```
+
+输出中的 `current_user` 必须为 `postgres`；无法切换时停止发布并改用数据库所有者连接。
 
 #### 3. 正式库只读预检
 
 先确认输出中的数据库、角色、时区和服务器版本确实是正式目标，再继续：
 
 ```bash
-psql -X -v ON_ERROR_STOP=1 <<'SQL'
+psql "$MCP_MIGRATION_DATABASE_URL" -X -v ON_ERROR_STOP=1 <<'SQL'
 BEGIN READ ONLY;
 SELECT current_database() AS database_name,
        current_user AS role_name,
@@ -304,7 +311,7 @@ SQL
 如果 `migration_ledger` 已存在，再执行以下只读查询并核对版本、文件名、状态和 checksum；出现 `failed`、校验和不一致或后续版本已存在而前序缺失时立即停止：
 
 ```bash
-psql -X -v ON_ERROR_STOP=1 -c \
+psql "$MCP_MIGRATION_DATABASE_URL" -X -v ON_ERROR_STOP=1 -c \
   "SELECT version, file_name, status, source_kind, checksum FROM mcp_internal.schema_migrations ORDER BY applied_at, version"
 ```
 
@@ -313,7 +320,7 @@ psql -X -v ON_ERROR_STOP=1 -c \
 ```bash
 umask 077
 mkdir -p /var/backups/ai-xing
-psql -X -v ON_ERROR_STOP=1 \
+psql "$MCP_MIGRATION_DATABASE_URL" -X -v ON_ERROR_STOP=1 \
   -f "$MCP_RELEASE_ROOT/sql/2026-08-27_mcp_review_data_scan.sql" \
   > "/var/backups/ai-xing/review-data-scan-$(date +%Y%m%d-%H%M%S).txt"
 ```
@@ -323,7 +330,7 @@ psql -X -v ON_ERROR_STOP=1 \
 再执行任务周期只读预检和 dry-run。输出只包含安全标识、日期、周、行版本、原因码、数量和摘要：
 
 ```bash
-psql -X -v ON_ERROR_STOP=1 \
+psql "$MCP_MIGRATION_DATABASE_URL" -X -v ON_ERROR_STOP=1 \
   -f "$MCP_RELEASE_ROOT/sql/preflight/2026-09-01_review_task_period_consistency.sql" \
   > "/var/backups/ai-xing/task-period-scan-$(date +%Y%m%d-%H%M%S).txt"
 
@@ -336,7 +343,7 @@ set +o pipefail
 unset MCP_BACKFILL_DATABASE_URL
 if [ "$MCP_PERIOD_DRY_RUN_STATUS" -ne 0 ]; then
   echo "任务周期 dry-run 失败，停止发布。" >&2
-  unset MCP_PERIOD_DRY_RUN_STATUS MCP_MIGRATION_DATABASE_URL PGDATABASE MCP_RELEASE_ROOT
+  unset MCP_PERIOD_DRY_RUN_STATUS MCP_MIGRATION_DATABASE_URL PGOPTIONS MCP_RELEASE_ROOT
   exit 1
 fi
 unset MCP_PERIOD_DRY_RUN_STATUS
@@ -350,7 +357,7 @@ unset MCP_PERIOD_DRY_RUN_STATUS
 
 ```bash
 MCP_BACKUP_FILE="/var/backups/ai-xing/ai-xing-$(date +%Y%m%d-%H%M%S).dump"
-pg_dump --format=custom --no-owner --no-acl --file "$MCP_BACKUP_FILE"
+pg_dump "$MCP_MIGRATION_DATABASE_URL" --format=custom --no-owner --no-acl --file "$MCP_BACKUP_FILE"
 chmod 600 "$MCP_BACKUP_FILE"
 pg_restore --list "$MCP_BACKUP_FILE" > "$MCP_BACKUP_FILE.list"
 chmod 600 "$MCP_BACKUP_FILE.list"
@@ -358,9 +365,29 @@ chmod 600 "$MCP_BACKUP_FILE.list"
 
 若是 Supabase 托管库，使用平台备份/恢复能力恢复到独立项目或隔离实例，完成抽样校验后再进入迁移窗口。没有可验证的备份和恢复结果，不得继续。
 
-#### 5. 执行受控任务周回填
+#### 5. 执行受控迁移（首次不带任何可选参数）
 
-完成备份后，把正式库本次 dry-run 的数量和摘要人工二次核对。若 `planned=0`，跳过执行模式并再次 dry-run 确认 `planned=0`、`exceptions=0`；`planned` 大于 0 时才执行：
+确认前四步证据通过、已进入维护窗口后，在候选制品的 `mcp-server` 目录执行。必须先完成这一步，再执行任务周回填；回填器依赖本步创建的任务校验触发器。
+
+```bash
+cd "$MCP_RELEASE_ROOT/mcp-server"
+npm ci --omit=dev
+set -o pipefail
+npm run migrate 2>&1 | tee "/var/backups/ai-xing/mcp-migrate-$(date +%Y%m%d-%H%M%S).log"
+MCP_MIGRATION_STATUS=${PIPESTATUS[0]}
+set +o pipefail
+if [ "$MCP_MIGRATION_STATUS" -ne 0 ]; then
+  echo "迁移失败，停止后续操作。退出码：$MCP_MIGRATION_STATUS" >&2
+  unset MCP_MIGRATION_DATABASE_URL PGOPTIONS MCP_RELEASE_ROOT MCP_MIGRATION_STATUS
+  exit "$MCP_MIGRATION_STATUS"
+fi
+```
+
+首次执行不要添加 `--include-indexes` 或 `--adopt-existing`。正常首次结果是事务迁移按 manifest 顺序 `applied`，已存在且 checksum 相同的版本为 `skipped`，`2026-08-27_mcp_task_indexes` 为 `deferred`；迁移器随后记录 release contract。
+
+#### 6. 执行受控任务周回填
+
+本步骤会写正式库，只能在取得本次正式库写入独立授权后执行。完成迁移后，把第 3 步正式库 dry-run 的数量和摘要人工二次核对。若 `planned=0`，跳过执行模式并再次 dry-run 确认 `planned=0`、`exceptions=0`；`planned` 大于 0 时才执行：
 
 ```bash
 export MCP_BACKFILL_DATABASE_URL="$MCP_MIGRATION_DATABASE_URL"
@@ -380,32 +407,12 @@ fi
 unset MCP_PERIOD_BACKFILL_STATUS
 ```
 
-回填器会锁定快照、验证两条既有任务保护触发器、在表锁事务内临时禁用并恢复这两条触发器，然后只按 ID、行版本、旧周和日期守卫更新 `target_weeks` 与 `row_version`。执行后必须再次 dry-run，结果必须为 `planned=0`、`exceptions=0`，否则禁止迁移。
-
-#### 6. 执行受控迁移（首次不带任何可选参数）
-
-确认前五步证据通过、已进入维护窗口后，在候选制品的 `mcp-server` 目录执行：
-
-```bash
-cd "$MCP_RELEASE_ROOT/mcp-server"
-npm ci --omit=dev
-set -o pipefail
-npm run migrate 2>&1 | tee "/var/backups/ai-xing/mcp-migrate-$(date +%Y%m%d-%H%M%S).log"
-MCP_MIGRATION_STATUS=${PIPESTATUS[0]}
-set +o pipefail
-if [ "$MCP_MIGRATION_STATUS" -ne 0 ]; then
-  echo "迁移失败，停止后续操作。退出码：$MCP_MIGRATION_STATUS" >&2
-  unset MCP_MIGRATION_DATABASE_URL PGDATABASE MCP_RELEASE_ROOT MCP_MIGRATION_STATUS
-  exit "$MCP_MIGRATION_STATUS"
-fi
-```
-
-首次执行不要添加 `--include-indexes` 或 `--adopt-existing`。正常首次结果是事务迁移按 manifest 顺序 `applied`，已存在且 checksum 相同的版本为 `skipped`，`2026-08-27_mcp_task_indexes` 为 `deferred`；迁移器随后记录 release contract。
+回填器会锁定快照、验证迁移创建的任务校验触发器和既有任务保护触发器，在表锁事务内临时禁用并恢复受保护触发器，然后只按 ID、行版本、旧周和日期守卫更新 `target_weeks` 与 `row_version`。执行后必须重新运行第 3 步的任务周期 dry-run，结果必须为 `planned=0`、`exceptions=0`，否则停止发布并保留失败证据。
 
 #### 7. 迁移后核对
 
 ```bash
-psql -X -v ON_ERROR_STOP=1 <<'SQL'
+psql "$MCP_MIGRATION_DATABASE_URL" -X -v ON_ERROR_STOP=1 <<'SQL'
 SELECT version, file_name, status, source_kind, checksum
 FROM mcp_internal.schema_migrations
 ORDER BY applied_at, version;
@@ -421,7 +428,7 @@ SQL
 迁移失败时只查询失败记录和安全错误码，禁止手工修改账本、删除失败记录或直接粘贴 SQL 重跑：
 
 ```bash
-psql -X -v ON_ERROR_STOP=1 -c \
+psql "$MCP_MIGRATION_DATABASE_URL" -X -v ON_ERROR_STOP=1 -c \
   "SELECT version, file_name, status, error_code FROM mcp_internal.schema_migrations WHERE status = 'failed' ORDER BY applied_at"
 ```
 
@@ -430,7 +437,7 @@ psql -X -v ON_ERROR_STOP=1 -c \
 迁移和核对完成后清除一次性连接变量：
 
 ```bash
-unset MCP_MIGRATION_DATABASE_URL PGDATABASE MCP_RELEASE_ROOT MCP_BACKUP_FILE MCP_MIGRATION_STATUS
+unset MCP_MIGRATION_DATABASE_URL PGOPTIONS MCP_RELEASE_ROOT MCP_BACKUP_FILE MCP_MIGRATION_STATUS
 ```
 
 ## 11. 授权后的部署顺序
@@ -438,15 +445,16 @@ unset MCP_MIGRATION_DATABASE_URL PGDATABASE MCP_RELEASE_ROOT MCP_BACKUP_FILE MCP
 1. 冻结候选提交并通过第 4 节全部门禁；
 2. 生成 allowlist 制品和 SHA-256 清单；
 3. 完成 CentOS 7 运行时、端口、磁盘、Nginx 和 systemd 只读检查；
-4. 完成正式库只读预检和真实复盘异常处置决策、任务周期零例外回填、备份和恢复演练；
+4. 完成正式库只读预检和真实复盘异常处置决策、备份和恢复演练；
 5. 取得正式迁移独立授权；
 6. 使用受控迁移器执行事务迁移并核对账本；
-7. 单独决定 deferred 索引；
-8. 部署制品和最小权限环境文件；
-9. 授权安装/启用 systemd，验证本机 `/health` 和 `/ready`；
-10. 验证 Nginx HTTPS、Session Header、长连接和 8787 公网隔离；
-11. 使用批准的 Admin、Manager、Employee 账号验收权限，不运行写正式数据的自动 live smoke；
-12. 全部证据通过后再创建正式发布标签。
+7. 按 dry-run 快照执行必要的任务周期回填并再次核对；
+8. 单独决定 deferred 索引；
+9. 部署制品和最小权限环境文件；
+10. 授权安装/启用 systemd，验证本机 `/health` 和 `/ready`；
+11. 验证 Nginx HTTPS、Session Header、长连接和 8787 公网隔离；
+12. 使用批准的 Admin、Manager、Employee 账号验收权限，不运行写正式数据的自动 live smoke；
+13. 全部证据通过后再创建正式发布标签。
 
 ## 12. 上线验收
 
