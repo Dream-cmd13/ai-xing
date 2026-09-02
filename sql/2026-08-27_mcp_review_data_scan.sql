@@ -2,7 +2,7 @@
 -- This file is not a migration and must not be added to the migration ledger.
 -- It returns only object IDs, JSON paths and reason codes, never review content.
 
-WITH task_slot_issues AS (
+WITH RECURSIVE task_slot_issues AS (
   SELECT
     'task'::TEXT AS object_type,
     t.id AS object_id,
@@ -16,19 +16,52 @@ WITH task_slot_issues AS (
     END AS reason
   FROM public.tasks AS t
   WHERE t.aligned_kr_id IS NOT NULL AND btrim(t.aligned_kr_id) <> ''
-), department_root_issues AS (
+), department_nodes AS (
+  SELECT
+    d.id AS root_id,
+    d.id AS object_id,
+    ARRAY[d.id]::TEXT[] AS node_path,
+    jsonb_build_object(
+      'reviews', d.reviews,
+      'subDepartments', CASE
+        WHEN jsonb_typeof(to_jsonb(d)->'sub_departments') = 'array' THEN to_jsonb(d)->'sub_departments'
+        WHEN jsonb_typeof(to_jsonb(d)->'subDepartments') = 'array' THEN to_jsonb(d)->'subDepartments'
+        ELSE '[]'::JSONB
+      END
+    ) AS node
+  FROM public.departments AS d
+  WHERE d.id IS NOT NULL
+  UNION ALL
+  SELECT
+    parent.root_id,
+    child.value->>'id' AS object_id,
+    parent.node_path || (child.value->>'id'),
+    child.value AS node
+  FROM department_nodes AS parent
+  CROSS JOIN LATERAL jsonb_array_elements(
+    CASE
+      WHEN jsonb_typeof(parent.node->'subDepartments') = 'array' THEN parent.node->'subDepartments'
+      WHEN jsonb_typeof(parent.node->'sub_departments') = 'array' THEN parent.node->'sub_departments'
+      ELSE '[]'::JSONB
+    END
+  ) AS child(value)
+  WHERE jsonb_typeof(child.value) = 'object'
+    AND NULLIF(btrim(child.value->>'id'), '') IS NOT NULL
+    AND array_length(parent.node_path, 1) < 101
+    AND NOT ((child.value->>'id') = ANY(parent.node_path))
+), review_container_issues AS (
   SELECT
     'department'::TEXT AS object_type,
-    d.id AS object_id,
+    object_id,
     'reviews'::TEXT AS json_path,
     'REVIEWS_FORMAT_INVALID'::TEXT AS reason
-  FROM public.departments AS d
-  WHERE d.reviews IS NOT NULL AND jsonb_typeof(d.reviews) <> 'object'
+  FROM department_nodes
+  WHERE jsonb_typeof(node->'reviews') NOT IN ('object', 'null')
 ), review_periods AS (
-  SELECT d.id AS department_id, period.key AS period_key, period.value AS period_value
-  FROM public.departments AS d
+  SELECT node.object_id AS department_id, period.key AS period_key, period.value AS period_value
+  FROM department_nodes AS node
   CROSS JOIN LATERAL jsonb_each(
-    CASE WHEN jsonb_typeof(d.reviews) = 'object' THEN d.reviews ELSE '{}'::JSONB END
+    CASE WHEN jsonb_typeof(node.node->'reviews') = 'object' THEN node.node->'reviews' ELSE '{}'::JSONB END
   ) AS period(key, value)
 ), period_issues AS (
   SELECT
@@ -36,7 +69,9 @@ WITH task_slot_issues AS (
     department_id AS object_id,
     'reviews.' || period_key AS json_path,
     CASE
-      WHEN period_key !~ '^\d{4}-W(0[1-9]|[1-4]\d|5[0-3])$' THEN 'REVIEW_PERIOD_KEY_INVALID'
+      WHEN period_key !~ '^\d{4}-W(0[1-9]|[1-4]\d|5[0-3])$'
+       AND period_key !~ '^\d{4}-M(0[1-9]|1[0-2])$'
+       AND period_key !~ '^\d{4}-Q[1-4]$' THEN 'REVIEW_PERIOD_KEY_INVALID'
       WHEN jsonb_typeof(period_value) <> 'array' THEN 'REVIEW_PERIOD_FORMAT_INVALID'
       ELSE NULL
     END AS reason
@@ -91,7 +126,7 @@ WITH task_slot_issues AS (
 SELECT object_type, object_id, json_path, reason
 FROM (
   SELECT * FROM task_slot_issues
-  UNION ALL SELECT * FROM department_root_issues
+  UNION ALL SELECT * FROM review_container_issues
   UNION ALL SELECT * FROM period_issues
   UNION ALL SELECT * FROM entry_issues
   UNION ALL SELECT * FROM objective_issues

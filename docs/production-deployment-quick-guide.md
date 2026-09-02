@@ -17,7 +17,7 @@
 ## 一、部署前确认
 
 1. 本地代码已经提交并推送到 GitHub 的 mcpkf 分支。
-2. 正式库只读预检已经完成，45 条历史复盘异常已有书面处置决定。
+2. 正式库已运行修正后的只读复盘预检：`REVIEW_PERIOD_KEY_INVALID`、`REVIEW_PERIOD_FORMAT_INVALID` 和 `REVIEWS_FORMAT_INVALID` 均为 0；任何其他复盘原因码均已有书面处置决定。
 3. 正式库任务周期 dry-run 已取得现场数量和摘要，所有缺失、倒置或超长日期例外均已人工处理。
 4. 已在 Supabase 或数据库平台完成正式库备份和隔离恢复演练。
 5. 宝塔服务器已经安装 Git、Node.js 20 或更高版本、npm、PostgreSQL 客户端和 Nginx。
@@ -110,6 +110,8 @@ if [ "$MCP_PERIOD_DRY_RUN_STATUS" -ne 0 ]; then
 fi
 unset MCP_PERIOD_DRY_RUN_STATUS
 ~~~
+
+检查 `review-scan` 文件：`REVIEW_PERIOD_KEY_INVALID`、`REVIEW_PERIOD_FORMAT_INVALID` 和 `REVIEWS_FORMAT_INVALID` 必须均为 0。出现任意复盘原因码时，停止发布，先完成人工处置或取得书面接受；扫描不得自动改写历史复盘。
 
 记录 dry-run 最后一条 `backfill_dry_run` 的 `planned`、`exceptions` 和 `digest`，但不要把数据库连接信息或业务正文复制到发布记录。必须满足：
 

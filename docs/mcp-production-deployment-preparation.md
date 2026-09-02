@@ -10,7 +10,7 @@
 
 1. 正式库身份、版本、时区、基线对象、RLS、触发器、函数签名和权限尚未只读核验；
 2. 正式库迁移账本与本候选制品的 32 项 manifest、顺序、状态和 digest 尚未核验；
-3. 历史扫描发现的 45 条 `REVIEW_PERIOD_KEY_INVALID` 尚未逐条修复或取得书面接受；
+3. 正式库尚未使用修正后的规则完成只读复盘预检；任何真实复盘原因码均须逐条处置或取得书面接受，其中 `REVIEW_PERIOD_KEY_INVALID`、`REVIEW_PERIOD_FORMAT_INVALID` 和 `REVIEWS_FORMAT_INVALID` 必须为 0；
 4. 正式库任务日期/周只读扫描、缺失日期人工补全和受控周回填尚未完成；
 5. 正式库备份和恢复演练尚未完成；
 6. 正式迁移尚未获得独立授权，也未执行迁移后验收；发布契约不一致时必须返回 `RELEASE_CONTRACT_MISMATCH` 并保持 fail-closed；
@@ -201,7 +201,7 @@ systemd-analyze verify /etc/systemd/system/ai-xing-mcp.service
 4. `mcp_internal.schema_migrations` 的版本、顺序、状态和校验和；
 5. release contract 的 release ID、manifest digest、required versions 和 deferred index 状态；
 6. readiness 各标志与候选代码要求一致；
-7. 只读复盘数据扫描仍为 45 条、数量是否变化，以及每条异常的处置决策；
+7. 修正后的只读复盘数据扫描结果、原因码和每条真实异常的处置决策；
 8. 任务日期派生周预检的可修复数量、摘要、缺失/倒置/超长日期例外和历史复盘引用；
 9. 数据规模、索引状态和迁移锁风险。
 
@@ -318,7 +318,7 @@ psql -X -v ON_ERROR_STOP=1 \
   > "/var/backups/ai-xing/review-data-scan-$(date +%Y%m%d-%H%M%S).txt"
 ```
 
-预期仍为已知的 45 条 `REVIEW_PERIOD_KEY_INVALID`，不得在迁移前自动修复；数量变化或出现其他原因码时，先形成书面处置决定。
+修正后的扫描中，`REVIEW_PERIOD_KEY_INVALID`、`REVIEW_PERIOD_FORMAT_INVALID` 和 `REVIEWS_FORMAT_INVALID` 必须均为 0；出现任意复盘原因码时，先形成书面处置决定。预检和迁移均不得自动改写历史复盘。
 
 再执行任务周期只读预检和 dry-run。输出只包含安全标识、日期、周、行版本、原因码、数量和摘要：
 
@@ -438,7 +438,7 @@ unset MCP_MIGRATION_DATABASE_URL PGDATABASE MCP_RELEASE_ROOT MCP_BACKUP_FILE MCP
 1. 冻结候选提交并通过第 4 节全部门禁；
 2. 生成 allowlist 制品和 SHA-256 清单；
 3. 完成 CentOS 7 运行时、端口、磁盘、Nginx 和 systemd 只读检查；
-4. 完成正式库只读预检、45 条复盘异常处置决策、任务周期零例外回填、备份和恢复演练；
+4. 完成正式库只读预检和真实复盘异常处置决策、任务周期零例外回填、备份和恢复演练；
 5. 取得正式迁移独立授权；
 6. 使用受控迁移器执行事务迁移并核对账本；
 7. 单独决定 deferred 索引；
@@ -469,7 +469,7 @@ unset MCP_MIGRATION_DATABASE_URL PGDATABASE MCP_RELEASE_ROOT MCP_BACKUP_FILE MCP
 - 父部门负责人可在管理子树创建和复盘，普通成员不能越权写入；
 - KR 下标、任务字段、人员数组和复盘同步在网页、Node 和数据库边界一致拒绝非法值；
 - 任务 `startDate/dueDate` 派生出的 ISO 周与 `targetWeeks` 完全一致，`2026-06-29` 至 `2026-07-05` 只出现在 `2026-W27`，不出现在 `2026-W39`；
-- 45 条历史异常不会被自动修复或覆盖。
+- 历史复盘不会被预检、回填或迁移自动修复或覆盖。
 
 ### 12.3 安全和制品
 
@@ -485,7 +485,7 @@ unset MCP_MIGRATION_DATABASE_URL PGDATABASE MCP_RELEASE_ROOT MCP_BACKUP_FILE MCP
 - 事务迁移失败：停止后续版本，保留失败证据，核对事务回滚和账本，不手改成功状态。
 - deferred 索引失败：记录已创建索引并人工评估，不盲目重跑。
 - readiness 失败：保持 MCP fail-closed，先修复契约或依赖，不绕过门禁。
-- 数据异常：保留原因码和 ID，走人工处置或书面接受，不自动改写 45 条历史记录。
+- 数据异常：保留原因码和 ID，走人工处置或书面接受，不自动改写历史复盘记录。
 
 常驻服务排障命令只能在获得服务器操作授权后执行：
 

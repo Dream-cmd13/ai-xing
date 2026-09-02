@@ -428,6 +428,12 @@ test('review data preflight is read-only and returns identifiers instead of revi
   assert.equal(MIGRATION_MANIFEST.includes('2026-08-27_mcp_review_data_scan.sql'), false);
 
   assert.match(sql, /ALIGNED_KR_ID_INVALID/i);
+  assert.match(sql, /WITH RECURSIVE[\s\S]*?\), department_nodes AS/i);
+  assert.doesNotMatch(sql, /mcp_department_tree_nodes/i);
+  assert.match(sql, /period_key !~ '\^\\d\{4\}-W/i);
+  assert.match(sql, /period_key !~ '\^\\d\{4\}-M/i);
+  assert.match(sql, /period_key !~ '\^\\d\{4\}-Q/i);
+  assert.match(sql, /REVIEWS_FORMAT_INVALID/i);
   assert.match(sql, /REVIEW_PERIOD_FORMAT_INVALID/i);
   assert.match(sql, /OKR_DETAILS_FORMAT_INVALID/i);
   assert.match(sql, /KR_REVIEWS_OUT_OF_RANGE/i);
