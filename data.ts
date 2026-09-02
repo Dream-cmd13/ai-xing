@@ -1,13 +1,15 @@
 
-import { AppState, User, Department, ProcessDefinition, CompanyStrategy, BusinessDefinition, SystemRole, PADEntry, AIModelConfig, AISettings, UserRole } from "./types";
+import { AppState, User, Department, ProcessDefinition, CompanyStrategy, BusinessDefinition, SystemRole, PADEntry, AIModelConfig, AISettings, UserRole, DepartmentReviewCapability, DepartmentReviewSubmitInput, DepartmentReviewSubmitResult } from "./types";
 import { isSupabaseConfigured, supabase } from "./supabase";
 import { isMissingTaskReviewColumnError, omitTaskReviewColumns, stripTaskReviewFieldsFromSelect } from "./utils/taskSchemaCompat";
+import { deriveTaskWeeksFromDateRange } from "./utils/reviewPeriodConsistency.js";
 
 /**
  * StratFlow AI 数据持久化层 (Data Access Layer) - Supabase Relational Version (Single Tenant)
  */
 
 const handleSupabaseError = (error: any) => {
+  if (error?.code === 'RPC_NOT_CONFIGURED') throw error;
   const message =
     error?.message ||
     (typeof error === 'string' && error.trim().length > 0 ? error : "未知数据库错误");
@@ -31,6 +33,11 @@ const buildDeleteConflictError = (entityLabel: string) =>
 
 const buildPermissionError = (entityLabel: string) =>
   new Error(`您暂无权限保存${entityLabel}，请联系管理员检查权限配置。`);
+
+const buildRpcNotConfiguredError = (featureLabel: string) =>
+  Object.assign(new Error(`${featureLabel}所需数据库接口尚未启用，请先完成当前版本迁移。`), {
+    code: 'RPC_NOT_CONFIGURED'
+  });
 
 const buildDuplicateCreateError = (entityLabel: string) =>
   new Error(`${entityLabel}创建失败，可能是重复提交或记录已存在。`);
@@ -131,10 +138,15 @@ const mapUserRow = (u: any): User => {
   };
 };
 
-const mapDepartmentRow = (d: any): Department => {
+const mapDepartmentRow = (d: any, depth = 0, path = new Set<string>()): Department => {
+  if (!d || typeof d !== 'object' || depth > 100 || typeof d.id !== 'string' || path.has(d.id)) {
+    throw new Error('部门树包含无效或循环节点。');
+  }
+  const nextPath = new Set(path);
+  nextPath.add(d.id);
   const roleMembers: Record<string, string[]> = {};
-  if (d.role_members) {
-    Object.assign(roleMembers, d.role_members);
+  if (d.roleMembers || d.role_members) {
+    Object.assign(roleMembers, d.roleMembers ?? d.role_members);
   }
 
   const reviewsMap: Record<string, any[]> = {};
@@ -145,17 +157,25 @@ const mapDepartmentRow = (d: any): Department => {
   return {
     id: d.id,
     name: d.name,
-    managerName: d.manager_name ?? '',
-    managerUserId: d.manager_user_id ?? undefined,
+    managerName: d.managerName ?? d.manager_name ?? '',
+    managerUserId: d.managerUserId ?? d.manager_user_id ?? undefined,
     responsibilities: d.responsibilities ?? '',
     roles: d.roles || [],
     roleMembers,
     attributes: d.attributes ?? '',
-    subDepartments: d.sub_departments || [],
+    subDepartments: (Array.isArray(d.subDepartments)
+      ? d.subDepartments
+      : (Array.isArray(d.sub_departments) ? d.sub_departments : []))
+      .flatMap((child: any) => (
+        child && typeof child === 'object' && typeof child.id === 'string'
+          && depth < 100 && !nextPath.has(child.id)
+          ? [mapDepartmentRow(child, depth + 1, nextPath)]
+          : []
+      )),
     okrs: d.okrs || {},
     reviews: reviewsMap,
-    updatedAt: d.updated_at,
-    rowVersion: normalizeRowVersion(d.row_version)
+    updatedAt: d.updatedAt ?? d.updated_at,
+    rowVersion: normalizeRowVersion(d.rowVersion ?? d.row_version)
   };
 };
 
@@ -212,27 +232,27 @@ const mapSystemRoleRow = (r: any): SystemRole => ({
 
 const mapTaskRow = (t: any): PADEntry => ({
   id: t.id,
-  createdBy: t.created_by ?? t.owner_id,
+  createdBy: t.createdBy ?? t.created_by ?? t.ownerId ?? t.owner_id,
   title: t.title,
   status: t.status,
   priority: t.priority,
-  ownerId: t.owner_id,
-  departmentId: t.department_id,
-  alignedKrId: t.aligned_kr_id,
-  targetWeeks: t.target_weeks || [],
-  startDate: t.start_date,
-  dueDate: t.due_date,
+  ownerId: t.ownerId ?? t.owner_id,
+  departmentId: t.departmentId ?? t.department_id,
+  alignedKrId: t.alignedKrId ?? t.aligned_kr_id,
+  targetWeeks: t.targetWeeks ?? t.target_weeks ?? [],
+  startDate: t.startDate ?? t.start_date,
+  dueDate: t.dueDate ?? t.due_date,
   tags: t.tags || [],
-  participantIds: t.participant_ids || [],
-  approverIds: t.approver_ids || [],
+  participantIds: t.participantIds ?? t.participant_ids ?? [],
+  approverIds: t.approverIds ?? t.approver_ids ?? [],
   logs: t.logs || [],
   plan: t.plan,
   action: t.action,
   deliverable: t.deliverable,
-  taskReview: t.task_review,
-  taskReviewScore: t.task_review_score,
-  updatedAt: t.updated_at,
-  rowVersion: normalizeRowVersion(t.row_version)
+  taskReview: t.taskReview ?? t.task_review,
+  taskReviewScore: t.taskReviewScore ?? t.task_review_score,
+  updatedAt: t.updatedAt ?? t.updated_at,
+  rowVersion: normalizeRowVersion(t.rowVersion ?? t.row_version)
 });
 
 const USERS_SELECT_FIELDS = 'id,auth_id,username,name,role,department_id,pad_permissions,reviews,system_role_ids,custom_permissions,updated_at,row_version';
@@ -251,6 +271,29 @@ export interface TaskListPage {
   tasks: PADEntry[];
   nextOffset: number;
   hasMore: boolean;
+}
+
+export interface TaskCenterCursor {
+  updatedAt: number;
+  id: string;
+}
+
+export interface TaskCenterPage {
+  tasks: PADEntry[];
+  total: number;
+  hasMore: boolean;
+  nextCursor: TaskCenterCursor | null;
+  scope: string;
+}
+
+export interface TaskCenterPageOptions {
+  departmentId?: string | null;
+  scope?: 'all' | 'auto' | 'exact' | 'subtree';
+  status?: string | null;
+  priority?: string | null;
+  search?: string | null;
+  limit?: number;
+  cursor?: TaskCenterCursor | null;
 }
 
 const isIgnoredNoRowsError = (error: any) => error?.code === 'PGRST116';
@@ -277,6 +320,21 @@ const buildDefaultStrategy = (): CompanyStrategy => ({
   companyOKRs: {},
   rowVersion: 0
 });
+
+const TASK_SCOPE_CACHE_TTL_MS = 30_000;
+const taskScopeCache = new Map<string, { tasks: PADEntry[]; expiresAt: number }>();
+
+export const invalidateVisibleTaskScopeCache = (userId?: string) => {
+  if (!userId) {
+    taskScopeCache.clear();
+    return;
+  }
+  for (const key of taskScopeCache.keys()) {
+    if (key.startsWith(`${userId}:`)) taskScopeCache.delete(key);
+  }
+};
+
+const TASK_PEOPLE_BATCH_SIZE = 50;
 
 const fetchSettingsRow = async () => {
   const { data, error } = await supabase
@@ -371,7 +429,7 @@ export const getDepartments = async (): Promise<Department[]> => {
   try {
     const { data, error } = await supabase.from('departments').select(DEPARTMENTS_SELECT_FIELDS);
     if (error && !isIgnoredMissingTableError(error)) throw error;
-    return (data || []).map(mapDepartmentRow);
+    return (data || []).map((row) => mapDepartmentRow(row));
   } catch (e) {
     handleSupabaseError(e);
     throw e;
@@ -440,7 +498,22 @@ export const getTasks = async (): Promise<PADEntry[]> => {
     let data: any[] | null = null;
     let error: any = null;
 
-    ({ data, error } = await supabase.rpc('get_visible_tasks_full'));
+    const webResult = await supabase.rpc('web_get_visible_tasks_full', {
+      p_limit: 10_000
+    });
+    if (!isIgnoredMissingFunctionError(webResult.error)) {
+      if (webResult.error) throw webResult.error;
+      const payload = webResult.data && typeof webResult.data === 'object' ? webResult.data : null;
+      if (!payload || !Array.isArray(payload.items) || typeof payload.truncated !== 'boolean') {
+        throw new Error('网页任务结果格式错误，请检查数据库迁移。');
+      }
+      if (payload.truncated || payload.items.length > 10_000) {
+        throw new Error('可见任务超过 10000 条安全上限，请缩小任务范围。');
+      }
+      data = payload.items;
+    } else {
+      ({ data, error } = await supabase.rpc('get_visible_tasks_full'));
+    }
 
     if (isIgnoredMissingFunctionError(error)) {
       ({ data, error } = await supabase.from('tasks').select(TASKS_SELECT_FIELDS));
@@ -458,15 +531,89 @@ export const getTasks = async (): Promise<PADEntry[]> => {
   }
 };
 
+export const getVisibleTasksForScope = async (
+  userId: string,
+  departmentId: string,
+  weekIds: string[],
+  _fallbackUsers: User[] = [],
+  scope: 'auto' | 'exact' | 'subtree' = 'auto'
+): Promise<PADEntry[]> => {
+  if (!isSupabaseConfigured()) throw new Error("Supabase not configured");
+  if (!userId || !departmentId || weekIds.length === 0) return [];
+
+  try {
+    const cacheKey = `${userId}:${departmentId}:${scope}:${weekIds.join(',')}`;
+    const cached = taskScopeCache.get(cacheKey);
+    if (cached && cached.expiresAt > Date.now()) return cached.tasks;
+    if (cached) taskScopeCache.delete(cacheKey);
+
+    const scopedResult = await supabase.rpc('web_get_visible_tasks_scope_v2', {
+      p_department_id: departmentId,
+      p_week_ids: weekIds,
+      p_limit: 2_000,
+      p_scope: scope,
+    });
+
+    let result = scopedResult;
+    if (isIgnoredMissingFunctionError(scopedResult.error)) {
+      if (scope !== 'exact') {
+        throw buildRpcNotConfiguredError('部门范围任务查询');
+      }
+      result = await supabase.rpc('web_get_visible_tasks_scope', {
+        p_department_id: departmentId,
+        p_week_ids: weekIds,
+        p_limit: 2_000
+      });
+    }
+
+    if (result?.error) {
+      if (isIgnoredMissingFunctionError(result.error)) {
+        throw buildRpcNotConfiguredError('部门范围任务查询');
+      }
+      throw result.error;
+    }
+    if (result?.data && typeof result.data === 'object') {
+      const payload = result.data as { items?: unknown[]; truncated?: boolean };
+      if (!Array.isArray(payload.items) || typeof payload.truncated !== 'boolean') {
+        throw new Error('任务范围结果格式错误，请检查数据库迁移。');
+      }
+      if (payload.truncated || payload.items.length > 2_000) {
+        throw new Error('当前部门周期任务超过 2000 条安全上限，请缩小范围。');
+      }
+      const tasks = payload.items.map(mapTaskRow);
+      taskScopeCache.set(cacheKey, { tasks, expiresAt: Date.now() + TASK_SCOPE_CACHE_TTL_MS });
+      return tasks;
+    }
+    throw new Error('任务范围结果格式错误，请检查数据库迁移。');
+  } catch (e) {
+    handleSupabaseError(e);
+    throw e;
+  }
+};
+
 export const getTaskUsersForTasks = async (taskIds: string[]): Promise<User[]> => {
   if (!isSupabaseConfigured()) throw new Error("Supabase not configured");
   if (taskIds.length === 0) return [];
   try {
-    const { data, error } = await supabase.rpc('get_current_user_task_users_for_tasks', {
-      p_task_ids: taskIds
-    });
-    if (error) throw error;
-    return (data || []).map(mapUserRow);
+    const uniqueTaskIds = Array.from(new Set(taskIds.filter(Boolean)));
+    const batches: string[][] = [];
+    for (let index = 0; index < uniqueTaskIds.length; index += TASK_PEOPLE_BATCH_SIZE) {
+      batches.push(uniqueTaskIds.slice(index, index + TASK_PEOPLE_BATCH_SIZE));
+    }
+    const usersById = new Map<string, User>();
+    for (let index = 0; index < batches.length; index += 4) {
+      const results = await Promise.all(batches.slice(index, index + 4).map((batch) =>
+        supabase.rpc('get_current_user_task_users_for_tasks', { p_task_ids: batch })
+      ));
+      results.forEach(({ data, error }) => {
+        if (error) throw error;
+        (data || []).forEach((row: any) => {
+          const user = mapUserRow(row);
+          usersById.set(user.id, user);
+        });
+      });
+    }
+    return Array.from(usersById.values());
   } catch (e) {
     handleSupabaseError(e);
     throw e;
@@ -588,11 +735,156 @@ export const getTaskById = async (taskId: string): Promise<PADEntry> => {
   }
 };
 
+const getIsoWeekIdForDate = (input: Date): string => {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit'
+  }).formatToParts(input);
+  const read = (type: string) => Number(parts.find((part) => part.type === type)?.value);
+  const date = new Date(Date.UTC(read('year'), read('month') - 1, read('day')));
+  date.setUTCDate(date.getUTCDate() + 4 - (date.getUTCDay() || 7));
+  const isoYear = date.getUTCFullYear();
+  const yearStart = new Date(Date.UTC(isoYear, 0, 1));
+  const week = Math.ceil((((date.getTime() - yearStart.getTime()) / 86400000) + 1) / 7);
+  return `${isoYear}-W${String(week).padStart(2, '0')}`;
+};
+
+const parseTaskCenterCursor = (value: any): TaskCenterCursor | null => {
+  if (!value || typeof value !== 'object') return null;
+  const updatedAt = Number(value.updatedAt ?? value.updated_at);
+  const id = typeof value.id === 'string' ? value.id : '';
+  if (!Number.isSafeInteger(updatedAt) || updatedAt < 0 || id.length === 0) return null;
+  return { updatedAt, id };
+};
+
+export const getTaskCenterPage = async ({
+  departmentId = null,
+  scope = 'all',
+  status = null,
+  priority = null,
+  search = null,
+  limit = TASK_LIST_PAGE_SIZE,
+  cursor = null,
+}: TaskCenterPageOptions = {}): Promise<TaskCenterPage> => {
+  if (!isSupabaseConfigured()) throw new Error("Supabase not configured");
+
+  try {
+    const result = await supabase.rpc('web_get_task_center_page', {
+      p_department_id: departmentId || null,
+      p_scope: scope,
+      p_status: status && status !== 'all' ? status : null,
+      p_priority: priority && priority !== 'all' ? priority : null,
+      p_query: search?.trim() || null,
+      p_limit: limit,
+      p_cursor_updated_at: cursor?.updatedAt ?? null,
+      p_cursor_id: cursor?.id ?? null,
+    });
+
+    if (isIgnoredMissingFunctionError(result.error)) {
+      throw new Error('组织任务查询接口尚未部署，请先完成任务中心分页迁移。');
+    }
+    if (result.error) throw result.error;
+
+    const payload = result.data && typeof result.data === 'object' ? result.data as Record<string, any> : null;
+    const total = Number(payload?.total);
+    const rawHasMore = payload?.hasMore ?? payload?.has_more;
+    const hasMore = rawHasMore === true;
+    const items = payload?.items;
+    const nextCursor = parseTaskCenterCursor(payload?.nextCursor ?? payload?.next_cursor);
+    if (!payload || !Array.isArray(items) || !Number.isSafeInteger(total) || total < 0
+      || typeof rawHasMore !== 'boolean'
+      || (payload.hasMore !== undefined && typeof payload.hasMore !== 'boolean')
+      || (payload.has_more !== undefined && typeof payload.has_more !== 'boolean')
+      || (hasMore && !nextCursor)) {
+      throw new Error('任务中心分页结果格式错误，请检查数据库迁移。');
+    }
+
+    return {
+      tasks: items.map(mapTaskRow),
+      total,
+      hasMore,
+      nextCursor: hasMore ? nextCursor : null,
+      scope: typeof payload.scope === 'string' ? payload.scope : scope,
+    };
+  } catch (e) {
+    handleSupabaseError(e);
+    throw e;
+  }
+};
+
 export const getWorkbenchTasks = async (_userId: string): Promise<PADEntry[]> => {
   if (!isSupabaseConfigured()) throw new Error("Supabase not configured");
   try {
     let data: any[] | null = null;
     let error: any = null;
+
+    const today = new Date();
+    const currentWeekId = getIsoWeekIdForDate(today);
+    const nextWeekId = getIsoWeekIdForDate(new Date(today.getTime() + (7 * 24 * 60 * 60 * 1000)));
+    const rowsById = new Map<string, any>();
+    const cursors: Record<'today' | 'thisWeek' | 'nextWeek', any> = {
+      today: null, thisWeek: null, nextWeek: null
+    };
+    const done: Record<'today' | 'thisWeek' | 'nextWeek', boolean> = {
+      today: false, thisWeek: false, nextWeek: false
+    };
+    let fetchedCount = 0;
+    let pageRpcAvailable = true;
+
+    while (Object.values(done).some((value) => !value)) {
+      const cursorArgs = (key: 'today' | 'thisWeek' | 'nextWeek') => done[key]
+        ? { updatedAt: -1, id: '' }
+        : (cursors[key] || { updatedAt: null, id: null });
+      const todayCursor = cursorArgs('today');
+      const thisWeekCursor = cursorArgs('thisWeek');
+      const nextWeekCursor = cursorArgs('nextWeek');
+      const result = await supabase.rpc('mcp_get_personal_workbench_page', {
+        p_limit: 50,
+        p_today_cursor_updated_at: todayCursor.updatedAt,
+        p_today_cursor_id: todayCursor.id,
+        p_this_week_id: currentWeekId,
+        p_this_week_cursor_updated_at: thisWeekCursor.updatedAt,
+        p_this_week_cursor_id: thisWeekCursor.id,
+        p_next_week_id: nextWeekId,
+        p_next_week_cursor_updated_at: nextWeekCursor.updatedAt,
+        p_next_week_cursor_id: nextWeekCursor.id,
+      });
+      if (isIgnoredMissingFunctionError(result.error)) {
+        pageRpcAvailable = false;
+        break;
+      }
+      if (result.error) throw result.error;
+      const payload = result.data && typeof result.data === 'object' ? result.data : null;
+      if (!payload || !['today', 'thisWeek', 'nextWeek'].every((key) => payload[key] && Array.isArray(payload[key].items))) {
+        throw new Error('工作台分页结果格式错误，请检查数据库迁移。');
+      }
+      let pageProgress = 0;
+      for (const key of ['today', 'thisWeek', 'nextWeek'] as const) {
+        if (done[key]) continue;
+        const page = payload[key];
+        for (const row of page.items) {
+          pageProgress += 1;
+          fetchedCount += 1;
+          if (row?.id) rowsById.set(row.id, row);
+        }
+        if (page.hasMore === true) {
+          if (!page.nextCursor || !Number.isSafeInteger(Number(page.nextCursor.updatedAt))
+            || typeof page.nextCursor.id !== 'string' || page.nextCursor.id.length === 0) {
+            throw new Error('工作台分页游标无效，请检查数据库迁移。');
+          }
+          cursors[key] = page.nextCursor;
+        } else {
+          done[key] = true;
+        }
+      }
+      if (fetchedCount > 10_000) {
+        throw new Error('工作台任务超过 10000 条安全上限，请缩小任务范围。');
+      }
+      if (pageProgress === 0 && Object.values(done).some((value) => !value)) {
+        throw new Error('工作台分页未取得进展，请检查数据库游标。');
+      }
+    }
+
+    if (pageRpcAvailable) return [...rowsById.values()].map(mapTaskRow);
 
     ({ data, error } = await supabase.rpc('get_my_workbench_tasks'));
 
@@ -1160,6 +1452,116 @@ export const saveDepartmentsAtomically = async (
   }
 };
 
+export const getDepartmentReviewCapability = async (
+  departmentId: string
+): Promise<DepartmentReviewCapability> => {
+  if (!isSupabaseConfigured()) throw new Error("Supabase not configured");
+  try {
+    const { data, error } = await supabase.rpc('web_get_department_review_capability', {
+      p_department_id: departmentId
+    });
+    if (isIgnoredMissingFunctionError(error)) {
+      throw buildRpcNotConfiguredError('部门复盘权限校验');
+    }
+    if (error) throw error;
+    if (!data || typeof data !== 'object' || Array.isArray(data)) {
+      throw new Error('部门复盘权限校验返回了无效结果。');
+    }
+
+    const capability = data as Record<string, any>;
+    const normalizedDepartmentId = String(capability.departmentId ?? capability.department_id ?? '');
+    const normalizedRootId = String(capability.rootId ?? capability.root_id ?? '');
+    const normalizedNodePath = normalizeStringArray(capability.nodePath ?? capability.node_path) ?? [];
+    const normalizedRowVersion = Number(capability.rowVersion ?? capability.row_version);
+    const canView = capability.canView ?? capability.can_view;
+    const canEdit = capability.canEdit ?? capability.can_edit;
+    if (
+      !normalizedDepartmentId
+      || !normalizedRootId
+      || normalizedNodePath.length === 0
+      || normalizedNodePath[0] !== normalizedRootId
+      || normalizedNodePath[normalizedNodePath.length - 1] !== normalizedDepartmentId
+      || !Number.isSafeInteger(normalizedRowVersion)
+      || normalizedRowVersion < 0
+      || typeof canView !== 'boolean'
+      || typeof canEdit !== 'boolean'
+    ) {
+      throw new Error('部门复盘权限校验返回了不完整结果。');
+    }
+    return {
+      departmentId: normalizedDepartmentId,
+      rootId: normalizedRootId,
+      nodePath: normalizedNodePath,
+      rowVersion: normalizedRowVersion,
+      canView,
+      canEdit
+    };
+  } catch (e) {
+    handleSupabaseError(e);
+    throw e;
+  }
+};
+
+export const submitDepartmentReviewScoped = async (
+  input: DepartmentReviewSubmitInput
+): Promise<DepartmentReviewSubmitResult> => {
+  if (!isSupabaseConfigured()) throw new Error("Supabase not configured");
+  try {
+    const { data, error } = await supabase.rpc('web_submit_department_review_scoped', {
+      p_department_id: input.departmentId,
+      p_period_key: input.periodKey,
+      p_entry: input.entry,
+      p_task_updates: input.taskUpdates,
+      p_expected_department_row_version: input.expectedDepartmentRowVersion,
+      p_request_id: input.requestId,
+      p_department_root_id: input.departmentRootId,
+      p_department_node_path: input.departmentNodePath
+    });
+    if (isIgnoredMissingFunctionError(error)) {
+      throw buildRpcNotConfiguredError('部门复盘原子提交');
+    }
+    if (error) throw error;
+    if (!data || typeof data !== 'object' || Array.isArray(data)) {
+      throw new Error('部门复盘提交返回了无效结果。');
+    }
+
+    const result = data as Record<string, any>;
+    const reviewEntry = result.reviewEntry ?? result.review_entry;
+    if (!reviewEntry || typeof reviewEntry !== 'object' || Array.isArray(reviewEntry)) {
+      throw new Error('部门复盘提交未返回规范化复盘记录。');
+    }
+    const normalizedDepartmentId = String(result.departmentId ?? result.department_id ?? '');
+    const normalizedPeriodKey = String(result.periodKey ?? result.period_key ?? '');
+    const normalizedRootId = String(result.rootId ?? result.root_id ?? '');
+    const normalizedRootRowVersion = Number(result.rootRowVersion ?? result.root_row_version);
+    if (
+      normalizedDepartmentId !== input.departmentId
+      || normalizedPeriodKey !== input.periodKey
+      || normalizedRootId !== input.departmentRootId
+      || !Number.isSafeInteger(normalizedRootRowVersion)
+      || normalizedRootRowVersion <= input.expectedDepartmentRowVersion
+      || !Array.isArray(result.tasks)
+      || result.tasks.some((task: any) => !task || typeof task !== 'object' || typeof task.id !== 'string')
+    ) {
+      throw new Error('部门复盘提交返回了不完整结果。');
+    }
+
+    invalidateVisibleTaskScopeCache();
+    return {
+      replayed: result.replayed === true,
+      departmentId: normalizedDepartmentId,
+      periodKey: normalizedPeriodKey,
+      reviewEntry: reviewEntry as any,
+      tasks: result.tasks.map(mapTaskRow),
+      rootId: normalizedRootId,
+      rootRowVersion: normalizedRootRowVersion
+    };
+  } catch (e) {
+    handleSupabaseError(e);
+    throw e;
+  }
+};
+
 export const saveProcessesAtomically = async (
   nextProcesses: ProcessDefinition[],
   previousProcesses: ProcessDefinition[]
@@ -1325,29 +1727,44 @@ export const deleteUser = async (id: string, rowVersion?: number): Promise<void>
 /**
  * Atomic Task Operations
  */
+const normalizeTaskPeriodForPersistence = <T extends Partial<PADEntry>>(task: T): T & {
+  startDate: number;
+  dueDate: number;
+  targetWeeks: string[];
+} => {
+  const period = deriveTaskWeeksFromDateRange(task.startDate, task.dueDate);
+  return {
+    ...task,
+    startDate: Number(task.startDate),
+    dueDate: Number(task.dueDate),
+    targetWeeks: period.targetWeeks
+  };
+};
+
 export const addTask = async (task: PADEntry): Promise<PADEntry> => {
   if (!isSupabaseConfigured()) throw new Error("Supabase not configured")
   try {
+    const normalizedTask = normalizeTaskPeriodForPersistence(task);
     const taskData = {
-      id: task.id,
-      department_id: task.departmentId || null,
-      title: task.title || '',
-      status: task.status || 'draft',
-      priority: task.priority || 'medium',
-      owner_id: task.ownerId || null,
-      aligned_kr_id: task.alignedKrId || null,
-      target_weeks: task.targetWeeks || [],
-      start_date: task.startDate || null,
-      due_date: task.dueDate || null,
-      tags: task.tags || [],
-      participant_ids: task.participantIds || [],
-      approver_ids: task.approverIds || [],
-      logs: task.logs || [],
-      plan: task.plan || null,
-      action: task.action || null,
-      deliverable: task.deliverable || null,
-      task_review: task.taskReview || null,
-      task_review_score: task.taskReviewScore ?? null,
+      id: normalizedTask.id,
+      department_id: normalizedTask.departmentId || null,
+      title: normalizedTask.title || '',
+      status: normalizedTask.status || 'draft',
+      priority: normalizedTask.priority || 'medium',
+      owner_id: normalizedTask.ownerId || null,
+      aligned_kr_id: normalizedTask.alignedKrId || null,
+      target_weeks: normalizedTask.targetWeeks,
+      start_date: normalizedTask.startDate,
+      due_date: normalizedTask.dueDate,
+      tags: normalizedTask.tags || [],
+      participant_ids: normalizedTask.participantIds || [],
+      approver_ids: normalizedTask.approverIds || [],
+      logs: normalizedTask.logs || [],
+      plan: normalizedTask.plan || null,
+      action: normalizedTask.action || null,
+      deliverable: normalizedTask.deliverable || null,
+      task_review: normalizedTask.taskReview || null,
+      task_review_score: normalizedTask.taskReviewScore ?? null,
       row_version: 0
     };
     let data: any = null;
@@ -1375,26 +1792,41 @@ export const addTask = async (task: PADEntry): Promise<PADEntry> => {
 export const updateTask = async (taskId: string, task: Partial<PADEntry>): Promise<PADEntry> => {
   if (!isSupabaseConfigured()) throw new Error("Supabase not configured")
   try {
+    const changesPeriod = task.startDate !== undefined
+      || task.dueDate !== undefined
+      || task.targetWeeks !== undefined;
+    let normalizedTask = task;
+    if (changesPeriod) {
+      const hasCompleteDates = task.startDate !== undefined && task.dueDate !== undefined;
+      const finalTask = hasCompleteDates ? task : { ...(await getTaskById(taskId)), ...task };
+      const normalizedPeriod = normalizeTaskPeriodForPersistence(finalTask);
+      normalizedTask = {
+        ...task,
+        startDate: normalizedPeriod.startDate,
+        dueDate: normalizedPeriod.dueDate,
+        targetWeeks: normalizedPeriod.targetWeeks
+      };
+    }
     const currentRowVersion = normalizeRowVersion(task.rowVersion);
     const taskData: any = {};
-    if (task.departmentId !== undefined) taskData.department_id = task.departmentId;
-    if (task.title !== undefined) taskData.title = task.title;
-    if (task.status !== undefined) taskData.status = task.status;
-    if (task.priority !== undefined) taskData.priority = task.priority;
-    if (task.ownerId !== undefined) taskData.owner_id = task.ownerId;
-    if (task.alignedKrId !== undefined) taskData.aligned_kr_id = task.alignedKrId;
-    if (task.targetWeeks !== undefined) taskData.target_weeks = task.targetWeeks;
-    if (task.startDate !== undefined) taskData.start_date = task.startDate;
-    if (task.dueDate !== undefined) taskData.due_date = task.dueDate;
-    if (task.tags !== undefined) taskData.tags = task.tags;
-    if (task.participantIds !== undefined) taskData.participant_ids = task.participantIds;
-    if (task.approverIds !== undefined) taskData.approver_ids = task.approverIds;
-    if (task.logs !== undefined) taskData.logs = task.logs;
-    if (task.plan !== undefined) taskData.plan = task.plan;
-    if (task.action !== undefined) taskData.action = task.action;
-    if (task.deliverable !== undefined) taskData.deliverable = task.deliverable;
-    if (task.taskReview !== undefined) taskData.task_review = task.taskReview;
-    if (task.taskReviewScore !== undefined) taskData.task_review_score = task.taskReviewScore;
+    if (normalizedTask.departmentId !== undefined) taskData.department_id = normalizedTask.departmentId;
+    if (normalizedTask.title !== undefined) taskData.title = normalizedTask.title;
+    if (normalizedTask.status !== undefined) taskData.status = normalizedTask.status;
+    if (normalizedTask.priority !== undefined) taskData.priority = normalizedTask.priority;
+    if (normalizedTask.ownerId !== undefined) taskData.owner_id = normalizedTask.ownerId;
+    if (normalizedTask.alignedKrId !== undefined) taskData.aligned_kr_id = normalizedTask.alignedKrId;
+    if (normalizedTask.targetWeeks !== undefined) taskData.target_weeks = normalizedTask.targetWeeks;
+    if (normalizedTask.startDate !== undefined) taskData.start_date = normalizedTask.startDate;
+    if (normalizedTask.dueDate !== undefined) taskData.due_date = normalizedTask.dueDate;
+    if (normalizedTask.tags !== undefined) taskData.tags = normalizedTask.tags;
+    if (normalizedTask.participantIds !== undefined) taskData.participant_ids = normalizedTask.participantIds;
+    if (normalizedTask.approverIds !== undefined) taskData.approver_ids = normalizedTask.approverIds;
+    if (normalizedTask.logs !== undefined) taskData.logs = normalizedTask.logs;
+    if (normalizedTask.plan !== undefined) taskData.plan = normalizedTask.plan;
+    if (normalizedTask.action !== undefined) taskData.action = normalizedTask.action;
+    if (normalizedTask.deliverable !== undefined) taskData.deliverable = normalizedTask.deliverable;
+    if (normalizedTask.taskReview !== undefined) taskData.task_review = normalizedTask.taskReview;
+    if (normalizedTask.taskReviewScore !== undefined) taskData.task_review_score = normalizedTask.taskReviewScore;
     taskData.row_version = currentRowVersion + 1;
 
     let data: any = null;

@@ -44,6 +44,26 @@ const DEFAULT_STRATEGY = {
   rowVersion: 0
 };
 
+const isJwtFutureError = (error: any) => {
+  const message = String(error?.message || error || '').toLowerCase();
+  return message.includes('jwt issued at future') || (message.includes('401') && message.includes('jwt'));
+};
+
+const getBootstrapDataWithSessionRecovery = async () => {
+  try {
+    return await withTimeout(getBootstrapData(), 'bootstrap');
+  } catch (error) {
+    if (!isJwtFutureError(error)) throw error;
+
+    const { error: refreshError } = await withTimeout(supabase.auth.refreshSession(), 'session refresh');
+    if (refreshError) {
+      await supabase.auth.signOut({ scope: 'local' });
+      throw new Error('登录会话已失效，请重新登录。');
+    }
+    return await withTimeout(getBootstrapData(), 'bootstrap retry');
+  }
+};
+
 const App: React.FC = () => {
   const { isAuthenticated, login } = useAuthStore();
   const { 
@@ -85,7 +105,7 @@ const App: React.FC = () => {
         setIsInitialLoadComplete(false);
         resetDomainLoadState();
         try {
-          const bootstrapData = await withTimeout(getBootstrapData(), 'bootstrap');
+          const bootstrapData = await getBootstrapDataWithSessionRecovery();
           if (bootstrapData) {
             // Prefer auth_id mapping, fallback to username for legacy email/phone records.
             const user = bootstrapData.users?.find((u) => {

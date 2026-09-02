@@ -5,6 +5,7 @@ import { checkPADQuality } from '../services/gemini';
 import { IMEInput } from './IMEInput';
 import { parseTaskTags } from '../utils/taskTags.js';
 import { getTaskCandidateUsers } from '../data';
+import { getTaskPeriodConsistency, getTaskWeekDisplay, normalizeTaskPeriodFromDates } from '../utils/reviewPeriodConsistency.js';
 
 interface TaskModalProps {
   isOpen: boolean;
@@ -39,7 +40,6 @@ const TaskModal: React.FC<TaskModalProps> = ({
   groupedAvailableKRs,
   mode,
   readOnly = false,
-  periodWeeks = [],
   aiSettings,
   currentUser,
   isAdmin = false,
@@ -213,6 +213,22 @@ const TaskModal: React.FC<TaskModalProps> = ({
   const isEditing = mode === 'edit';
   const canEditOwner = isEditing ? isAdmin : availableOwners.length > 1;
   const isDepartmentReadOnly = readOnly || (!isAdmin && (mode === 'edit' || mode === 'create'));
+  const periodConsistency = getTaskPeriodConsistency(data);
+  const derivedWeekDisplay = getTaskWeekDisplay(periodConsistency.expectedWeeks);
+
+  const updateTaskDate = (field: 'startDate' | 'dueDate', value: string) => {
+    const timestamp = value ? Date.parse(`${value}T12:00:00.000Z`) : undefined;
+    let nextData: Partial<PADEntry> = { ...data, [field]: timestamp };
+    if (nextData.startDate !== undefined && nextData.dueDate !== undefined) {
+      try {
+        nextData = normalizeTaskPeriodFromDates(nextData);
+      } catch {
+        // The validation message is shown after both date fields are complete.
+      }
+    }
+    setData(nextData);
+    if (error) setError(null);
+  };
 
   const handleSave = (status: string, keepOpen?: boolean) => {
     if (isSaving) {
@@ -246,7 +262,16 @@ const TaskModal: React.FC<TaskModalProps> = ({
       return;
     }
 
+    let normalizedData: Partial<PADEntry>;
+    try {
+      normalizedData = normalizeTaskPeriodFromDates(data);
+    } catch (periodError: any) {
+      setError(periodError?.message || '任务日期范围无效');
+      return;
+    }
+
     setError(null);
+    setData(normalizedData);
     onSave(status, keepOpen);
   };
 
@@ -370,10 +395,7 @@ const TaskModal: React.FC<TaskModalProps> = ({
                 disabled={readOnly}
                 className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold outline-none disabled:opacity-50"
                 value={data.startDate ? new Date(data.startDate).toISOString().split('T')[0] : ''}
-                onChange={e => {
-                  setData({ ...data, startDate: new Date(e.target.value).getTime() });
-                  if (error) setError(null);
-                }}
+                onChange={e => updateTaskDate('startDate', e.target.value)}
               />
             </div>
             <div className="flex-1 space-y-2">
@@ -383,10 +405,7 @@ const TaskModal: React.FC<TaskModalProps> = ({
                 disabled={readOnly}
                 className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold outline-none disabled:opacity-50"
                 value={data.dueDate ? new Date(data.dueDate).toISOString().split('T')[0] : ''}
-                onChange={e => {
-                  setData({ ...data, dueDate: new Date(e.target.value).getTime() });
-                  if (error) setError(null);
-                }}
+                onChange={e => updateTaskDate('dueDate', e.target.value)}
               />
             </div>
           </div>
@@ -590,35 +609,15 @@ const TaskModal: React.FC<TaskModalProps> = ({
 
 
           <div className="space-y-2">
-            <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">执行周期 (可多选)</label>
-            <div className="flex flex-wrap gap-2 max-h-32 overflow-y-auto p-2 bg-slate-50 border border-slate-200 rounded-xl custom-scrollbar">
-              {periodWeeks.map(week => {
-                const isSelected = data.targetWeeks?.includes(week.id);
-                return (
-                  <button
-                    key={week.id}
-                    disabled={readOnly}
-                    onClick={() => {
-                      const current = data.targetWeeks || [];
-                      const newTargetWeeks = isSelected 
-                        ? current.filter(id => id !== week.id)
-                        : [...current, week.id];
-                      setData({ ...data, targetWeeks: newTargetWeeks });
-                    }}
-                    className={`px-3 py-1.5 rounded-lg text-[10px] font-black transition-all disabled:opacity-50 ${
-                      isSelected 
-                        ? 'bg-brand-500 text-white shadow-sm' 
-                        : 'bg-white text-slate-500 border border-slate-200 hover:border-brand-300'
-                    }`}
-                  >
-                    {week.label}
-                  </button>
-                );
-              })}
-              {periodWeeks.length === 0 && (
-                <span className="text-xs text-slate-400 italic p-2">暂无可选周期</span>
-              )}
+            <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">所属周</label>
+            <div className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-3 text-xs font-bold text-slate-600">
+              {derivedWeekDisplay?.label || '请选择完整且有效的任务日期'}
             </div>
+            {periodConsistency.status === 'week-mismatch' && (
+              <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-bold text-amber-700">
+                已按任务日期重新计算所属周，保存后将修复旧周期绑定。
+              </div>
+            )}
           </div>
 
           <div className="space-y-2">

@@ -1,4 +1,4 @@
-import { canAssignTaskOwner } from './permissions';
+import { canAssignTaskOwner, getManagedDepartmentIds, isManagerUser } from './permissions';
 
 const toFiniteNumber = (value) => {
   const number = typeof value === 'number' ? value : Number(value);
@@ -12,7 +12,8 @@ export const prepareTaskForPersistence = (
   users,
   systemRoles,
   mode,
-  isAdmin = false
+  isAdmin = false,
+  departments = []
 ) => {
   const entryRowVersion = toFiniteNumber(entry?.rowVersion);
   const previousRowVersion = toFiniteNumber(previousTask?.rowVersion);
@@ -23,13 +24,19 @@ export const prepareTaskForPersistence = (
   const ownerId = isAdmin
     ? requestedOwnerId
     : mode === 'create'
-      ? (canAssignTaskOwner(currentUser, users, requestedOwnerId, systemRoles) ? requestedOwnerId : currentUser.id)
+      ? (canAssignTaskOwner(currentUser, users, requestedOwnerId, systemRoles, departments) ? requestedOwnerId : currentUser.id)
       : previousTask?.ownerId ?? requestedOwnerId;
+  const requestedDepartmentId = entry.departmentId ?? previousTask?.departmentId ?? currentUser.departmentId;
+  const managerDepartmentIds = isManagerUser(currentUser)
+    ? new Set(getManagedDepartmentIds(currentUser, departments))
+    : new Set();
   const departmentId = isAdmin
-    ? entry.departmentId ?? previousTask?.departmentId ?? currentUser.departmentId
+    ? requestedDepartmentId
     : mode === 'create'
-      ? currentUser.departmentId ?? entry.departmentId ?? previousTask?.departmentId
-      : entry.departmentId ?? previousTask?.departmentId ?? currentUser.departmentId;
+      ? (isManagerUser(currentUser) && requestedDepartmentId && managerDepartmentIds.has(requestedDepartmentId)
+        ? requestedDepartmentId
+        : currentUser.departmentId)
+      : requestedDepartmentId;
 
   return {
     ...entry,

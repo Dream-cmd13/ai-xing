@@ -1,0 +1,26 @@
+[Unit]
+Description=AI Xing Public MCP Server
+After=network-online.target
+Wants=network-online.target
+StartLimitInterval=60
+StartLimitBurst=10
+
+[Service]
+Type=simple
+User=ai-xing
+Group=ai-xing
+WorkingDirectory=/opt/ai-xing/mcp-server
+EnvironmentFile=/etc/ai-xing/mcp.env
+ExecStart=/usr/bin/node /opt/ai-xing/mcp-server/src/index.mjs
+Restart=always
+RestartSec=5s
+TimeoutStopSec=30
+LimitNOFILE=65536
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target

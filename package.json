@@ -6,27 +6,30 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "build:secure": "npm run build && npm run scan:dist",
     "lint": "npm run lint:app",
     "lint:app": "tsc --noEmit -p tsconfig.app.json",
-    "preview": "vite preview"
+    "mcp:start": "npm --prefix mcp-server start",
+    "mcp:test": "npm --prefix mcp-server test",
+    "mcp:test:live": "npm --prefix mcp-server run test:live",
+    "preview": "vite preview",
+    "scan:dist": "node scripts/scan-build-secrets.mjs",
+    "package:production": "node scripts/package-production.mjs"
   },
   "dependencies": {
-    "@google/genai": "^1.34.0",
     "@supabase/supabase-js": "^2.105.4",
     "clsx": "^2.1.1",
     "dotenv": "^17.4.2",
-    "lodash": "^4.17.23",
     "lucide-react": "^0.562.0",
     "motion": "^12.38.0",
     "pinyin-pro": "^3.28.1",
     "react": "^19.2.3",
     "react-dom": "^19.2.3",
-    "react-router-dom": "^7.13.2",
+    "react-router-dom": "7.18.2",
     "tailwind-merge": "^3.5.0",
     "zustand": "^5.0.12"
   },
   "devDependencies": {
-    "@types/lodash": "^4.17.24",
     "@types/node": "^22.14.0",
     "@vitejs/plugin-react": "^5.0.0",
     "autoprefixer": "^10.5.0",

@@ -45,12 +45,12 @@ const WorkbenchView: React.FC = () => {
   const setCurrentProcessId = state.setCurrentProcessId;
 
   const today = new Date();
-  const d = new Date(Date.UTC(today.getFullYear(), today.getMonth(), today.getDate()));
-  d.setUTCDate(d.getUTCDate() + 4 - (d.getUTCDay() || 7));
-  const currentYear = d.getUTCFullYear();
-  const currentWeek = getWeekNumber(today);
-  const weekId = `${currentYear}-W${currentWeek.toString().padStart(2, '0')}`;
-  const nextWeekId = `${currentYear}-W${(currentWeek + 1).toString().padStart(2, '0')}`;
+  const currentPeriod = getIsoWeekPeriod(today);
+  const nextWeekDate = new Date(today);
+  nextWeekDate.setDate(nextWeekDate.getDate() + 7);
+  const nextPeriod = getIsoWeekPeriod(nextWeekDate);
+  const weekId = `${currentPeriod.year}-W${currentPeriod.week.toString().padStart(2, '0')}`;
+  const nextWeekId = `${nextPeriod.year}-W${nextPeriod.week.toString().padStart(2, '0')}`;
 
   const [taskModal, setTaskModal] = useState<{ isOpen: boolean, weekId: string | null, mode: 'create' | 'edit', data: Partial<PADEntry> }>({ isOpen: false, weekId: null, mode: 'create', data: {} });
   const { toastState, showToast, clearToast } = usePageToast();
@@ -58,8 +58,8 @@ const WorkbenchView: React.FC = () => {
   const backgroundPrefetchVersionRef = useRef(0);
   const missingTaskUserFetchKeyRef = useRef('');
   const assignableTaskOwners = useMemo(
-    () => getAssignableTaskOwners(currentUser, state.users, state.systemRoles || []),
-    [currentUser, state.users, state.systemRoles]
+    () => getAssignableTaskOwners(currentUser, state.users, state.systemRoles || [], state.departments),
+    [currentUser, state.users, state.systemRoles, state.departments]
   );
 
   useEffect(() => {
@@ -148,7 +148,8 @@ const WorkbenchView: React.FC = () => {
     missingTaskUserFetchKeyRef.current = fetchKey;
 
     let cancelled = false;
-    getTaskUsersForTasks(state.tasks.map(task => task.id))
+    getTaskUsersForTasks(state.tasks.filter((task) => [task.createdBy, task.ownerId, ...(task.participantIds || []), ...(task.approverIds || [])]
+      .some((userId) => userId && missingUserIds.includes(userId))).map(task => task.id))
       .then((loadedUsers) => {
         if (cancelled) return;
         const mergedUsersById = new Map(state.users.map(user => [user.id, user]));
@@ -311,10 +312,9 @@ const WorkbenchView: React.FC = () => {
         newTask.ownerId = oldTask.ownerId;
       }
     } else if (!currentUserIsAdmin) {
-      if (!canAssignTaskOwner(currentUser, state.users, newTask.ownerId, state.systemRoles || [])) {
+      if (!canAssignTaskOwner(currentUser, state.users, newTask.ownerId, state.systemRoles || [], state.departments)) {
         newTask.ownerId = currentUser.id;
       }
-      newTask.departmentId = currentUser.departmentId;
     }
 
     if (!isNewTask) {
@@ -425,7 +425,7 @@ const WorkbenchView: React.FC = () => {
           <div className="flex items-center gap-2 text-xs md:text-sm font-bold text-slate-500 bg-white px-4 py-2 rounded-2xl border shadow-sm">
             <Calendar size={14} className="md:w-4 md:h-4" />
             <span>{today.toLocaleDateString()}</span>
-            <span className="bg-slate-100 px-2 py-0.5 rounded text-[10px] md:text-xs text-slate-600">第 {currentWeek} 周</span>
+            <span className="bg-slate-100 px-2 py-0.5 rounded text-[10px] md:text-xs text-slate-600">第 {currentPeriod.week} 周</span>
           </div>
         </div>
       </div>
@@ -554,12 +554,13 @@ const ColumnLoadingState = ({ label }: { label: string }) => (
   </div>
 );
 
-function getWeekNumber(d: Date) {
-  d = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+function getIsoWeekPeriod(input: Date) {
+  const d = new Date(Date.UTC(input.getFullYear(), input.getMonth(), input.getDate()));
   d.setUTCDate(d.getUTCDate() + 4 - (d.getUTCDay() || 7));
-  var yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
-  var weekNo = Math.ceil((((d.getTime() - yearStart.getTime()) / 86400000) + 1) / 7);
-  return weekNo;
+  const year = d.getUTCFullYear();
+  const yearStart = new Date(Date.UTC(year, 0, 1));
+  const week = Math.ceil((((d.getTime() - yearStart.getTime()) / 86400000) + 1) / 7);
+  return { year, week };
 }
 
 export default WorkbenchView;

@@ -4,15 +4,14 @@ import { useAppStore } from '../store/useAppStore';
 import { useAuthStore } from '../store/useAuthStore';
 import { useAppActions } from '../hooks/useAppActions';
 import { usePageToast } from '../hooks/usePageToast';
-import { usePermissions } from '../hooks/usePermissions';
 
-import { AppState, Department, ReviewEntry, ObjectiveReview, User, PADEntry, MenuPermission, OKR } from '../types';
+import { AppState, Department, ReviewEntry, ObjectiveReview, User, PADEntry, MenuPermission, OKR, DepartmentReviewCapability, DepartmentReviewTaskUpdate } from '../types';
 import { Calendar, Building2, ClipboardCheck, Save, CheckCircle, Loader2, Target, TrendingUp, MessageSquare, FileText, Lock, Download, RefreshCw, ChevronLeft, ChevronRight, PieChart } from 'lucide-react';
 import PageToast from './PageToast';
 import TaskModal from './TaskModal';
-import { getTaskById } from '../data';
+import { getDepartmentReviewCapability, getVisibleTasksForScope, submitDepartmentReviewScoped } from '../data';
 import { getUserFacingError } from '../utils/userFacingError';
-import { canManageReview, canManageTask, getVisibleDepartments, canViewTask, isAdminUser } from '../utils/permissions';
+import { canManageTask, getVisibleDepartments, canViewTask, hasPermission, isAdminUser } from '../utils/permissions';
 import { createTaskOkrGroups } from '../utils/taskOkrOptions';
 import { isTaskInMonthlyPeriod, isTaskInWeeklyPeriod } from '../utils/taskPeriods.js';
 import { readTaskReviewState, updateTaskReviewState } from '../utils/reviewTaskState.js';
@@ -20,6 +19,9 @@ import { createReviewDraftSnapshot, hasReviewDraftChanges, ReviewDraftSnapshot }
 import { syncTaskReviewsToTasks } from '../utils/taskReviewSync';
 import { useLeaveGuard } from '@/hooks/useLeaveGuard';
 import { createTaskOwnerSections, getDepartmentManagerUserIds } from '../utils/taskOwnerGrouping.js';
+import { collectDepartmentIds, flattenDepartmentTree } from '../utils/departmentTree';
+import { upsertTasksById } from '../utils/taskSyncState.js';
+import { getTaskPeriodConsistency, getTaskWeekDisplay } from '../utils/reviewPeriodConsistency.js';
 
 
 
@@ -29,10 +31,8 @@ const ReviewView: React.FC = () => {
 
   const { currentUser } = useAuthStore();
   const actions = useAppActions();
-  const permissions = usePermissions('okr-review');
   const { 
-    handleSave, 
-    handleSetDepartments: setDepartments, handleSetUsers: setUsers, 
+    handleSetUsers: setUsers,
     handleSetSystemRoles: setSystemRoles, handleSetAISettings: setAISettings, 
     handleSetBusinesses: setBusinesses, setProcessData, updateProcessProps, 
     addProcess, deleteProcessFn: deleteProcess, publishProcess, rollbackProcess, 
@@ -43,6 +43,9 @@ const ReviewView: React.FC = () => {
   const showSaveSuccess = state.showSaveSuccess;
   const isDirty = state.isDirty;
   const setIsDirty = state.setIsDirty;
+  const setState = state.setState;
+  const setLastSavedTasks = state.setLastSavedTasks;
+  const setBackendError = state.setBackendError;
   const backendError = state.backendError;
   const currentProcessId = state.currentProcessId;
   const setCurrentProcessId = state.setCurrentProcessId;
@@ -53,7 +56,6 @@ const ReviewView: React.FC = () => {
 
   const [activeTab, setActiveTab] = useState<'weekly' | 'monthly' | 'quarterly'>(initialTab || 'monthly');
   const [selectedDeptId, setSelectedDeptId] = useState<string | null>(initialDeptId || null);
-  
   // Weekly State
   const [selectedWeek, setSelectedWeek] = useState<string>(() => {
     if (initialTab === 'weekly' && initialPeriod) return initialPeriod;
@@ -81,6 +83,12 @@ const ReviewView: React.FC = () => {
   const [reviewScore, setReviewScore] = useState(0);
   const [okrReviews, setOkrReviews] = useState<Record<string, ObjectiveReview>>({});
   const [deptTasks, setDeptTasks] = useState<PADEntry[]>([]);
+  const [isTaskScopeLoading, setIsTaskScopeLoading] = useState(false);
+  const [taskScopeError, setTaskScopeError] = useState<string | null>(null);
+  const [scopedTaskIds, setScopedTaskIds] = useState<Set<string>>(new Set());
+  const [reviewCapability, setReviewCapability] = useState<DepartmentReviewCapability | null>(null);
+  const [reviewCapabilityLoading, setReviewCapabilityLoading] = useState(false);
+  const [reviewCapabilityError, setReviewCapabilityError] = useState<string | null>(null);
   const [currentQuarterlyOkrIndex, setCurrentQuarterlyOkrIndex] = useState(0);
   const [reviewSubTab, setReviewSubTab] = useState<'tasks' | 'weekly-records' | 'okrs'>(
     initialTab === 'quarterly' || initialTab === 'monthly' ? 'okrs' : 'tasks'
@@ -199,10 +207,50 @@ const ReviewView: React.FC = () => {
     () => flatDepts.find(d => d.id === selectedDeptId) || null,
     [flatDepts, selectedDeptId]
   );
-  const canEditReview = useMemo(() => {
-    if (!currentUser || !selectedDept || !permissions.update) return false;
-    return canManageReview(selectedDept, currentUser, state.systemRoles || [], state.departments);
-  }, [currentUser, selectedDept, permissions.update, state.systemRoles, state.departments]);
+  const selectedDepartmentScope = 'exact' as const;
+  const canEditReview = Boolean(
+    selectedDeptId
+    && !reviewCapabilityLoading
+    && reviewCapability?.departmentId === selectedDeptId
+    && reviewCapability.canEdit
+  );
+  const canUpdateTaskMenu = hasPermission(currentUser, state.systemRoles || [], 'task-center', 'update')
+    || hasPermission(currentUser, state.systemRoles || [], 'execution', 'update');
+
+  useEffect(() => {
+    if (!selectedDeptId) {
+      setReviewCapability(null);
+      setReviewCapabilityError(null);
+      setReviewCapabilityLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+    setReviewCapability(null);
+    setReviewCapabilityError(null);
+    setReviewCapabilityLoading(true);
+
+    getDepartmentReviewCapability(selectedDeptId)
+      .then((capability) => {
+        if (cancelled) return;
+        if (!capability.canView || capability.departmentId !== selectedDeptId) {
+          throw new Error('当前账号无权查看该部门复盘。');
+        }
+        setReviewCapability(capability);
+      })
+      .catch((error: any) => {
+        if (cancelled) return;
+        setReviewCapability(null);
+        setReviewCapabilityError(getUserFacingError(error, '部门复盘权限校验失败，当前页面已切换为只读。'));
+      })
+      .finally(() => {
+        if (!cancelled) setReviewCapabilityLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedDeptId]);
 
   const groupedAvailableKRs = useMemo(() => {
     return createTaskOkrGroups({
@@ -246,8 +294,13 @@ const ReviewView: React.FC = () => {
 
     const nextTasks: PADEntry[] = [];
     const seen = new Set<string>();
+    const scopeIndex = flattenDepartmentTree(state.departments, state.users);
+    const scopedDepartmentIds = selectedDeptId
+      ? new Set(collectDepartmentIds(scopeIndex, selectedDeptId, selectedDepartmentScope))
+      : new Set<string>();
 
     (state.tasks || []).forEach(task => {
+      if (activeTab === 'weekly' && !scopedTaskIds.has(task.id)) return;
       const inPeriod = activeTab === 'weekly'
         ? isTaskInWeeklyPeriod(task.targetWeeks, selectedWeek)
         : activeTab === 'monthly'
@@ -258,7 +311,7 @@ const ReviewView: React.FC = () => {
       if (!canViewTask(task, currentUser, state.users, state.systemRoles || [], state.departments)) return;
 
       const taskDeptId = task.departmentId || state.users.find(u => u.id === task.ownerId)?.departmentId;
-      if (taskDeptId === selectedDeptId && !seen.has(task.id)) {
+      if (scopedDepartmentIds.has(taskDeptId || '') && !seen.has(task.id)) {
         seen.add(task.id);
         nextTasks.push(task);
       }
@@ -274,8 +327,10 @@ const ReviewView: React.FC = () => {
     currentUser,
     selectedDept,
     selectedDeptId,
+    selectedDepartmentScope,
     selectedMonth,
     selectedWeek,
+    scopedTaskIds,
     state.departments,
     state.systemRoles,
     state.tasks,
@@ -362,7 +417,9 @@ const ReviewView: React.FC = () => {
 
   const changeSelectedDepartment = (nextDeptId: string) => {
     if ((selectedDeptId || '') === nextDeptId) return;
-    attemptLeave(() => setSelectedDeptId(nextDeptId || null));
+    attemptLeave(() => {
+      setSelectedDeptId(nextDeptId || null);
+    });
   };
 
   const changeSelectedMonthValue = (nextMonth: string) => {
@@ -381,114 +438,132 @@ const ReviewView: React.FC = () => {
   };
 
   const submitReview = async () => {
+    if (isTaskScopeLoading || reviewCapabilityLoading || isSaving) return;
     if (!selectedDeptId) return;
-    if (!canEditReview) {
+    if (!canEditReview || !reviewCapability) {
       showToast('当前部门复盘仅可查看，不能修改。', 'info');
       return;
     }
-    
-    const newEntry: ReviewEntry = {
-        id: `rev-${Date.now()}`,
-        date: Date.now(),
-        content: reviewContent,
-        score: reviewScore,
-        reviewer: currentUser?.name || 'Admin', 
-        okrDetails: okrReviews
-    };
-
-    const periodKey = currentPeriodKey;
-
-    const updateDeptRecursive = (depts: Department[]): Department[] => {
-      return depts.map(d => {
-        if (d.id === selectedDeptId) {
-          const currentReviews = d.reviews || {};
-          return { ...d, reviews: { ...currentReviews, [periodKey]: [newEntry] } };
-        }
-        if (d.subDepartments) {
-          return { ...d, subDepartments: updateDeptRecursive(d.subDepartments) };
-        }
-        return d;
-      });
-    };
-
-    const syncedDeptTasks = syncTaskReviewsToTasks(deptTasks, okrReviews);
-    const syncedTaskMap = new Map(syncedDeptTasks.map((task) => [task.id, task]));
-    const candidateTaskIds = syncedDeptTasks
-      .filter((task) => {
-        // 跳过当前用户无权管理的任务。同步层会把不在 okrReviews 中的任务 taskReview 置为空字符串，
-        // 导致他人任务（数据库中已有复盘内容）被误判为"有变更"，属于假阳性，直接跳过。
-        if (currentUser && !canManageTask(task, currentUser, state.systemRoles || [], state.departments)) return false;
-        const currentTask = state.tasks.find((entry) => entry.id === task.id);
-        if (!currentTask) return false;
-        return (currentTask.deliverable || '') !== (task.deliverable || '')
-          || (currentTask.taskReview || '') !== (task.taskReview || '')
-          || (currentTask.taskReviewScore ?? 0) !== (task.taskReviewScore ?? 0);
-      })
-      .map((task) => task.id);
-
-    try {
-      const latestChangedTasks = candidateTaskIds.length > 0
-        ? await Promise.all(candidateTaskIds.map(async (taskId) => {
-            try {
-              return await getTaskById(taskId);
-            } catch {
-              return state.tasks.find((entry) => entry.id === taskId) || syncedTaskMap.get(taskId)!;
-            }
-          }))
-        : [];
-
-      const unauthorizedTask = currentUser
-        ? latestChangedTasks.find((task) => !canManageTask(task, currentUser, state.systemRoles || [], state.departments))
-        : null;
-
-      if (unauthorizedTask) {
-        showToast(`任务「${unauthorizedTask.title}」属于他人，您无权限修改其实际成果，请联系任务负责人提交复盘。`, 'error');
-        return;
-      }
-
-      const changedTaskMap = new Map(
-        latestChangedTasks
-          .map((latestTask) => {
-            const syncedTask = syncedTaskMap.get(latestTask.id);
-            if (!syncedTask) return null;
-
-            const nextTask = {
-              ...latestTask,
-              deliverable: syncedTask.deliverable || '',
-              taskReview: syncedTask.taskReview || '',
-              taskReviewScore: syncedTask.taskReviewScore ?? 0
-            };
-
-            const hasChanged = (latestTask.deliverable || '') !== (nextTask.deliverable || '')
-              || (latestTask.taskReview || '') !== (nextTask.taskReview || '')
-              || (latestTask.taskReviewScore ?? 0) !== (nextTask.taskReviewScore ?? 0);
-
-            return hasChanged ? [latestTask.id, nextTask] as [string, PADEntry] : null;
-          })
-          .filter((entry): entry is [string, PADEntry] => Boolean(entry))
-      );
-
-      const nextAllTasks = changedTaskMap.size > 0
-        ? state.tasks.map((task) => changedTaskMap.get(task.id) ?? task)
-        : state.tasks;
-
-      if (changedTaskMap.size > 0) {
-        await persistTaskEntries(nextAllTasks, Array.from(changedTaskMap.values()), 'update');
-      }
-    } catch (error: any) {
-      showToast(getUserFacingError(error, '任务复盘保存失败，请稍后重试'), 'error');
+    const inconsistentTask = deptTasks.find((task) => getTaskPeriodConsistency(task).status !== 'valid');
+    if (inconsistentTask) {
+      showToast(`任务「${inconsistentTask.title}」的任务周期尚未修复，当前不能提交复盘。`, 'error');
       return;
     }
 
-    const updatedDepts = updateDeptRecursive(state.departments);
-    setDepartments(updatedDepts);
+    const requestId = typeof crypto?.randomUUID === 'function'
+      ? `web-review-${crypto.randomUUID()}`
+      : `web-review-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    const newEntry: ReviewEntry = {
+      id: `rev-${requestId.slice('web-review-'.length)}`,
+      date: Date.now(),
+      content: reviewContent,
+      score: reviewScore,
+      reviewer: currentUser?.name || '',
+      okrDetails: okrReviews
+    };
+    const periodKey = currentPeriodKey;
+    const syncedDeptTasks = syncTaskReviewsToTasks(deptTasks, okrReviews);
+    let taskUpdates: DepartmentReviewTaskUpdate[];
 
-    const success = await handleSave(['departments']);
-    if (success) {
-      setDeptTasks(syncedDeptTasks);
-      setLoadedDraftSnapshot(currentDraftSnapshot);
+    try {
+      taskUpdates = syncedDeptTasks.flatMap((syncedTask) => {
+        const currentTask = state.tasks.find((entry) => entry.id === syncedTask.id);
+        if (!currentTask) return [];
+
+        const nextReviewState = readTaskReviewState(okrReviews, syncedTask);
+        const previousReviewState = readTaskReviewState(loadedDraftSnapshot.okrReviews, currentTask);
+        if (nextReviewState.state === 'invalid' || previousReviewState.state === 'invalid') {
+          throw new Error(`任务「${currentTask.title}」的复盘槽位数据无效，请先处理历史数据。`);
+        }
+
+        const changes: DepartmentReviewTaskUpdate['changes'] = {};
+        if ((currentTask.deliverable || '') !== (syncedTask.deliverable || '')) {
+          changes.deliverable = syncedTask.deliverable || '';
+        }
+        if (previousReviewState.evaluation !== nextReviewState.evaluation) {
+          changes.taskReview = nextReviewState.evaluation;
+        }
+        if (previousReviewState.score !== nextReviewState.score) {
+          changes.taskReviewScore = nextReviewState.score;
+        }
+        if (Object.keys(changes).length === 0) return [];
+
+        return [{
+          id: currentTask.id,
+          expectedRowVersion: Number(currentTask.rowVersion ?? 0),
+          reviewKey: nextReviewState.reviewKey,
+          krIndex: nextReviewState.krIndex,
+          changes
+        }];
+      });
+    } catch (error: any) {
+      showToast(getUserFacingError(error, '任务复盘数据校验失败，请稍后重试'), 'error');
+      return;
+    }
+
+    state.setIsSaving(true);
+    try {
+      const result = await submitDepartmentReviewScoped({
+        departmentId: selectedDeptId,
+        periodKey,
+        entry: newEntry,
+        taskUpdates,
+        expectedDepartmentRowVersion: reviewCapability.rowVersion,
+        requestId,
+        departmentRootId: reviewCapability.rootId,
+        departmentNodePath: reviewCapability.nodePath
+      });
+
+      const updateTargetReview = (department: Department): Department => {
+        const nextDepartment = department.id === selectedDeptId
+          ? {
+              ...department,
+              reviews: {
+                ...(department.reviews || {}),
+                [periodKey]: [result.reviewEntry]
+              }
+            }
+          : department;
+        if (!nextDepartment.subDepartments?.length) return nextDepartment;
+        return {
+          ...nextDepartment,
+          subDepartments: nextDepartment.subDepartments.map(updateTargetReview)
+        };
+      };
+
+      const latestStore = useAppStore.getState();
+      const nextDepartments = latestStore.departments.map((rootDepartment) => {
+        const nextRoot = updateTargetReview(rootDepartment);
+        return rootDepartment.id === result.rootId
+          ? { ...nextRoot, rowVersion: result.rootRowVersion }
+          : nextRoot;
+      });
+      const nextTasks = upsertTasksById(latestStore.tasks, result.tasks);
+      const nextDeptTasks = upsertTasksById(deptTasks, result.tasks);
+      const savedSnapshot = createReviewDraftSnapshot({
+        content: result.reviewEntry.content || '',
+        score: result.reviewEntry.score || 0,
+        okrReviews: result.reviewEntry.okrDetails || {}
+      });
+
+      setState({ departments: nextDepartments, tasks: nextTasks });
+      state.setLastSavedDepartments(nextDepartments);
+      setLastSavedTasks(upsertTasksById(latestStore.lastSavedTasks, result.tasks));
+      setDeptTasks(nextDeptTasks);
+      setReviewContent(savedSnapshot.content);
+      setReviewScore(savedSnapshot.score);
+      setOkrReviews(savedSnapshot.okrReviews);
+      setLoadedDraftSnapshot(savedSnapshot);
+      setReviewCapability((current) => current ? { ...current, rowVersion: result.rootRowVersion } : current);
       setIsDirty(false);
+      setBackendError(null);
       showToast('复盘报告已提交并保存成功', 'success');
+    } catch (error: any) {
+      const message = getUserFacingError(error, '复盘原子提交失败，请刷新后重试');
+      setBackendError(message);
+      showToast(message, 'error');
+    } finally {
+      state.setIsSaving(false);
     }
   };
 
@@ -510,7 +585,7 @@ const ReviewView: React.FC = () => {
   // Load tasks automatically when selection changes
   useEffect(() => {
     loadDeptTasks();
-  }, [selectedDeptId, selectedWeek, selectedMonth, selectedQuarter, activeTab, state.tasks, state.users, state.systemRoles, currentUser]);
+  }, [selectedDeptId, selectedDepartmentScope, selectedWeek, selectedMonth, selectedQuarter, activeTab, state.tasks, state.users, state.systemRoles, currentUser]);
 
   const currentPeriodLabel = currentPeriodKey;
 
@@ -534,11 +609,51 @@ const ReviewView: React.FC = () => {
       if (!periods.includes(weekKey)) {
         periods.push(weekKey);
       }
-      cursor.setUTCDate(cursor.getUTCDate() + 7);
+      cursor.setUTCDate(cursor.getUTCDate() + 1);
     }
 
     return periods;
   };
+
+  const reviewWeekIds = useMemo(() => {
+    return activeTab === 'weekly' ? [selectedWeek] : [];
+  }, [activeTab, selectedMonth, selectedWeek]);
+
+  useEffect(() => {
+    if (!currentUser?.id || !selectedDeptId || reviewWeekIds.length === 0) {
+      setIsTaskScopeLoading(false);
+      setTaskScopeError(null);
+      if (activeTab === 'weekly') setScopedTaskIds(new Set());
+      return;
+    }
+
+    let cancelled = false;
+    setIsTaskScopeLoading(true);
+    setTaskScopeError(null);
+    setScopedTaskIds(new Set());
+
+    getVisibleTasksForScope(currentUser.id, selectedDeptId, reviewWeekIds, state.users, selectedDepartmentScope)
+      .then((loadedTasks) => {
+        if (cancelled) return;
+        const currentStore = useAppStore.getState();
+        setScopedTaskIds(new Set(loadedTasks.map((task) => task.id)));
+        setState({ tasks: upsertTasksById(currentStore.tasks, loadedTasks) });
+        setLastSavedTasks(upsertTasksById(currentStore.lastSavedTasks, loadedTasks));
+      })
+      .catch((error: any) => {
+        if (cancelled) return;
+        const message = error?.message || '当前周期任务加载失败';
+        setTaskScopeError(message);
+        setBackendError(message);
+      })
+      .finally(() => {
+        if (!cancelled) setIsTaskScopeLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeTab, currentUser?.id, reviewWeekIds, selectedDeptId, selectedDepartmentScope, setBackendError, setLastSavedTasks, setState, state.users]);
 
   const monthlyWeekReviews = useMemo(() => {
     if (!selectedDept || activeTab !== 'monthly') return [];
@@ -739,8 +854,16 @@ const ReviewView: React.FC = () => {
     };
   }, [monthlyWeekReviews]);
   const renderTaskReviewCard = (task: PADEntry) => {
-    const { evaluation, score } = readTaskReviewState(okrReviews, task);
+    const reviewState = readTaskReviewState(okrReviews, task);
+    const { evaluation, score } = reviewState;
+    const reviewDataInvalid = reviewState.state === 'invalid';
     const owner = state.users.find(u => u.id === task.ownerId);
+    const periodConsistency = getTaskPeriodConsistency(task);
+    const periodDataInvalid = periodConsistency.status !== 'valid';
+    const weekDisplay = getTaskWeekDisplay(periodConsistency.expectedWeeks);
+    const canEditDeliverable = canEditReview && canUpdateTaskMenu
+      && !periodDataInvalid
+      && canManageTask(task, currentUser, state.systemRoles || [], state.departments);
 
     return (
       <div key={task.id} className="w-full bg-white p-5 rounded-[1.75rem] border border-slate-100 shadow-sm">
@@ -779,6 +902,18 @@ const ReviewView: React.FC = () => {
             </div>
           </div>
 
+          {reviewDataInvalid && (
+            <div className="rounded-xl border border-red-100 bg-red-50 px-3 py-2 text-xs font-bold text-red-600">
+              复盘数据格式错误（{reviewState.reason}），请先处理该任务的历史数据。
+            </div>
+          )}
+
+          {periodDataInvalid && (
+            <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-bold text-amber-700">
+              任务周期尚未修复，当前任务不能提交复盘。
+            </div>
+          )}
+
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="flex-1">
               <div className="mb-2 flex flex-col gap-1 md:flex-row md:items-center md:justify-between">
@@ -788,7 +923,7 @@ const ReviewView: React.FC = () => {
                 placeholder="输入该任务的预期成果..."
                 className="w-full min-h-[100px] max-h-72 resize-y bg-slate-50 border border-slate-100 rounded-2xl px-4 py-3 text-sm font-medium text-slate-700 outline-none focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500 transition-all leading-6"
                 value={task.deliverable || ''}
-                disabled={!canEditReview}
+                disabled={!canEditDeliverable || reviewDataInvalid || periodDataInvalid}
                 onChange={e => {
                   setDeptTasks((prevTasks) => prevTasks.map((entry) => (
                     entry.id === task.id
@@ -807,7 +942,7 @@ const ReviewView: React.FC = () => {
                 placeholder="输入该任务的实际成果..."
                 className="w-full min-h-[100px] max-h-72 resize-y bg-slate-50 border border-slate-100 rounded-2xl px-4 py-3 text-sm font-medium text-slate-700 outline-none focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500 transition-all leading-6"
                 value={evaluation}
-                disabled={!canEditReview}
+                disabled={!canEditReview || reviewDataInvalid || periodDataInvalid}
                 onChange={e => {
                   updateOkrReviews(
                     updateTaskReviewState(okrReviews, task, {
@@ -914,7 +1049,7 @@ const ReviewView: React.FC = () => {
           </div>
             <button 
               onClick={submitReview} 
-              disabled={isSaving || !hasUnsavedChanges || !canEditReview} 
+              disabled={isSaving || isTaskScopeLoading || !hasUnsavedChanges || !canEditReview}
               className={`px-6 py-2.5 rounded-xl text-xs font-black uppercase flex items-center gap-2 transition-all shadow-md ${hasUnsavedChanges ? 'bg-brand-600 text-white hover:bg-brand-700 shadow-brand-100' : 'bg-slate-100 text-slate-400 cursor-default'}`}
             >
               {isSaving ? <Loader2 className="animate-spin" size={16}/> : <Save size={16} />} 
@@ -935,7 +1070,6 @@ const ReviewView: React.FC = () => {
                       {flatDepts.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
                     </select>
                   </div>
-                  
                   {activeTab === 'monthly' ? (
                     <div className="flex items-center bg-slate-50 border rounded-xl px-4 py-2 gap-2">
                       <Calendar size={14} className="text-slate-400"/>
@@ -992,8 +1126,18 @@ const ReviewView: React.FC = () => {
                </div>
             </div>
 
+            {activeTab !== 'quarterly' && taskScopeError && !isTaskScopeLoading && (
+              <div className="mb-4 rounded-xl border border-red-100 bg-red-50 px-4 py-3 text-xs font-bold text-red-600">
+                {taskScopeError}
+              </div>
+            )}
+            {selectedDeptId && reviewCapabilityError && !reviewCapabilityLoading && (
+              <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs font-bold text-amber-700">
+                {reviewCapabilityError} 当前页面保持只读。
+              </div>
+            )}
             {selectedDeptId ? (
-              <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4">
+              <div className="space-y-8">
                  {/* Overall Review */}
                  <div className="space-y-4">
                     <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
