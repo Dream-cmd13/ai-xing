@@ -52,6 +52,7 @@ function mapRpcError(error) {
   if (message.startsWith('MCP_PERMISSION_DENIED:')) return new AppError('PERMISSION_DENIED');
   if (message.startsWith('MCP_REQUEST_IN_FLIGHT:')) return new AppError('REQUEST_IN_FLIGHT');
   if (message.startsWith('MCP_VALIDATION:')) return new AppError('MCP_VALIDATION', undefined, 400);
+  if (message.startsWith('MCP_TASK_PERIOD_MISMATCH:')) return new AppError('TASK_PERIOD_MISMATCH', undefined, 400);
   if (isMissingRpc(error)) {
     const publicMessage = message.includes('mcp_update_pad_task_with_review_sync')
       ? '任务复盘同步功能尚未启用，请先完成当前版本迁移后重试。'

@@ -470,12 +470,13 @@ test('release readiness requires the complete ordered transactional manifest and
   assertTransactional(sql);
   assert.match(sql, /CREATE TABLE IF NOT EXISTS mcp_internal\.release_contracts/i);
   assert.match(sql, /manifest_digest TEXT NOT NULL CHECK/i);
-  assert.match(sql, new RegExp(EXPECTED_MANIFEST_DIGEST));
+  assert.match(sql, /284d74705f7c31ab645f834f868b349ef7568077ea667502afdf10066a728c0d/);
   assert.match(sql, /contract\.manifest_digest\s*=\s*expected\.manifest_digest/i);
   assert.match(sql, /required_versions JSONB NOT NULL CHECK/i);
   assert.match(sql, /REVOKE ALL ON TABLE mcp_internal\.release_contracts FROM PUBLIC, anon, authenticated, service_role/i);
-  for (const fileName of MIGRATION_MANIFEST.filter((name) => (
-    name !== '2026-08-27_mcp_task_indexes.sql' && name !== '2026-09-01_mcp_release_contract.sql'
+  const oldContractIndex = MIGRATION_MANIFEST.indexOf('2026-09-01_mcp_release_contract.sql');
+  for (const fileName of MIGRATION_MANIFEST.slice(0, oldContractIndex).filter((name) => (
+    name !== '2026-08-27_mcp_task_indexes.sql'
   ))) {
     assert.match(sql, new RegExp(fileName.replace(/\.sql$/i, '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&')), fileName);
   }
@@ -483,8 +484,122 @@ test('release readiness requires the complete ordered transactional manifest and
   assert.match(sql, /'reason'[\s\S]{0,180}'RELEASE_CONTRACT_MISMATCH'/i);
   assert.match(sql, /functionPrivileges/i);
   assert.match(sql, /deferredIndexes/i);
-  assert.match(sql, /has_function_privilege\('authenticated'/i);
-  assert.match(sql, /has_function_privilege\('anon'/i);
+  assert.match(sql, /has_function_privilege\(\s*'authenticated'/i);
+  assert.match(sql, /has_function_privilege\(\s*'anon'/i);
+  assert.match(sql, /GRANT EXECUTE ON FUNCTION public\.mcp_get_readiness\(\) TO anon, authenticated/i);
+  assert.doesNotMatch(sql, /GRANT\s+(?:SELECT|INSERT|UPDATE|DELETE|ALL)\s+ON\s+TABLE/i);
+});
+
+test('child review readiness gate publishes the new release and hardens both web RPCs', async () => {
+  const sql = await migration('2026-09-01_web_child_department_review_readiness_gate.sql');
+
+  assertTransactional(sql);
+  assert.match(sql, /CREATE OR REPLACE FUNCTION public\.mcp_get_readiness\s*\(/i);
+  assert.match(sql, /1e00b4e55a3c355af2c232cb31e26ed8a6568118e582cb8c9ca566a037cae5d4/);
+  assert.match(sql, /2026-09-01_mcp_release_contract/i);
+  assert.match(sql, /2026-09-01_web_child_department_review_contract/i);
+  assert.match(sql, /web_get_department_review_capability\(text\)/i);
+  assert.match(sql, /web_submit_department_review_scoped\(text,text,jsonb,jsonb,bigint,text,text,text\[\]\)/i);
+  assert.match(sql, /has_function_privilege\(\s*'authenticated'/i);
+  assert.match(sql, /has_function_privilege\(\s*'anon'/i);
+  assert.match(sql, /reviewCapabilityRpc/i);
+  assert.match(sql, /reviewAtomicSubmitRpc/i);
+  assert.match(sql, /'migrationVersion',\s*'2026-09-01_web_child_department_review_readiness_gate'/i);
+  assert.match(sql, /GRANT EXECUTE ON FUNCTION public\.mcp_get_readiness\(\) TO anon, authenticated/i);
+  assert.doesNotMatch(sql, /GRANT\s+(?:SELECT|INSERT|UPDATE|DELETE|ALL)\s+ON\s+TABLE/i);
+});
+
+test('web child department review contract is capability-driven and atomically updates review tasks', async () => {
+  const sql = await migration('2026-09-01_web_child_department_review_contract.sql');
+
+  assertTransactional(sql);
+  assert.match(sql, /CREATE OR REPLACE FUNCTION public\.web_get_department_review_capability\s*\(\s*p_department_id TEXT/i);
+  assert.match(sql, /public\.mcp_current_user_can_see_department_node\s*\(\s*n\.node_id\s*\)/i);
+  assert.match(sql, /public\.current_user_can_edit_department_reviews\s*\(\s*v_node\.node_id\s*\)/i);
+  assert.match(sql, /CREATE OR REPLACE FUNCTION public\.web_submit_department_review_scoped\s*\(/i);
+  const submitSql = sql.slice(sql.indexOf('CREATE OR REPLACE FUNCTION public.web_submit_department_review_scoped'));
+  assert.match(submitSql, /public\.mcp_current_user_can_see_department_node\s*\(\s*n\.node_id\s*\)/i);
+  assert.match(sql, /jsonb_array_length\s*\(\s*p_task_updates\s*\)\s*>\s*100/i);
+  assert.match(sql, /ORDER BY\s+update_value->>'id'/i);
+  assert.match(sql, /v_update_key NOT IN\s*\(\s*'id'\s*,\s*'expectedRowVersion'\s*,\s*'reviewKey'\s*,\s*'krIndex'\s*,\s*'changes'\s*\)/i);
+  assert.match(sql, /length\s*\(\s*v_update->>'expectedRowVersion'\s*\)\s*>\s*19/i);
+  assert.match(sql, /FROM public\.tasks[\s\S]{0,180}FOR UPDATE/i);
+  assert.match(sql, /v_old_task\.department_id\s+IS DISTINCT FROM\s+p_department_id/i);
+  assert.match(sql, /target_weeks[\s\S]{0,160}jsonb_build_array\s*\(\s*p_period_key\s*\)/i);
+  assert.match(sql, /v_change_key NOT IN\s*\(\s*'deliverable'\s*,\s*'taskReview'\s*,\s*'taskReviewScore'\s*\)/i);
+  assert.match(sql, /current_user_can_manage_task/i);
+  assert.match(sql, /p_entry->'okrDetails'/i);
+  assert.match(sql, /taskEvaluations/i);
+  assert.match(sql, /taskScores/i);
+  assert.match(sql, /p_kr_index|v_kr_index/i);
+  assert.match(sql, /SELECT \* INTO v_root FROM public\.departments[\s\S]{0,120}FOR UPDATE/i);
+  assert.match(sql, /p_department_node_path\s+IS DISTINCT FROM\s+v_node\.node_path/i);
+  assert.match(sql, /ON CONFLICT\s*\(\s*user_id\s*,\s*tool_name\s*,\s*request_id\s*\)\s*DO NOTHING/i);
+  assert.match(sql, /INSERT INTO public\.mcp_audit_log/i);
+  assert.match(sql, /REVOKE ALL ON FUNCTION public\.web_get_department_review_capability\(TEXT\) FROM PUBLIC, anon, authenticated, service_role/i);
+  assert.match(sql, /REVOKE ALL ON FUNCTION public\.web_submit_department_review_scoped\(TEXT, TEXT, JSONB, JSONB, BIGINT, TEXT, TEXT, TEXT\[\]\) FROM PUBLIC, anon, authenticated, service_role/i);
+  assert.match(sql, /GRANT EXECUTE ON FUNCTION public\.web_get_department_review_capability\(TEXT\) TO authenticated/i);
+  assert.match(sql, /GRANT EXECUTE ON FUNCTION public\.web_submit_department_review_scoped\(TEXT, TEXT, JSONB, JSONB, BIGINT, TEXT, TEXT, TEXT\[\]\) TO authenticated/i);
+  assert.doesNotMatch(sql, /GRANT EXECUTE[^;]+TO anon/i);
+
+  const auditSection = sql.slice(sql.lastIndexOf('INSERT INTO public.mcp_audit_log'));
+  assert.doesNotMatch(auditSection, /p_entry|okrDetails|taskEvaluations|taskScores/i);
+});
+
+test('review task period preflight is read-only and omits business content', async () => {
+  const sql = await readFile(
+    path.join(projectRoot, 'sql', 'preflight', '2026-09-01_review_task_period_consistency.sql'),
+    'utf8',
+  );
+
+  assert.match(sql, /MISSING_DATE/i);
+  assert.match(sql, /DATE_RANGE_REVERSED/i);
+  assert.match(sql, /DATE_RANGE_TOO_LONG/i);
+  assert.match(sql, /INVALID_WEEK/i);
+  assert.match(sql, /WEEK_MISMATCH/i);
+  assert.match(sql, /extra_weeks/i);
+  assert.match(sql, /missing_weeks/i);
+  assert.match(sql, /REVIEW_PERIOD_NOT_IN_DERIVED_WEEKS/i);
+  assert.match(sql, /review_period_key/i);
+  assert.match(sql, /ORDER BY task_id, record_type, review_period_key/i);
+  assert.doesNotMatch(sql, /\b(?:INSERT|UPDATE|DELETE|ALTER|DROP|TRUNCATE|CREATE|GRANT|REVOKE)\b/i);
+  assert.doesNotMatch(sql, /(?:\btitle\b|owner_id|participant|approver|task_review|deliverable|\bcontent\b|\breviewer\b)/i);
+});
+
+test('date-derived task week contract enforces the invariant at the database boundary', async () => {
+  const sql = await migration('2026-09-01_task_date_derived_week_binding_contract.sql');
+
+  assertTransactional(sql);
+  assert.match(sql, /CREATE OR REPLACE FUNCTION public\.mcp_task_weeks_from_dates\s*\(/i);
+  assert.match(sql, /AT TIME ZONE 'Asia\/Shanghai'/i);
+  assert.match(sql, /IYYY-"W"IW/i);
+  assert.match(sql, /最多覆盖 53 个 ISO 周/i);
+  assert.match(sql, /mcp_validate_task_changes_impl_date_weeks_20260901/i);
+  assert.match(sql, /mcp_task_weeks_from_dates\([\s\S]{0,500}MCP_TASK_PERIOD_MISMATCH/i);
+  assert.match(sql, /CREATE TRIGGER mcp_enforce_task_date_weeks_trigger/i);
+  assert.match(sql, /BEFORE INSERT OR UPDATE OF start_date, due_date, target_weeks ON public\.tasks/i);
+  assert.match(sql, /v_dates_changed AND NOT v_weeks_changed[\s\S]{0,120}NEW\.target_weeks := v_expected_weeks/i);
+  assert.match(sql, /REVOKE ALL ON FUNCTION public\.mcp_task_weeks_from_dates\(BIGINT, BIGINT\) FROM PUBLIC, anon, authenticated, service_role/i);
+  assert.doesNotMatch(sql, /GRANT EXECUTE ON FUNCTION public\.mcp_task_weeks_from_dates/i);
+  assert.doesNotMatch(sql, /GRANT\s+(?:SELECT|INSERT|UPDATE|DELETE|ALL)\s+ON\s+TABLE/i);
+});
+
+test('date-derived task week readiness requires canonical data and the complete release', async () => {
+  const sql = await migration('2026-09-01_task_date_derived_week_binding_readiness_gate.sql');
+
+  assertTransactional(sql);
+  assert.match(sql, new RegExp(EXPECTED_MANIFEST_DIGEST));
+  assert.match(sql, /2026-09-01-task-date-weeks/i);
+  assert.match(sql, /2026-09-01_web_child_department_review_readiness_gate/i);
+  assert.match(sql, /2026-09-01_task_date_derived_week_binding_contract/i);
+  assert.match(sql, /mcp_task_weeks_from_dates\(bigint,bigint\)/i);
+  assert.match(sql, /mcp_enforce_task_date_weeks_trigger/i);
+  assert.match(sql, /task_period_data_consistent/i);
+  assert.match(sql, /TASK_PERIOD_DATA_INCONSISTENT/i);
+  assert.match(sql, /'taskDateWeekFunction'/i);
+  assert.match(sql, /'taskDateWeekTrigger'/i);
+  assert.match(sql, /'taskPeriodDataConsistent'/i);
+  assert.match(sql, /'migrationVersion',\s*'2026-09-01_task_date_derived_week_binding_readiness_gate'/i);
   assert.match(sql, /GRANT EXECUTE ON FUNCTION public\.mcp_get_readiness\(\) TO anon, authenticated/i);
   assert.doesNotMatch(sql, /GRANT\s+(?:SELECT|INSERT|UPDATE|DELETE|ALL)\s+ON\s+TABLE/i);
 });

@@ -6,6 +6,14 @@ import {
   checksum, MIGRATION_MANIFEST, RELEASE_ID, runMigrations, unwrapTransaction,
 } from '../scripts/migrate.mjs';
 
+test('publishes date-derived task week migrations as the latest release contract', () => {
+  assert.equal(RELEASE_ID, '2026-09-01-task-date-weeks');
+  assert.deepEqual(MIGRATION_MANIFEST.slice(-2), [
+    '2026-09-01_task_date_derived_week_binding_contract.sql',
+    '2026-09-01_task_date_derived_week_binding_readiness_gate.sql',
+  ]);
+});
+
 function fakeClient(initial = [], { rejectedFunctionDefinition = null, releaseContract = null } = {}) {
   const calls = [];
   const history = new Map(initial.map((row) => [row.version, { ...row }]));

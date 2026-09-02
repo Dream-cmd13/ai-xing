@@ -104,7 +104,7 @@ test('prepare_create_pad_task only previews and issues a bound confirmation toke
   assert.equal(confirmationStore.calls[0][1].toolName, 'commit_create_pad_task');
 });
 
-test('prepare create preserves a partially explicit period without filling other fields', async () => {
+test('prepare create rejects a partially explicit date range', async () => {
   const repository = fakeRepository();
   const tools = captureTools(repository, fakeConfirmationStore(), { now: () => Date.parse('2026-08-25T03:00:00.000Z') });
 
@@ -112,10 +112,9 @@ test('prepare create preserves a partially explicit period without filling other
     payload: { title: '自定义日期任务', startDate: 123 },
   });
 
-  assert.equal(result.isError, false);
-  assert.deepEqual(result.structuredContent.confirmation.parameterSummary.payload, {
-    title: '自定义日期任务', startDate: 123, ownerId: 'user-1', departmentId: 'dept-1', status: 'draft',
-  });
+  assert.equal(result.isError, true);
+  assert.equal(jsonContent(result).code, 'INVALID_ARGUMENT');
+  assert.equal(repository.calls.length, 0);
 });
 
 test('commit reuses the period fixed by prepare even after the current week changes', async () => {
@@ -491,7 +490,7 @@ test('prepare_create_pad_task derives dates from targetWeeks when dates are abse
   assert.equal(repository.calls[0][1].payload.startDate, 1787572800000);
 });
 
-test('prepare create keeps explicit dates and fills only the missing one', async () => {
+test('prepare create rejects weeks combined with only one explicit date', async () => {
   const repository = fakeRepository();
   const tools = captureTools(repository, fakeConfirmationStore(), { now: () => Date.parse('2026-08-25T03:00:00.000Z') });
 
@@ -499,12 +498,9 @@ test('prepare create keeps explicit dates and fills only the missing one', async
     payload: { title: '自定义开始任务', targetWeeks: ['2026-W35'], startDate: 123 },
   });
 
-  assert.equal(result.isError, false);
-  assert.deepEqual(result.structuredContent.confirmation.parameterSummary.payload, {
-    title: '自定义开始任务', targetWeeks: ['2026-W35'], startDate: 123,
-    ownerId: 'user-1', departmentId: 'dept-1', status: 'draft',
-    dueDate: 1788091200000,
-  });
+  assert.equal(result.isError, true);
+  assert.equal(jsonContent(result).code, 'INVALID_ARGUMENT');
+  assert.equal(repository.calls.length, 0);
 });
 
 test('prepare create rejects a nonexistent ISO week when dates must be derived', async () => {
@@ -564,7 +560,7 @@ test('prepare_update_pad_task fills empty dates when targetWeeks are added', asy
   assert.deepEqual(result.structuredContent.confirmation.parameterSummary.new, expected);
 });
 
-test('prepare update keeps existing task dates and explicit change values untouched', async () => {
+test('prepare update rejects partial historical dates and leaves unrelated changes untouched', async () => {
   const tools = captureTools(fakeRepository({
     async prepareUpdatePadTask(input) {
       return {
@@ -575,27 +571,68 @@ test('prepare update keeps existing task dates and explicit change values untouc
     },
   }), fakeConfirmationStore());
 
-  // 任务已有 start_date 时只补 dueDate。
   const partial = await tools.get('prepare_update_pad_task').handler({
     taskId: 'task-1', changes: { targetWeeks: ['2026-W35'] },
   });
-  assert.deepEqual(partial.structuredContent.changes, {
-    targetWeeks: ['2026-W35'], dueDate: 1788091200000,
-  });
+  assert.equal(partial.isError, true);
+  assert.equal(jsonContent(partial).code, 'INVALID_ARGUMENT');
 
-  // 更新中显式传入的 startDate 不被覆盖。
   const explicit = await tools.get('prepare_update_pad_task').handler({
     taskId: 'task-1', changes: { targetWeeks: ['2026-W35'], startDate: 222 },
   });
-  assert.deepEqual(explicit.structuredContent.changes, {
-    targetWeeks: ['2026-W35'], startDate: 222, dueDate: 1788091200000,
-  });
+  assert.equal(explicit.isError, true);
+  assert.equal(jsonContent(explicit).code, 'INVALID_ARGUMENT');
 
-  // 未新增 targetWeeks 时不填充。
   const untouched = await tools.get('prepare_update_pad_task').handler({
     taskId: 'task-1', changes: { title: '新标题' },
   });
   assert.deepEqual(untouched.structuredContent.changes, { title: '新标题' });
+});
+
+test('prepare create rejects conflicting dates and target weeks with a stable code', async () => {
+  const repository = fakeRepository();
+  const tools = captureTools(repository, fakeConfirmationStore());
+  const result = await tools.get('prepare_create_pad_task').handler({
+    payload: {
+      title: '冲突周期任务',
+      startDate: Date.UTC(2026, 5, 29, 12),
+      dueDate: Date.UTC(2026, 6, 5, 12),
+      targetWeeks: ['2026-W39'],
+    },
+  });
+  assert.equal(result.isError, true);
+  assert.equal(jsonContent(result).code, 'TASK_PERIOD_MISMATCH');
+  assert.equal(repository.calls.length, 0);
+});
+
+test('prepare update derives weeks from the final merged dates', async () => {
+  const repository = fakeRepository({
+    async prepareUpdatePadTask(input) {
+      repository.calls.push(['prepareUpdate', input]);
+      return {
+        current: {
+          id: input.taskId,
+          start_date: Date.UTC(2026, 5, 29, 12),
+          due_date: Date.UTC(2026, 6, 5, 12),
+          target_weeks: ['2026-W27'],
+          row_version: 3,
+        },
+        expectedRowVersion: 3,
+        changes: input.changes,
+      };
+    },
+  });
+  const tools = captureTools(repository, fakeConfirmationStore());
+  const result = await tools.get('prepare_update_pad_task').handler({
+    taskId: 'task-1',
+    changes: { dueDate: Date.UTC(2026, 6, 12, 12) },
+  });
+  assert.equal(result.isError, false);
+  assert.deepEqual(result.structuredContent.changes, {
+    dueDate: Date.UTC(2026, 6, 12, 12),
+    targetWeeks: ['2026-W27', '2026-W28'],
+    startDate: Date.UTC(2026, 5, 29, 12),
+  });
 });
 
 test('commit_update_pad_task derives the same dates through the confirmation digest', async () => {

@@ -4,11 +4,23 @@ import assert from 'node:assert/strict';
 import {
   applyDefaultTaskPeriod,
   deriveTaskPeriodFromWeeks,
+  deriveTaskWeeksFromDateRange,
   fillTaskPeriodFromTargetWeeks,
   getCurrentIsoWeekPeriod,
   getIsoWeekRange,
 } from '../src/task-period-defaults.mjs';
 import { AppError } from '../src/errors.mjs';
+import { taskPeriodVectors } from './fixtures/task-period-vectors.mjs';
+
+for (const vector of taskPeriodVectors) {
+  test(`MCP derives ${vector.name}`, () => {
+    assert.deepEqual(deriveTaskWeeksFromDateRange(vector.startDate, vector.dueDate), {
+      startDay: vector.startDay,
+      dueDay: vector.dueDay,
+      targetWeeks: [...vector.targetWeeks],
+    });
+  });
+}
 
 function calendarParts(ms, timeZone) {
   const parts = new Intl.DateTimeFormat('en-CA', {
@@ -55,13 +67,14 @@ test('fills the whole task period only when all three fields are absent', () => 
     dueDate: Date.UTC(2026, 7, 30, 12),
   });
 
-  for (const explicit of [
-    { targetWeeks: ['2026-W36'] },
-    { startDate: 123 },
-    { dueDate: 456 },
-  ]) {
-    assert.deepEqual(applyDefaultTaskPeriod({ title: '任务', ...explicit }, now), { title: '任务', ...explicit });
-  }
+  assert.deepEqual(applyDefaultTaskPeriod({ title: '任务', targetWeeks: ['2026-W36'] }, now), {
+    title: '任务',
+    targetWeeks: ['2026-W36'],
+    startDate: Date.UTC(2026, 7, 31, 12),
+    dueDate: Date.UTC(2026, 8, 6, 12),
+  });
+  assert.throws(() => applyDefaultTaskPeriod({ title: '任务', startDate: 123 }, now), /同时提供/);
+  assert.throws(() => applyDefaultTaskPeriod({ title: '任务', dueDate: 456 }, now), /同时提供/);
 });
 
 test('getIsoWeekRange matches the calibrated production timestamps for 2026-W35', () => {
@@ -160,36 +173,31 @@ test('deriveTaskPeriodFromWeeks rejects nonexistent ISO weeks', () => {
   });
 });
 
-test('fillTaskPeriodFromTargetWeeks fills empty dates without overriding explicit values', () => {
+test('fillTaskPeriodFromTargetWeeks normalizes weeks-only input and verifies date conflicts', () => {
   const week35 = { startDate: 1787572800000, dueDate: 1788091200000 };
 
   assert.deepEqual(fillTaskPeriodFromTargetWeeks({ title: '任务', targetWeeks: ['2026-W35'] }), {
     title: '任务', targetWeeks: ['2026-W35'], ...week35,
   });
 
-  // 只缺截止时间时仅填充 dueDate。
-  assert.deepEqual(fillTaskPeriodFromTargetWeeks({ targetWeeks: ['2026-W35'], startDate: 123 }), {
-    targetWeeks: ['2026-W35'], startDate: 123, dueDate: week35.dueDate,
+  assert.deepEqual(fillTaskPeriodFromTargetWeeks({ targetWeeks: ['2026-W36', '2026-W35'] }), {
+    targetWeeks: ['2026-W35', '2026-W36'],
+    startDate: Date.UTC(2026, 7, 24, 12),
+    dueDate: Date.UTC(2026, 8, 6, 12),
   });
 
-  // 显式传入的值一律不覆盖。
-  assert.deepEqual(fillTaskPeriodFromTargetWeeks({ targetWeeks: ['2026-W35'], startDate: 123, dueDate: 456 }), {
-    targetWeeks: ['2026-W35'], startDate: 123, dueDate: 456,
-  });
-
-  // 没有 targetWeeks 或为空数组时不填充。
   assert.deepEqual(fillTaskPeriodFromTargetWeeks({ title: '任务' }), { title: '任务' });
-  assert.deepEqual(fillTaskPeriodFromTargetWeeks({ targetWeeks: [] }), { targetWeeks: [] });
+  assert.throws(() => fillTaskPeriodFromTargetWeeks({ targetWeeks: [] }), /不能为空/);
+  assert.throws(() => fillTaskPeriodFromTargetWeeks({ targetWeeks: ['2026-W35'], startDate: 123 }), /同时提供/);
+  assert.throws(() => fillTaskPeriodFromTargetWeeks({ targetWeeks: ['2026-W35'], dueDate: 456 }), /同时提供/);
+  assert.throws(() => fillTaskPeriodFromTargetWeeks({
+    targetWeeks: ['2026-W35'],
+    startDate: Date.UTC(2026, 7, 24, 12),
+    dueDate: Date.UTC(2026, 8, 6, 12),
+  }), (error) => error.code === 'TASK_PERIOD_MISMATCH');
 
-  // 两日期均已显式提供时即使周次无效也不报错。
-  assert.deepEqual(fillTaskPeriodFromTargetWeeks({ targetWeeks: ['2025-W53'], startDate: 1, dueDate: 2 }), {
-    targetWeeks: ['2025-W53'], startDate: 1, dueDate: 2,
-  });
-
-  // 需要推导但周次不存在时拒绝。
   assert.throws(() => fillTaskPeriodFromTargetWeeks({ targetWeeks: ['2025-W53'] }), (error) => {
     assert.equal(error.code, 'INVALID_ARGUMENT');
     return true;
   });
 });
-

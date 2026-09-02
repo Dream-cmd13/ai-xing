@@ -24,6 +24,7 @@ const ALLOWED_FILES = Object.freeze([
   'mcp-server/package-lock.json',
   'mcp-server/.env.example',
   'mcp-server/scripts/migrate.mjs',
+  'mcp-server/scripts/backfill-task-period.mjs',
   'deploy/systemd/ai-xing-mcp.service.example',
   'deploy/nginx/mcp-location.conf.example',
   'docs/mcp-production-deployment-preparation.md',
@@ -32,6 +33,10 @@ const ALLOWED_FILES = Object.freeze([
 // is deliberately kept outside MIGRATION_MANIFEST and the migration ledger.
 const READ_ONLY_PREFLIGHT_FILES = Object.freeze([
   'sql/2026-08-27_mcp_review_data_scan.sql',
+  'sql/preflight/2026-09-01_review_task_period_consistency.sql',
+]);
+const APPROVED_MAINTENANCE_SCRIPTS = new Set([
+  'mcp-server/scripts/backfill-task-period.mjs',
 ]);
 const ALLOWED_DIRECTORIES = Object.freeze(['dist', 'mcp-server/src']);
 const TEXT_EXTENSIONS = new Set(['.conf', '.css', '.example', '.html', '.ini', '.js', '.json', '.md', '.mjs', '.sql', '.svg', '.txt']);
@@ -101,7 +106,8 @@ async function validatePackage(outputRoot) {
     if (basename === '.env') findings.push({ rule: 'environment-file', file: relative });
     if (segments.includes('local-test-files')) findings.push({ rule: 'local-test-files', file: relative });
     if (/\.(?:log|tmp)$/i.test(relative)) findings.push({ rule: 'runtime-output', file: relative });
-    if (/\/(?:diagnose[^/]*|backfill[^/]*|live-smoke)\.mjs$/i.test(`/${relative}`)) {
+    if (/\/(?:diagnose[^/]*|backfill[^/]*|live-smoke)\.mjs$/i.test(`/${relative}`)
+      && !APPROVED_MAINTENANCE_SCRIPTS.has(relative)) {
       findings.push({ rule: 'unsafe-script', file: relative });
     }
     if (relative.toLowerCase().endsWith('.sql') && !allowedSql.has(relative)) {

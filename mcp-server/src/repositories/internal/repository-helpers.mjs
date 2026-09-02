@@ -55,6 +55,7 @@ export function mapRpcError(error) {
   }
   if (message.startsWith('MCP_PERMISSION_DENIED:')) return new AppError('PERMISSION_DENIED');
   if (message.startsWith('MCP_VALIDATION:')) return new AppError('MCP_VALIDATION', undefined, 400);
+  if (message.startsWith('MCP_TASK_PERIOD_MISMATCH:')) return new AppError('TASK_PERIOD_MISMATCH', undefined, 400);
   if (message.startsWith('MCP_USER_NOT_FOUND:')) return new AppError('USER_NOT_FOUND');
   if (message.startsWith('MCP_USER_NAME_AMBIGUOUS:')) return new AppError('USER_NAME_AMBIGUOUS');
   if (message.startsWith('MCP_DEPARTMENT_NOT_FOUND:')) return new AppError('DEPARTMENT_NOT_FOUND');

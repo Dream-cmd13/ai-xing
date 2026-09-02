@@ -1,7 +1,8 @@
 
-import { AppState, User, Department, ProcessDefinition, CompanyStrategy, BusinessDefinition, SystemRole, PADEntry, AIModelConfig, AISettings, UserRole } from "./types";
+import { AppState, User, Department, ProcessDefinition, CompanyStrategy, BusinessDefinition, SystemRole, PADEntry, AIModelConfig, AISettings, UserRole, DepartmentReviewCapability, DepartmentReviewSubmitInput, DepartmentReviewSubmitResult } from "./types";
 import { isSupabaseConfigured, supabase } from "./supabase";
 import { isMissingTaskReviewColumnError, omitTaskReviewColumns, stripTaskReviewFieldsFromSelect } from "./utils/taskSchemaCompat";
+import { deriveTaskWeeksFromDateRange } from "./utils/reviewPeriodConsistency.js";
 
 /**
  * StratFlow AI 数据持久化层 (Data Access Layer) - Supabase Relational Version (Single Tenant)
@@ -231,27 +232,27 @@ const mapSystemRoleRow = (r: any): SystemRole => ({
 
 const mapTaskRow = (t: any): PADEntry => ({
   id: t.id,
-  createdBy: t.created_by ?? t.owner_id,
+  createdBy: t.createdBy ?? t.created_by ?? t.ownerId ?? t.owner_id,
   title: t.title,
   status: t.status,
   priority: t.priority,
-  ownerId: t.owner_id,
-  departmentId: t.department_id,
-  alignedKrId: t.aligned_kr_id,
-  targetWeeks: t.target_weeks || [],
-  startDate: t.start_date,
-  dueDate: t.due_date,
+  ownerId: t.ownerId ?? t.owner_id,
+  departmentId: t.departmentId ?? t.department_id,
+  alignedKrId: t.alignedKrId ?? t.aligned_kr_id,
+  targetWeeks: t.targetWeeks ?? t.target_weeks ?? [],
+  startDate: t.startDate ?? t.start_date,
+  dueDate: t.dueDate ?? t.due_date,
   tags: t.tags || [],
-  participantIds: t.participant_ids || [],
-  approverIds: t.approver_ids || [],
+  participantIds: t.participantIds ?? t.participant_ids ?? [],
+  approverIds: t.approverIds ?? t.approver_ids ?? [],
   logs: t.logs || [],
   plan: t.plan,
   action: t.action,
   deliverable: t.deliverable,
-  taskReview: t.task_review,
-  taskReviewScore: t.task_review_score,
-  updatedAt: t.updated_at,
-  rowVersion: normalizeRowVersion(t.row_version)
+  taskReview: t.taskReview ?? t.task_review,
+  taskReviewScore: t.taskReviewScore ?? t.task_review_score,
+  updatedAt: t.updatedAt ?? t.updated_at,
+  rowVersion: normalizeRowVersion(t.rowVersion ?? t.row_version)
 });
 
 const USERS_SELECT_FIELDS = 'id,auth_id,username,name,role,department_id,pad_permissions,reviews,system_role_ids,custom_permissions,updated_at,row_version';
@@ -1451,6 +1452,116 @@ export const saveDepartmentsAtomically = async (
   }
 };
 
+export const getDepartmentReviewCapability = async (
+  departmentId: string
+): Promise<DepartmentReviewCapability> => {
+  if (!isSupabaseConfigured()) throw new Error("Supabase not configured");
+  try {
+    const { data, error } = await supabase.rpc('web_get_department_review_capability', {
+      p_department_id: departmentId
+    });
+    if (isIgnoredMissingFunctionError(error)) {
+      throw buildRpcNotConfiguredError('部门复盘权限校验');
+    }
+    if (error) throw error;
+    if (!data || typeof data !== 'object' || Array.isArray(data)) {
+      throw new Error('部门复盘权限校验返回了无效结果。');
+    }
+
+    const capability = data as Record<string, any>;
+    const normalizedDepartmentId = String(capability.departmentId ?? capability.department_id ?? '');
+    const normalizedRootId = String(capability.rootId ?? capability.root_id ?? '');
+    const normalizedNodePath = normalizeStringArray(capability.nodePath ?? capability.node_path) ?? [];
+    const normalizedRowVersion = Number(capability.rowVersion ?? capability.row_version);
+    const canView = capability.canView ?? capability.can_view;
+    const canEdit = capability.canEdit ?? capability.can_edit;
+    if (
+      !normalizedDepartmentId
+      || !normalizedRootId
+      || normalizedNodePath.length === 0
+      || normalizedNodePath[0] !== normalizedRootId
+      || normalizedNodePath[normalizedNodePath.length - 1] !== normalizedDepartmentId
+      || !Number.isSafeInteger(normalizedRowVersion)
+      || normalizedRowVersion < 0
+      || typeof canView !== 'boolean'
+      || typeof canEdit !== 'boolean'
+    ) {
+      throw new Error('部门复盘权限校验返回了不完整结果。');
+    }
+    return {
+      departmentId: normalizedDepartmentId,
+      rootId: normalizedRootId,
+      nodePath: normalizedNodePath,
+      rowVersion: normalizedRowVersion,
+      canView,
+      canEdit
+    };
+  } catch (e) {
+    handleSupabaseError(e);
+    throw e;
+  }
+};
+
+export const submitDepartmentReviewScoped = async (
+  input: DepartmentReviewSubmitInput
+): Promise<DepartmentReviewSubmitResult> => {
+  if (!isSupabaseConfigured()) throw new Error("Supabase not configured");
+  try {
+    const { data, error } = await supabase.rpc('web_submit_department_review_scoped', {
+      p_department_id: input.departmentId,
+      p_period_key: input.periodKey,
+      p_entry: input.entry,
+      p_task_updates: input.taskUpdates,
+      p_expected_department_row_version: input.expectedDepartmentRowVersion,
+      p_request_id: input.requestId,
+      p_department_root_id: input.departmentRootId,
+      p_department_node_path: input.departmentNodePath
+    });
+    if (isIgnoredMissingFunctionError(error)) {
+      throw buildRpcNotConfiguredError('部门复盘原子提交');
+    }
+    if (error) throw error;
+    if (!data || typeof data !== 'object' || Array.isArray(data)) {
+      throw new Error('部门复盘提交返回了无效结果。');
+    }
+
+    const result = data as Record<string, any>;
+    const reviewEntry = result.reviewEntry ?? result.review_entry;
+    if (!reviewEntry || typeof reviewEntry !== 'object' || Array.isArray(reviewEntry)) {
+      throw new Error('部门复盘提交未返回规范化复盘记录。');
+    }
+    const normalizedDepartmentId = String(result.departmentId ?? result.department_id ?? '');
+    const normalizedPeriodKey = String(result.periodKey ?? result.period_key ?? '');
+    const normalizedRootId = String(result.rootId ?? result.root_id ?? '');
+    const normalizedRootRowVersion = Number(result.rootRowVersion ?? result.root_row_version);
+    if (
+      normalizedDepartmentId !== input.departmentId
+      || normalizedPeriodKey !== input.periodKey
+      || normalizedRootId !== input.departmentRootId
+      || !Number.isSafeInteger(normalizedRootRowVersion)
+      || normalizedRootRowVersion <= input.expectedDepartmentRowVersion
+      || !Array.isArray(result.tasks)
+      || result.tasks.some((task: any) => !task || typeof task !== 'object' || typeof task.id !== 'string')
+    ) {
+      throw new Error('部门复盘提交返回了不完整结果。');
+    }
+
+    invalidateVisibleTaskScopeCache();
+    return {
+      replayed: result.replayed === true,
+      departmentId: normalizedDepartmentId,
+      periodKey: normalizedPeriodKey,
+      reviewEntry: reviewEntry as any,
+      tasks: result.tasks.map(mapTaskRow),
+      rootId: normalizedRootId,
+      rootRowVersion: normalizedRootRowVersion
+    };
+  } catch (e) {
+    handleSupabaseError(e);
+    throw e;
+  }
+};
+
 export const saveProcessesAtomically = async (
   nextProcesses: ProcessDefinition[],
   previousProcesses: ProcessDefinition[]
@@ -1616,29 +1727,44 @@ export const deleteUser = async (id: string, rowVersion?: number): Promise<void>
 /**
  * Atomic Task Operations
  */
+const normalizeTaskPeriodForPersistence = <T extends Partial<PADEntry>>(task: T): T & {
+  startDate: number;
+  dueDate: number;
+  targetWeeks: string[];
+} => {
+  const period = deriveTaskWeeksFromDateRange(task.startDate, task.dueDate);
+  return {
+    ...task,
+    startDate: Number(task.startDate),
+    dueDate: Number(task.dueDate),
+    targetWeeks: period.targetWeeks
+  };
+};
+
 export const addTask = async (task: PADEntry): Promise<PADEntry> => {
   if (!isSupabaseConfigured()) throw new Error("Supabase not configured")
   try {
+    const normalizedTask = normalizeTaskPeriodForPersistence(task);
     const taskData = {
-      id: task.id,
-      department_id: task.departmentId || null,
-      title: task.title || '',
-      status: task.status || 'draft',
-      priority: task.priority || 'medium',
-      owner_id: task.ownerId || null,
-      aligned_kr_id: task.alignedKrId || null,
-      target_weeks: task.targetWeeks || [],
-      start_date: task.startDate || null,
-      due_date: task.dueDate || null,
-      tags: task.tags || [],
-      participant_ids: task.participantIds || [],
-      approver_ids: task.approverIds || [],
-      logs: task.logs || [],
-      plan: task.plan || null,
-      action: task.action || null,
-      deliverable: task.deliverable || null,
-      task_review: task.taskReview || null,
-      task_review_score: task.taskReviewScore ?? null,
+      id: normalizedTask.id,
+      department_id: normalizedTask.departmentId || null,
+      title: normalizedTask.title || '',
+      status: normalizedTask.status || 'draft',
+      priority: normalizedTask.priority || 'medium',
+      owner_id: normalizedTask.ownerId || null,
+      aligned_kr_id: normalizedTask.alignedKrId || null,
+      target_weeks: normalizedTask.targetWeeks,
+      start_date: normalizedTask.startDate,
+      due_date: normalizedTask.dueDate,
+      tags: normalizedTask.tags || [],
+      participant_ids: normalizedTask.participantIds || [],
+      approver_ids: normalizedTask.approverIds || [],
+      logs: normalizedTask.logs || [],
+      plan: normalizedTask.plan || null,
+      action: normalizedTask.action || null,
+      deliverable: normalizedTask.deliverable || null,
+      task_review: normalizedTask.taskReview || null,
+      task_review_score: normalizedTask.taskReviewScore ?? null,
       row_version: 0
     };
     let data: any = null;
@@ -1666,26 +1792,41 @@ export const addTask = async (task: PADEntry): Promise<PADEntry> => {
 export const updateTask = async (taskId: string, task: Partial<PADEntry>): Promise<PADEntry> => {
   if (!isSupabaseConfigured()) throw new Error("Supabase not configured")
   try {
+    const changesPeriod = task.startDate !== undefined
+      || task.dueDate !== undefined
+      || task.targetWeeks !== undefined;
+    let normalizedTask = task;
+    if (changesPeriod) {
+      const hasCompleteDates = task.startDate !== undefined && task.dueDate !== undefined;
+      const finalTask = hasCompleteDates ? task : { ...(await getTaskById(taskId)), ...task };
+      const normalizedPeriod = normalizeTaskPeriodForPersistence(finalTask);
+      normalizedTask = {
+        ...task,
+        startDate: normalizedPeriod.startDate,
+        dueDate: normalizedPeriod.dueDate,
+        targetWeeks: normalizedPeriod.targetWeeks
+      };
+    }
     const currentRowVersion = normalizeRowVersion(task.rowVersion);
     const taskData: any = {};
-    if (task.departmentId !== undefined) taskData.department_id = task.departmentId;
-    if (task.title !== undefined) taskData.title = task.title;
-    if (task.status !== undefined) taskData.status = task.status;
-    if (task.priority !== undefined) taskData.priority = task.priority;
-    if (task.ownerId !== undefined) taskData.owner_id = task.ownerId;
-    if (task.alignedKrId !== undefined) taskData.aligned_kr_id = task.alignedKrId;
-    if (task.targetWeeks !== undefined) taskData.target_weeks = task.targetWeeks;
-    if (task.startDate !== undefined) taskData.start_date = task.startDate;
-    if (task.dueDate !== undefined) taskData.due_date = task.dueDate;
-    if (task.tags !== undefined) taskData.tags = task.tags;
-    if (task.participantIds !== undefined) taskData.participant_ids = task.participantIds;
-    if (task.approverIds !== undefined) taskData.approver_ids = task.approverIds;
-    if (task.logs !== undefined) taskData.logs = task.logs;
-    if (task.plan !== undefined) taskData.plan = task.plan;
-    if (task.action !== undefined) taskData.action = task.action;
-    if (task.deliverable !== undefined) taskData.deliverable = task.deliverable;
-    if (task.taskReview !== undefined) taskData.task_review = task.taskReview;
-    if (task.taskReviewScore !== undefined) taskData.task_review_score = task.taskReviewScore;
+    if (normalizedTask.departmentId !== undefined) taskData.department_id = normalizedTask.departmentId;
+    if (normalizedTask.title !== undefined) taskData.title = normalizedTask.title;
+    if (normalizedTask.status !== undefined) taskData.status = normalizedTask.status;
+    if (normalizedTask.priority !== undefined) taskData.priority = normalizedTask.priority;
+    if (normalizedTask.ownerId !== undefined) taskData.owner_id = normalizedTask.ownerId;
+    if (normalizedTask.alignedKrId !== undefined) taskData.aligned_kr_id = normalizedTask.alignedKrId;
+    if (normalizedTask.targetWeeks !== undefined) taskData.target_weeks = normalizedTask.targetWeeks;
+    if (normalizedTask.startDate !== undefined) taskData.start_date = normalizedTask.startDate;
+    if (normalizedTask.dueDate !== undefined) taskData.due_date = normalizedTask.dueDate;
+    if (normalizedTask.tags !== undefined) taskData.tags = normalizedTask.tags;
+    if (normalizedTask.participantIds !== undefined) taskData.participant_ids = normalizedTask.participantIds;
+    if (normalizedTask.approverIds !== undefined) taskData.approver_ids = normalizedTask.approverIds;
+    if (normalizedTask.logs !== undefined) taskData.logs = normalizedTask.logs;
+    if (normalizedTask.plan !== undefined) taskData.plan = normalizedTask.plan;
+    if (normalizedTask.action !== undefined) taskData.action = normalizedTask.action;
+    if (normalizedTask.deliverable !== undefined) taskData.deliverable = normalizedTask.deliverable;
+    if (normalizedTask.taskReview !== undefined) taskData.task_review = normalizedTask.taskReview;
+    if (normalizedTask.taskReviewScore !== undefined) taskData.task_review_score = normalizedTask.taskReviewScore;
     taskData.row_version = currentRowVersion + 1;
 
     let data: any = null;

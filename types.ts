@@ -92,6 +92,50 @@ export interface ReviewEntry {
   padEntries?: PADEntry[]; // New: Monthly PAD entries
 }
 
+export interface DepartmentReviewCapability {
+  departmentId: string;
+  rootId: string;
+  nodePath: string[];
+  rowVersion: number;
+  canView: boolean;
+  canEdit: boolean;
+}
+
+export interface DepartmentReviewTaskChanges {
+  deliverable?: string;
+  taskReview?: string;
+  taskReviewScore?: number;
+}
+
+export interface DepartmentReviewTaskUpdate {
+  id: string;
+  expectedRowVersion: number;
+  reviewKey: string;
+  krIndex: number;
+  changes: DepartmentReviewTaskChanges;
+}
+
+export interface DepartmentReviewSubmitInput {
+  departmentId: string;
+  periodKey: string;
+  entry: ReviewEntry;
+  taskUpdates: DepartmentReviewTaskUpdate[];
+  expectedDepartmentRowVersion: number;
+  requestId: string;
+  departmentRootId: string;
+  departmentNodePath: string[];
+}
+
+export interface DepartmentReviewSubmitResult {
+  replayed: boolean;
+  departmentId: string;
+  periodKey: string;
+  reviewEntry: ReviewEntry;
+  tasks: PADEntry[];
+  rootId: string;
+  rootRowVersion: number;
+}
+
 export interface Department {
   id: string;
   name: string;

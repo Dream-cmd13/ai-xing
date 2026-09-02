@@ -3,7 +3,7 @@ import * as z from 'zod/v4';
 import { computeArgsDigest } from './confirmation-store.mjs';
 import { AppError, toPublicError } from './errors.mjs';
 import { parseReviewSlot } from './review-slot.mjs';
-import { applyDefaultTaskPeriod, deriveTaskPeriodFromWeeks, fillTaskPeriodFromTargetWeeks } from './task-period-defaults.mjs';
+import { normalizeTaskPeriodInput } from './task-period-defaults.mjs';
 
 const writeAnnotations = Object.freeze({
   readOnlyHint: false,
@@ -75,10 +75,7 @@ function createPayload(args = {}, context = {}, { defaultPeriod = false, nowMs =
   payload.status = 'draft';
   if (payload.ownerId === undefined && payload.ownerName === undefined && context.userId) payload.ownerId = context.userId;
   if (payload.departmentId === undefined && context.departmentId) payload.departmentId = context.departmentId;
-  if (defaultPeriod) payload = applyDefaultTaskPeriod(payload, nowMs);
-  // 只填 targetWeeks 不填日期时，按目标周自动推导起止时间；prepare 与 commit 都会确定性推导，
-  // 保证确认令牌的参数摘要一致。显式传入的值不会被覆盖。
-  payload = fillTaskPeriodFromTargetWeeks(payload);
+  payload = normalizeTaskPeriodInput(payload, { defaultPeriod, nowMs });
   validateTaskPayload(payload);
   return payload;
 }
@@ -278,23 +275,39 @@ function canonicalizeTaskPayload(payload, metadata) {
   return next;
 }
 
-/**
- * 更新时若新增了 targetWeeks 且任务当前起止时间仍为空，则按同样规则补齐；
- * 更新中显式传入（含显式置 null）或任务已有值的一律不覆盖。
- */
-function fillUpdatePeriodFromTargetWeeks(changes, current) {
+function periodValue(value, camelKey, snakeKey) {
+  if (hasKey(value ?? {}, camelKey)) return value[camelKey];
+  if (hasKey(value ?? {}, snakeKey)) return value[snakeKey];
+  return undefined;
+}
+
+function normalizeTaskPeriodChanges(changes, current) {
   const next = structuredClone(changes ?? {});
-  const weeks = next.targetWeeks ?? next.target_weeks;
-  if (!Array.isArray(weeks) || weeks.length === 0) return next;
-  const hasStart = hasKey(next, 'startDate') || hasKey(next, 'start_date');
-  const hasDue = hasKey(next, 'dueDate') || hasKey(next, 'due_date');
-  const currentStart = current?.startDate ?? current?.start_date ?? null;
-  const currentDue = current?.dueDate ?? current?.due_date ?? null;
-  if ((hasStart || currentStart !== null) && (hasDue || currentDue !== null)) return next;
-  const derived = deriveTaskPeriodFromWeeks(weeks);
-  if (!derived) return next;
-  if (!hasStart && currentStart === null) next.startDate = derived.startDate;
-  if (!hasDue && currentDue === null) next.dueDate = derived.dueDate;
+  const changesPeriod = ['targetWeeks', 'target_weeks', 'startDate', 'start_date', 'dueDate', 'due_date']
+    .some((key) => hasKey(next, key));
+  if (!changesPeriod) return next;
+
+  const suppliedWeeks = hasKey(next, 'targetWeeks') || hasKey(next, 'target_weeks');
+  const suppliedStart = hasKey(next, 'startDate') || hasKey(next, 'start_date');
+  const suppliedDue = hasKey(next, 'dueDate') || hasKey(next, 'due_date');
+  const finalStart = suppliedStart
+    ? periodValue(next, 'startDate', 'start_date')
+    : periodValue(current, 'startDate', 'start_date');
+  const finalDue = suppliedDue
+    ? periodValue(next, 'dueDate', 'due_date')
+    : periodValue(current, 'dueDate', 'due_date');
+  const periodPayload = { startDate: finalStart, dueDate: finalDue };
+  if (suppliedWeeks) periodPayload.targetWeeks = periodValue(next, 'targetWeeks', 'target_weeks');
+  if ((finalStart === null || finalStart === undefined) && (finalDue === null || finalDue === undefined)) {
+    delete periodPayload.startDate;
+    delete periodPayload.dueDate;
+  }
+
+  const normalized = normalizeTaskPeriodInput(periodPayload);
+  for (const key of ['target_weeks', 'start_date', 'due_date']) delete next[key];
+  next.targetWeeks = normalized.targetWeeks;
+  next.startDate = normalized.startDate;
+  next.dueDate = normalized.dueDate;
   return next;
 }
 
@@ -471,7 +484,7 @@ export function registerWriteTools(server, repository, confirmationStore, { now 
     const context = contextOf(repository);
     const input = updateInput(args, { allowOwnerChange: context.role === 'Admin' || context.role === 'Manager' });
     const preview = await repository.prepareUpdatePadTask(input);
-    const canonicalChanges = fillUpdatePeriodFromTargetWeeks(preview.changes ?? input.changes, preview.current);
+    const canonicalChanges = normalizeTaskPeriodChanges(preview.changes ?? input.changes, preview.current);
     const preparedArgs = {
       taskId: input.taskId,
       changes: canonicalChanges,
@@ -526,7 +539,7 @@ export function registerWriteTools(server, repository, confirmationStore, { now 
       commitArgs: { ...input, expectedRowVersion },
       buildCommitArgs: (metadata) => ({
         ...input,
-        changes: fillUpdatePeriodFromTargetWeeks(canonicalizeTaskChanges(input.changes, metadata), metadata.current),
+        changes: normalizeTaskPeriodChanges(canonicalizeTaskChanges(input.changes, metadata), metadata.current),
         expectedRowVersion,
         ...(metadata.identity ? { identity: metadata.identity } : {}),
         ...(metadata.reviewSync ? {
@@ -539,7 +552,7 @@ export function registerWriteTools(server, repository, confirmationStore, { now 
       }),
       operation: (metadata) => repository.commitUpdatePadTask({
         ...input,
-        changes: fillUpdatePeriodFromTargetWeeks(metadata.changes ?? input.changes, metadata.current),
+        changes: metadata.changes ?? input.changes,
         expectedRowVersion,
         ...(metadata.reviewSync ? {
           reviewPeriodKey: metadata.reviewSync.periodKey,

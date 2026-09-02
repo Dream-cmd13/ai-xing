@@ -11,6 +11,7 @@ const DEFAULT_MESSAGES = Object.freeze({
   REQUEST_IN_FLIGHT: '同一请求正在执行中，请稍后重试。',
   SERVICE_NOT_READY: '服务依赖尚未就绪，请稍后重试。',
   MCP_VALIDATION: '数据库拒绝了无效的任务数据。',
+  TASK_PERIOD_MISMATCH: 'targetWeeks 与任务日期派生周不一致。',
   RPC_NOT_CONFIGURED: '所需数据库接口尚未启用，请先完成当前版本迁移后重试。',
   USER_NOT_FOUND: '未找到匹配的用户，请检查姓名和部门名称。',
   USER_NAME_AMBIGUOUS: '姓名存在同名用户，请补充部门名称。',

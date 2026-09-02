@@ -188,7 +188,11 @@ test('fails readiness closed unless the complete release contract matches the co
   const responses = [
     { status: 'ready', releaseId: RELEASE_ID, manifestDigest: 'wrong', requiredMigrations: true, functionPrivileges: true },
     { status: 'ready', releaseId: 'old-release', manifestDigest: EXPECTED_MANIFEST_DIGEST, requiredMigrations: true, functionPrivileges: true },
-    { status: 'ready', releaseId: RELEASE_ID, manifestDigest: EXPECTED_MANIFEST_DIGEST, requiredMigrations: true, functionPrivileges: true },
+    {
+      status: 'ready', releaseId: RELEASE_ID, manifestDigest: EXPECTED_MANIFEST_DIGEST,
+      requiredMigrations: true, functionPrivileges: true,
+      taskDateWeekFunction: true, taskDateWeekTrigger: true, taskPeriodDataConsistent: true,
+    },
   ];
   for (const [index, responseData] of responses.entries()) {
     const provider = createSupabaseAuthProvider({

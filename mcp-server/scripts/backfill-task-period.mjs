@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import path from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
@@ -5,141 +6,217 @@ import { fileURLToPath } from 'node:url';
 import { config as loadDotEnv } from 'dotenv';
 import pg from 'pg';
 
-import { getIsoWeekRange } from '../src/task-period-defaults.mjs';
+import { deriveTaskWeeksFromDateRange } from '../src/task-period-defaults.mjs';
 
 const { Client } = pg;
-
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
+const BACKFILL_LOCK_KEY = 'ai-xing:task-date-weeks:v1';
 
-/**
- * 把查询到的任务行规划为“按目标周补齐空起止时间”的修复计划：
- * start_date 为空取最早目标周的周一，due_date 为空取最晚目标周的周日，
- * 时间戳约定与线上写入一致（日期 + 12:00 UTC）。已有值一律不修改；
- * 目标周次无效或不存在的任务跳过并给出原因，不做部分填充。
- */
+function canonicalWeeks(value) {
+  if (!Array.isArray(value)) return [];
+  return [...new Set(value.filter((week) => typeof week === 'string'))].sort();
+}
+
+function sameWeeks(left, right) {
+  return left.length === right.length && left.every((week, index) => week === right[index]);
+}
+
+function planDigest(updates) {
+  const snapshot = updates.map(({ id, rowVersion, oldWeeks, expectedWeeks, startDate, dueDate }) => ({
+    id, rowVersion, oldWeeks, expectedWeeks, startDate, dueDate,
+  }));
+  return createHash('sha256').update(JSON.stringify(snapshot), 'utf8').digest('hex');
+}
+
 export function planTaskPeriodBackfill(rows) {
   const updates = [];
-  const skipped = [];
+  const exceptions = [];
   for (const row of rows ?? []) {
-    const weeks = Array.isArray(row.targetWeeks) ? [...row.targetWeeks].sort() : [];
-    if (weeks.length === 0) {
-      skipped.push({ id: row.id, title: row.title, reason: 'NO_TARGET_WEEKS' });
+    const normalized = {
+      id: String(row.id),
+      rowVersion: Number(row.rowVersion ?? row.row_version ?? 0),
+      oldWeeks: Array.isArray(row.targetWeeks ?? row.target_weeks)
+        ? structuredClone(row.targetWeeks ?? row.target_weeks)
+        : [],
+      startDate: row.startDate ?? row.start_date,
+      dueDate: row.dueDate ?? row.due_date,
+    };
+    if (normalized.startDate === null || normalized.startDate === undefined
+      || normalized.dueDate === null || normalized.dueDate === undefined) {
+      exceptions.push({ id: normalized.id, rowVersion: normalized.rowVersion, reason: 'MISSING_DATE' });
       continue;
     }
-    const needsStart = row.startDate === null || row.startDate === undefined;
-    const needsDue = row.dueDate === null || row.dueDate === undefined;
-    if (!needsStart && !needsDue) {
-      skipped.push({ id: row.id, title: row.title, reason: 'ALREADY_FILLED' });
-      continue;
+    try {
+      const expectedWeeks = deriveTaskWeeksFromDateRange(
+        Number(normalized.startDate),
+        Number(normalized.dueDate),
+      ).targetWeeks;
+      if (!sameWeeks(normalized.oldWeeks, expectedWeeks)
+        || !sameWeeks(canonicalWeeks(normalized.oldWeeks), expectedWeeks)) {
+        updates.push({
+          ...normalized,
+          startDate: Number(normalized.startDate),
+          dueDate: Number(normalized.dueDate),
+          expectedWeeks,
+        });
+      }
+    } catch (error) {
+      exceptions.push({
+        id: normalized.id,
+        rowVersion: normalized.rowVersion,
+        reason: /53/.test(error?.message ?? '') ? 'DATE_RANGE_TOO_LONG' : 'DATE_RANGE_INVALID',
+      });
     }
-    const first = getIsoWeekRange(weeks[0]);
-    const last = getIsoWeekRange(weeks[weeks.length - 1]);
-    if (needsStart && !first) {
-      skipped.push({ id: row.id, title: row.title, reason: `INVALID_WEEK:${weeks[0]}` });
-      continue;
-    }
-    if (needsDue && !last) {
-      skipped.push({ id: row.id, title: row.title, reason: `INVALID_WEEK:${weeks[weeks.length - 1]}` });
-      continue;
-    }
-    updates.push({
-      id: row.id,
-      title: row.title,
-      weeks,
-      startDate: needsStart ? first.startDate : row.startDate,
-      dueDate: needsDue ? last.dueDate : row.dueDate,
-    });
   }
-  return { updates, skipped };
+  updates.sort((left, right) => left.id.localeCompare(right.id));
+  exceptions.sort((left, right) => left.id.localeCompare(right.id));
+  return { updates, exceptions, digest: planDigest(updates) };
 }
 
-function normalizeRow(raw) {
-  return {
-    id: raw.id,
-    title: raw.title,
-    targetWeeks: Array.isArray(raw.target_weeks) ? raw.target_weeks : [],
-    startDate: raw.start_date === null || raw.start_date === undefined ? null : Number(raw.start_date),
-    dueDate: raw.due_date === null || raw.due_date === undefined ? null : Number(raw.due_date),
-  };
-}
-
-export async function runTaskPeriodBackfill({ client, execute = false, logger = console } = {}) {
-  if (!client) throw new Error('缺少数据库客户端。');
+async function readPlan(client) {
   const result = await client.query(`
-    SELECT id, title, target_weeks, start_date, due_date
-    FROM tasks
-    WHERE target_weeks IS NOT NULL
-      AND jsonb_typeof(target_weeks) = 'array'
-      AND jsonb_array_length(target_weeks) > 0
-      AND (start_date IS NULL OR due_date IS NULL)
+    SELECT id, target_weeks, start_date, due_date, row_version
+    FROM public.tasks
     ORDER BY id
   `);
-  const plan = planTaskPeriodBackfill((result.rows ?? []).map(normalizeRow));
-  for (const update of plan.updates) {
-    logger.info?.({
-      event: 'backfill_plan',
-      taskId: update.id,
-      title: update.title,
-      targetWeeks: update.weeks,
-      startDate: update.startDate,
-      dueDate: update.dueDate,
-    });
+  return planTaskPeriodBackfill(result.rows ?? []);
+}
+
+function assertExecutionConfirmation(plan, expectedCount, expectedDigest) {
+  if (!Number.isSafeInteger(expectedCount) || expectedCount < 0 || typeof expectedDigest !== 'string') {
+    throw new Error('执行回填必须提供 dry-run 的确认数量和摘要。');
   }
-  for (const skip of plan.skipped) {
-    logger.info?.({ event: 'backfill_skipped', taskId: skip.id, title: skip.title, reason: skip.reason });
+  if (plan.updates.length !== expectedCount || plan.digest !== expectedDigest) {
+    throw new Error('回填快照数量或摘要已变化，操作已取消。');
   }
-  const summary = {
-    candidates: plan.updates.length + plan.skipped.length,
-    planned: plan.updates.length,
-    skipped: plan.skipped.length,
+}
+
+export async function runTaskPeriodBackfill({
+  client,
+  execute = false,
+  expectedCount,
+  expectedDigest,
+  logger = console,
+} = {}) {
+  if (!client) throw new Error('缺少数据库客户端。');
+  const dryPlan = await readPlan(client);
+  for (const exception of dryPlan.exceptions) {
+    logger.info?.({ event: 'backfill_exception', taskId: exception.id, rowVersion: exception.rowVersion, reason: exception.reason });
+  }
+  const baseSummary = {
+    planned: dryPlan.updates.length,
+    exceptions: dryPlan.exceptions.length,
+    digest: dryPlan.digest,
   };
   if (!execute) {
-    const dryRun = { ...summary, executed: false };
-    logger.info?.({ event: 'backfill_dry_run', ...dryRun, hint: '确认清单无误后追加 --execute 执行。' });
-    return { ...dryRun, updates: plan.updates, skipped: plan.skipped };
+    const result = { ...baseSummary, executed: false, updates: dryPlan.updates, exceptionRows: dryPlan.exceptions };
+    logger.info?.({ event: 'backfill_dry_run', ...baseSummary, executed: false });
+    return result;
   }
-  let applied = 0;
+
+  assertExecutionConfirmation(dryPlan, expectedCount, expectedDigest);
   await client.query('BEGIN');
   try {
-    for (const update of plan.updates) {
-      // WHERE 兜底再次校验空值，保证只填充空字段、不覆盖并发写入的值。
-      const updated = await client.query(
-        'UPDATE tasks SET start_date = $2, due_date = $3 WHERE id = $1 AND (start_date IS NULL OR due_date IS NULL)',
-        [update.id, update.startDate, update.dueDate],
-      );
-      applied += updated.rowCount ?? 0;
+    await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 0))', [BACKFILL_LOCK_KEY]);
+    const protectedTriggers = await client.query(`
+      SELECT trigger_row.tgname AS trigger_name, trigger_proc.proname AS function_name
+      FROM pg_catalog.pg_trigger AS trigger_row
+      JOIN pg_catalog.pg_proc AS trigger_proc ON trigger_proc.oid = trigger_row.tgfoid
+      WHERE trigger_row.tgrelid = 'public.tasks'::regclass
+        AND trigger_row.tgname IN (
+          'enforce_task_owner_scope_on_tasks',
+          'mcp_validate_task_row_contract_trigger'
+        )
+        AND NOT trigger_row.tgisinternal
+    `);
+    const triggerFunctions = new Map((protectedTriggers.rows ?? [])
+      .map((row) => [row.trigger_name, row.function_name]));
+    if (triggerFunctions.get('enforce_task_owner_scope_on_tasks') !== 'enforce_task_owner_scope'
+      || triggerFunctions.get('mcp_validate_task_row_contract_trigger') !== 'mcp_validate_task_row_contract') {
+      throw new Error('任务保护触发器身份不符合预期，操作已取消。');
     }
+    await client.query('ALTER TABLE public.tasks DISABLE TRIGGER enforce_task_owner_scope_on_tasks');
+    await client.query('ALTER TABLE public.tasks DISABLE TRIGGER mcp_validate_task_row_contract_trigger');
+    const lockedPlan = await readPlan(client);
+    assertExecutionConfirmation(lockedPlan, expectedCount, expectedDigest);
+
+    let applied = 0;
+    for (const update of lockedPlan.updates) {
+      const result = await client.query(`
+        UPDATE public.tasks
+        SET target_weeks = $2::JSONB,
+            row_version = row_version + 1
+        WHERE id = $1
+          AND row_version = $3
+          AND target_weeks = $4::JSONB
+          AND start_date = $5
+          AND due_date = $6
+      `, [
+        update.id,
+        JSON.stringify(update.expectedWeeks),
+        update.rowVersion,
+        JSON.stringify(update.oldWeeks),
+        update.startDate,
+        update.dueDate,
+      ]);
+      if (result.rowCount !== 1) throw new Error(`任务 ${update.id} 的行版本或周期快照已变化。`);
+      applied += 1;
+    }
+
+    await client.query('ALTER TABLE public.tasks ENABLE TRIGGER mcp_validate_task_row_contract_trigger');
+    await client.query('ALTER TABLE public.tasks ENABLE TRIGGER enforce_task_owner_scope_on_tasks');
+    const postPlan = await readPlan(client);
+    if (postPlan.updates.length !== 0) throw new Error('回填后仍存在日期有效的周绑定异常。');
     await client.query('COMMIT');
+    const result = {
+      ...baseSummary,
+      executed: true,
+      applied,
+      remainingExceptions: postPlan.exceptions.length,
+    };
+    logger.info?.({ event: 'backfill_executed', ...result });
+    return result;
   } catch (error) {
     await client.query('ROLLBACK').catch(() => {});
     throw error;
   }
-  logger.info?.({ event: 'backfill_executed', ...summary, applied });
-  return { ...summary, executed: true, applied, updates: plan.updates, skipped: plan.skipped };
 }
 
 function resolveConnectionString(env) {
-  const direct = env.MCP_BACKFILL_DATABASE_URL;
-  if (direct) return direct;
-  const { SUPABASE_DB_HOST: host, SUPABASE_DB_PORT: port, SUPABASE_DB_NAME: name, SUPABASE_DB_USER: user, SUPABASE_DB_PASSWORD: password } = env;
+  if (env.MCP_BACKFILL_DATABASE_URL) return env.MCP_BACKFILL_DATABASE_URL;
+  const {
+    SUPABASE_DB_HOST: host,
+    SUPABASE_DB_PORT: port,
+    SUPABASE_DB_NAME: name,
+    SUPABASE_DB_USER: user,
+    SUPABASE_DB_PASSWORD: password,
+  } = env;
   if (host && name && user && password) {
-    const encoded = encodeURIComponent(password);
-    return `postgresql://${encodeURIComponent(user)}:${encoded}@${host}:${port || 5432}/${name}`;
+    return `postgresql://${encodeURIComponent(user)}:${encodeURIComponent(password)}@${host}:${port || 5432}/${name}`;
   }
-  throw new Error('缺少数据库连接：请设置 MCP_BACKFILL_DATABASE_URL，或 SUPABASE_DB_HOST/PORT/NAME/USER/PASSWORD。');
+  throw new Error('缺少数据库连接配置。');
+}
+
+function readArgument(argv, name) {
+  const prefix = `${name}=`;
+  const value = argv.find((item) => item.startsWith(prefix));
+  return value?.slice(prefix.length);
 }
 
 export async function main({ env = process.env, logger = console, argv = process.argv.slice(2) } = {}) {
   loadDotEnv({ path: path.resolve(projectRoot, '.env') });
   loadDotEnv({ path: path.resolve(projectRoot, 'mcp-server', '.env') });
   const execute = argv.includes('--execute');
+  const expectedCountValue = readArgument(argv, '--expected-count');
+  const expectedDigest = readArgument(argv, '--expected-digest');
+  const expectedCount = expectedCountValue === undefined ? undefined : Number(expectedCountValue);
   const client = new Client({
     connectionString: resolveConnectionString(env),
     application_name: 'ai-xing-mcp-task-period-backfill',
   });
   await client.connect();
   try {
-    return await runTaskPeriodBackfill({ client, execute, logger });
+    return await runTaskPeriodBackfill({ client, execute, expectedCount, expectedDigest, logger });
   } finally {
     await client.end();
   }

@@ -9,14 +9,15 @@
 当前代码已完成本地层面的依赖、前端状态、任务校验、迁移契约、MCP readiness、范围查询失败关闭、仓储拆分、systemd 模板和 allowlist 打包加固。正式发布仍然被以下现场证据阻断：
 
 1. 正式库身份、版本、时区、基线对象、RLS、触发器、函数签名和权限尚未只读核验；
-2. 正式库迁移账本与本候选制品的 28 项 manifest、顺序、状态和 digest 尚未核验；
+2. 正式库迁移账本与本候选制品的 32 项 manifest、顺序、状态和 digest 尚未核验；
 3. 历史扫描发现的 45 条 `REVIEW_PERIOD_KEY_INVALID` 尚未逐条修复或取得书面接受；
-4. 正式库备份和恢复演练尚未完成；
-5. 正式迁移尚未获得独立授权，也未执行迁移后验收；发布契约不一致时必须返回 `RELEASE_CONTRACT_MISMATCH` 并保持 fail-closed；
-6. CentOS 7 目标机的 glibc、Node、systemd、Nginx、HTTPS、防火墙、重启恢复和角色验收尚未完成；
-7. 最终冻结提交、正式发布标签和正式制品摘要尚未生成。
+4. 正式库任务日期/周只读扫描、缺失日期人工补全和受控周回填尚未完成；
+5. 正式库备份和恢复演练尚未完成；
+6. 正式迁移尚未获得独立授权，也未执行迁移后验收；发布契约不一致时必须返回 `RELEASE_CONTRACT_MISMATCH` 并保持 fail-closed；
+7. CentOS 7 目标机的 glibc、Node、systemd、Nginx、HTTPS、防火墙、重启恢复和角色验收尚未完成；
+8. 最终冻结提交、正式发布标签和正式制品摘要尚未生成。
 
-因此当前状态是“本地候选修复中/待最终门禁”，不是“允许上线”。
+因此当前状态是“本地候选已完成/待正式现场门禁”，不是“允许上线”。
 
 ## 2. 发布边界
 
@@ -26,7 +27,7 @@
 
 - 当前网页生产构建和安全扫描；
 - MCP Node 服务、只读/写入工具、认证、Session、限流和 readiness；
-- `mcp-server/scripts/migrate.mjs` manifest 中的 28 个 SQL 迁移；
+- `mcp-server/scripts/migrate.mjs` manifest 中的 32 个 SQL 迁移；
 - Nginx 和 CentOS 7 systemd 模板；
 - allowlist 发布制品和 SHA-256 清单。
 
@@ -39,7 +40,7 @@
 - 正式库先只读核验。迁移和任何写入必须另行授权。
 - 迁移只通过受控迁移器执行，不在 SQL Editor 手工粘贴整批迁移。
 - 不从脏工作区制作正式制品，不手工复制目录作为发布包。
-- `local-test-files/`、`.env`、日志、诊断、回填和 live smoke 文件不得进入正式制品。
+- `local-test-files/`、`.env`、日志、诊断、未批准的回填和 live smoke 文件不得进入正式制品。
 - 正式环境不得运行会创建或更新业务数据的 `live-smoke.mjs`。
 
 ## 4. 候选制品
@@ -63,27 +64,27 @@ npm run package:production -- release-output/<candidate>
 - 工作区干净；
 - 输出位于工作区 `release-output/` 下的新目录；
 - 输出目录不存在，拒绝覆盖；
-- 仅复制显式 allowlist 中的 `dist/`、MCP `src/`、运行依赖锁、迁移器、部署模板、本文、28 项 manifest SQL 和只读正式库预检 SQL；
+- 仅复制显式 allowlist 中的 `dist/`、MCP `src/`、运行依赖锁、迁移器、经批准的任务周期回填器、部署模板、本文、32 项 manifest SQL 和两份只读正式库预检 SQL；
 - 生成只含相对路径、SHA-256 和候选提交号的 `SHA256SUMS.json`；
 - 安全扫描失败时不得继续发布。
 
-打包脚本不会包含 `.env`、`local-test-files/`、诊断脚本、回填脚本、live smoke、日志或上述两类资产之外的 SQL。`2026-08-27_mcp_review_data_scan.sql` 仅用于只读预检，不得交给迁移器，也不会写入迁移账本。
+打包脚本不会包含 `.env`、`local-test-files/`、诊断脚本、未批准的回填脚本、live smoke、日志或上述资产之外的 SQL。唯一允许的维护脚本是 `mcp-server/scripts/backfill-task-period.mjs`；两份 preflight SQL 仅用于只读检查，不进入迁移账本。
 
 ## 5. 已实现的本地门禁
 
 2026-09-01 当前候选工作区的本地证据如下。冻结提交生成后仍需再运行一次同样的门禁：
 
 - `npm run lint:app`：通过，TypeScript 零错误；
-- `npm run build:secure`：通过，40 个文本构建资产敏感模式扫描通过，仅保留既有大 chunk 警告；
-- `npm run mcp:test`：284/284 通过；
+- `npm run build:secure`：通过，41 个文本构建资产敏感模式扫描通过，仅保留既有大 chunk 警告；
+- `npm run mcp:test`：312/312 通过；冻结提交生成后仍需重跑，任何失败均阻断发布；
 - 根项目和 `mcp-server` 的生产依赖审计：均为 0 vulnerabilities；
 - MCP `src/`、`scripts/` 和根发布脚本 `.mjs`：`node --check` 全部通过；
 - `git diff --check`：通过；
-- manifest/SQL 对齐：28 项迁移无缺失、无额外未登记 MCP 迁移；只读预检 SQL 单独作为发布资产，不进入迁移账本；
+- manifest/SQL 对齐：32 项迁移无缺失；两份只读预检 SQL 单独作为发布资产，不进入迁移账本；
 - allowlist 打包测试：2/2 通过，测试目录已清理且未生成正式制品；
 - release contract 摘要由迁移器、Node readiness 校验和 SQL readiness 等值固定为当前候选摘要；摘要不匹配时返回 `RELEASE_CONTRACT_MISMATCH`；
 - production 配置模板要求正式域名、loopback、可信 loopback 代理和 `MCP_REQUIRE_HTTPS=true`，错误配置会在启动时失败关闭；
-- 本轮未连接任何正式环境，未执行数据库迁移或写入，未启动、停止或重启服务。
+- 本轮未连接任何正式环境；当前 MCP 测试库已完成任务周期迁移和幂等重放，本地 MCP 已重启并通过新版 readiness。
 
 已实现内容：
 
@@ -91,7 +92,7 @@ npm run package:production -- release-output/<candidate>
 - `build:secure` 在生产构建后扫描敏感模式；
 - 范围任务加载按 ID 合并全局状态，网页和 MCP 人员补全每批最多 50 个任务；
 - 任务更新校验由前向 SQL 迁移统一覆盖，人员函数固定 `search_path` 和执行权限；
-- manifest 为 28 项，发布契约保存 ordered required versions 和 digest；
+- manifest 为 32 项，发布契约保存 ordered required versions 和 digest；
 - 事务迁移使用注释、字符串和 dollar quote 感知的外层事务解析器；
 - `2026-08-27_mcp_readiness.sql` 是唯一登记的历史无外壳例外；
 - `/health` 只表示进程存活，`/ready` 和 POST/GET/DELETE `/mcp` 使用同一 readiness gate；
@@ -103,6 +104,21 @@ npm run package:production -- release-output/<candidate>
 - 数据库任务契约拒绝统一返回公开码 `MCP_VALIDATION`，不暴露数据库内部错误正文；
 - `repository.mjs` 是薄组合工厂，组织、任务、人员、OKR、复盘和流程读取位于独立仓储模块；
 - systemd 模板采用 `Restart=always`、5 秒重启间隔、CentOS 7 启动限速和文件描述符限制。
+
+### 5.1 当前测试库的任务周期证据
+
+2026-09-01 对当前 MCP 测试库执行了方案 2 的受控回填：
+
+- dry-run 新快照为 346 条可确定修复、2 条缺失日期例外；
+- 346 条在同一 advisory lock 和事务内全部更新成功，只修改 `target_weeks` 并递增 `row_version`；
+- 两条缺失日期任务由用户确认删除，没有新增专用迁移，也没有根据旧周推测日期；
+- 删除后复查为 `planned=0`、`exceptions=0`；
+- 两条通用任务周期迁移已成功应用，重放均返回 `skipped`；
+- 本地 MCP 重启后 `/health=200`、`/ready=200`，release ID 为 `2026-09-01-task-date-weeks`，三个任务周期 readiness 标志均为 true；
+- 日期为 `2026-06-29` 至 `2026-07-05` 的 89 条测试库任务全部精确绑定 `2026-W27`，`2026-W39` 命中为 0；
+- 本证据只属于当前测试库。正式库必须生成自己的数量和摘要，不得复用 346 或测试库摘要。
+
+正式库若发现缺失日期，仍必须由业务负责人给出起止日期。禁止根据旧周、任务文本、创建时间或历史复盘推测；历史复盘引用只报告，不自动移动、删除或改写。
 
 ## 6. CentOS 7 运行路径
 
@@ -186,13 +202,14 @@ systemd-analyze verify /etc/systemd/system/ai-xing-mcp.service
 5. release contract 的 release ID、manifest digest、required versions 和 deferred index 状态；
 6. readiness 各标志与候选代码要求一致；
 7. 只读复盘数据扫描仍为 45 条、数量是否变化，以及每条异常的处置决策；
-8. 数据规模、索引状态和迁移锁风险。
+8. 任务日期派生周预检的可修复数量、摘要、缺失/倒置/超长日期例外和历史复盘引用；
+9. 数据规模、索引状态和迁移锁风险。
 
 正式库未完成上述只读证据前，不得执行迁移。
 
 ## 10. 迁移与索引规则
 
-`mcp-server/scripts/migrate.mjs` 中的 `MIGRATION_MANIFEST` 是唯一权威清单，当前共 28 项。执行规则：
+`mcp-server/scripts/migrate.mjs` 中的 `MIGRATION_MANIFEST` 是唯一权威清单，当前共 32 项。执行规则：
 
 - 先完成备份和恢复演练；
 - 先核对候选制品 SHA-256 和 release digest；
@@ -303,6 +320,30 @@ psql -X -v ON_ERROR_STOP=1 \
 
 预期仍为已知的 45 条 `REVIEW_PERIOD_KEY_INVALID`，不得在迁移前自动修复；数量变化或出现其他原因码时，先形成书面处置决定。
 
+再执行任务周期只读预检和 dry-run。输出只包含安全标识、日期、周、行版本、原因码、数量和摘要：
+
+```bash
+psql -X -v ON_ERROR_STOP=1 \
+  -f "$MCP_RELEASE_ROOT/sql/preflight/2026-09-01_review_task_period_consistency.sql" \
+  > "/var/backups/ai-xing/task-period-scan-$(date +%Y%m%d-%H%M%S).txt"
+
+export MCP_BACKFILL_DATABASE_URL="$MCP_MIGRATION_DATABASE_URL"
+set -o pipefail
+node "$MCP_RELEASE_ROOT/mcp-server/scripts/backfill-task-period.mjs" \
+  | tee "/var/backups/ai-xing/task-period-dry-run-$(date +%Y%m%d-%H%M%S).log"
+MCP_PERIOD_DRY_RUN_STATUS=${PIPESTATUS[0]}
+set +o pipefail
+unset MCP_BACKFILL_DATABASE_URL
+if [ "$MCP_PERIOD_DRY_RUN_STATUS" -ne 0 ]; then
+  echo "任务周期 dry-run 失败，停止发布。" >&2
+  unset MCP_PERIOD_DRY_RUN_STATUS MCP_MIGRATION_DATABASE_URL PGDATABASE MCP_RELEASE_ROOT
+  exit 1
+fi
+unset MCP_PERIOD_DRY_RUN_STATUS
+```
+
+记录 `planned`、`exceptions` 和 `digest`。`exceptions` 必须为 0；任何 `MISSING_DATE`、`DATE_RANGE_INVALID` 或 `DATE_RANGE_TOO_LONG` 都必须先由业务负责人补齐/纠正日期并重新 dry-run，不能从旧周次推测日期。历史复盘引用单独审批，不在这个步骤自动移动或删除。
+
 #### 4. 备份和恢复演练
 
 若是自建 PostgreSQL，在独立备份目录执行（备份文件权限设为 600），并把恢复目标指定为隔离数据库，绝不能填正式库：
@@ -317,9 +358,33 @@ chmod 600 "$MCP_BACKUP_FILE.list"
 
 若是 Supabase 托管库，使用平台备份/恢复能力恢复到独立项目或隔离实例，完成抽样校验后再进入迁移窗口。没有可验证的备份和恢复结果，不得继续。
 
-#### 5. 执行受控迁移（首次不带任何可选参数）
+#### 5. 执行受控任务周回填
 
-确认前四步证据通过、已进入维护窗口后，在候选制品的 `mcp-server` 目录执行：
+完成备份后，把正式库本次 dry-run 的数量和摘要人工二次核对。若 `planned=0`，跳过执行模式并再次 dry-run 确认 `planned=0`、`exceptions=0`；`planned` 大于 0 时才执行：
+
+```bash
+export MCP_BACKFILL_DATABASE_URL="$MCP_MIGRATION_DATABASE_URL"
+read -r -p '请输入本次 dry-run 的 planned 数量: ' MCP_PERIOD_EXPECTED_COUNT
+read -r -p '请输入本次 dry-run 的 digest: ' MCP_PERIOD_EXPECTED_DIGEST
+node "$MCP_RELEASE_ROOT/mcp-server/scripts/backfill-task-period.mjs" \
+  --execute \
+  "--expected-count=$MCP_PERIOD_EXPECTED_COUNT" \
+  "--expected-digest=$MCP_PERIOD_EXPECTED_DIGEST"
+MCP_PERIOD_BACKFILL_STATUS=$?
+unset MCP_BACKFILL_DATABASE_URL MCP_PERIOD_EXPECTED_COUNT MCP_PERIOD_EXPECTED_DIGEST
+if [ "$MCP_PERIOD_BACKFILL_STATUS" -ne 0 ]; then
+  echo "任务周回填失败或已回滚，停止发布。" >&2
+  unset MCP_PERIOD_BACKFILL_STATUS
+  exit 1
+fi
+unset MCP_PERIOD_BACKFILL_STATUS
+```
+
+回填器会锁定快照、验证两条既有任务保护触发器、在表锁事务内临时禁用并恢复这两条触发器，然后只按 ID、行版本、旧周和日期守卫更新 `target_weeks` 与 `row_version`。执行后必须再次 dry-run，结果必须为 `planned=0`、`exceptions=0`，否则禁止迁移。
+
+#### 6. 执行受控迁移（首次不带任何可选参数）
+
+确认前五步证据通过、已进入维护窗口后，在候选制品的 `mcp-server` 目录执行：
 
 ```bash
 cd "$MCP_RELEASE_ROOT/mcp-server"
@@ -337,7 +402,7 @@ fi
 
 首次执行不要添加 `--include-indexes` 或 `--adopt-existing`。正常首次结果是事务迁移按 manifest 顺序 `applied`，已存在且 checksum 相同的版本为 `skipped`，`2026-08-27_mcp_task_indexes` 为 `deferred`；迁移器随后记录 release contract。
 
-#### 6. 迁移后核对
+#### 7. 迁移后核对
 
 ```bash
 psql -X -v ON_ERROR_STOP=1 <<'SQL'
@@ -346,12 +411,12 @@ FROM mcp_internal.schema_migrations
 ORDER BY applied_at, version;
 SELECT release_id, manifest_digest, required_versions, deferred_indexes
 FROM mcp_internal.release_contracts
-WHERE release_id = '2026-09-01';
+WHERE release_id = '2026-09-01-task-date-weeks';
 SELECT public.mcp_get_readiness();
 SQL
 ```
 
-必须同时满足：所有必需事务版本为 `success`，文件名和 checksum 与候选制品一致；`release_id` 为 `2026-09-01` 且 digest 一致；readiness 返回 `status=ready`、`requiredMigrations=true`、`functionPrivileges=true`，OKR 和任务中心兼容标志为 true。`deferredIndexes` 为 `pending` 可以接受，索引是否执行必须另行评估。
+必须同时满足：所有必需事务版本为 `success`，文件名和 checksum 与候选制品一致；`release_id` 为 `2026-09-01-task-date-weeks` 且 digest 为 `9061382fd04ea9deb77565a3c90ffb82f9e49a8da1a20a94000783604392bf5c`；readiness 返回 `status=ready`、`requiredMigrations=true`、`functionPrivileges=true`、`taskDateWeekFunction=true`、`taskDateWeekTrigger=true`、`taskPeriodDataConsistent=true`，OKR 和任务中心兼容标志为 true。`deferredIndexes` 为 `pending` 可以接受，索引是否执行必须另行评估。
 
 迁移失败时只查询失败记录和安全错误码，禁止手工修改账本、删除失败记录或直接粘贴 SQL 重跑：
 
@@ -373,7 +438,7 @@ unset MCP_MIGRATION_DATABASE_URL PGDATABASE MCP_RELEASE_ROOT MCP_BACKUP_FILE MCP
 1. 冻结候选提交并通过第 4 节全部门禁；
 2. 生成 allowlist 制品和 SHA-256 清单；
 3. 完成 CentOS 7 运行时、端口、磁盘、Nginx 和 systemd 只读检查；
-4. 完成正式库只读预检、45 条异常处置决策、备份和恢复演练；
+4. 完成正式库只读预检、45 条复盘异常处置决策、任务周期零例外回填、备份和恢复演练；
 5. 取得正式迁移独立授权；
 6. 使用受控迁移器执行事务迁移并核对账本；
 7. 单独决定 deferred 索引；
@@ -397,19 +462,20 @@ unset MCP_MIGRATION_DATABASE_URL PGDATABASE MCP_RELEASE_ROOT MCP_BACKUP_FILE MCP
 
 ### 12.2 数据和权限
 
-- 28 项 manifest、release digest、成功状态和 deferred index 状态一致；
+- 32 项 manifest、release digest、成功状态和 deferred index 状态一致；
 - 公司 2026 OKR 和产品部 Q3 OKR 在 `includeTasks=false/true` 下目标、KR 和任务槽位完整；
 - 父、子、兄弟部门按现有只读权限可见，跨顶级部门树隔离；
 - Admin 查询子部门成员任务与部门负责人/成员的合法可见集合一致；
 - 父部门负责人可在管理子树创建和复盘，普通成员不能越权写入；
 - KR 下标、任务字段、人员数组和复盘同步在网页、Node 和数据库边界一致拒绝非法值；
+- 任务 `startDate/dueDate` 派生出的 ISO 周与 `targetWeeks` 完全一致，`2026-06-29` 至 `2026-07-05` 只出现在 `2026-W27`，不出现在 `2026-W39`；
 - 45 条历史异常不会被自动修复或覆盖。
 
 ### 12.3 安全和制品
 
 - 两个生产依赖审计均为零漏洞；
 - 制品摘要覆盖除摘要文件自身外的全部 allowlist 文件；
-- 制品不含 `.env`、临时文件、诊断/回填/live smoke、日志或未知 SQL；
+- 制品不含 `.env`、临时文件、未批准的诊断/回填/live smoke、日志或未知 SQL；任务周期回填器是唯一获准维护脚本；
 - 服务进程没有高权限密钥或迁移连接变量；
 - 日志和验收材料没有凭据、连接信息或完整业务载荷。
 
