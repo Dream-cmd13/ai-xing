@@ -1,0 +1,4 @@
+project_id = "ai-xing"
+
+[functions.admin-user-manager]
+verify_jwt = true
