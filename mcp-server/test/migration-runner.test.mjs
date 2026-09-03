@@ -6,11 +6,11 @@ import {
   checksum, MIGRATION_MANIFEST, RELEASE_ID, runMigrations, unwrapTransaction,
 } from '../scripts/migrate.mjs';
 
-test('publishes date-derived task week migrations as the latest release contract', () => {
-  assert.equal(RELEASE_ID, '2026-09-01-task-date-weeks');
+test('publishes task title validation migration as the latest release contract', () => {
+  assert.equal(RELEASE_ID, '2026-09-03-task-title-unbounded');
   assert.deepEqual(MIGRATION_MANIFEST.slice(-2), [
-    '2026-09-01_task_date_derived_week_binding_contract.sql',
     '2026-09-01_task_date_derived_week_binding_readiness_gate.sql',
+    '2026-09-03_mcp_task_title_unbounded.sql',
   ]);
 });
 

@@ -48,6 +48,7 @@ export const MIGRATION_MANIFEST = Object.freeze([
   '2026-09-01_web_child_department_review_readiness_gate.sql',
   '2026-09-01_task_date_derived_week_binding_contract.sql',
   '2026-09-01_task_date_derived_week_binding_readiness_gate.sql',
+  '2026-09-03_mcp_task_title_unbounded.sql',
 ]);
 
 const NON_TRANSACTIONAL = new Set(['2026-08-27_mcp_task_indexes.sql']);
@@ -55,7 +56,7 @@ const NON_TRANSACTIONAL = new Set(['2026-08-27_mcp_task_indexes.sql']);
 // The runner still wraps it in its own transaction; every later transactional
 // migration must carry and pass the strict outer-envelope validation.
 const LEGACY_UNWRAPPED_TRANSACTIONAL = new Set(['2026-08-27_mcp_readiness.sql']);
-const RELEASE_CONTRACT_FILE = '2026-09-01_task_date_derived_week_binding_readiness_gate.sql';
+const RELEASE_CONTRACT_FILE = '2026-09-03_mcp_task_title_unbounded.sql';
 const LOCK_KEY = 'ai-xing:mcp:migrations:v1';
 const LEGACY_ADOPTION_CHECKS = Object.freeze({
   '2026-08-21_mcp_write_infra_tables': [

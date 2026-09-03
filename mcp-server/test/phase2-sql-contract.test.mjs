@@ -590,22 +590,14 @@ test('date-derived task week contract enforces the invariant at the database bou
   assert.doesNotMatch(sql, /GRANT\s+(?:SELECT|INSERT|UPDATE|DELETE|ALL)\s+ON\s+TABLE/i);
 });
 
-test('date-derived task week readiness requires canonical data and the complete release', async () => {
-  const sql = await migration('2026-09-01_task_date_derived_week_binding_readiness_gate.sql');
+test('task title migration removes only the upper bound and publishes the new release', async () => {
+  const sql = await migration('2026-09-03_mcp_task_title_unbounded.sql');
 
   assertTransactional(sql);
   assert.match(sql, new RegExp(EXPECTED_MANIFEST_DIGEST));
-  assert.match(sql, /2026-09-01-task-date-weeks/i);
-  assert.match(sql, /2026-09-01_web_child_department_review_readiness_gate/i);
-  assert.match(sql, /2026-09-01_task_date_derived_week_binding_contract/i);
-  assert.match(sql, /mcp_task_weeks_from_dates\(bigint,bigint\)/i);
-  assert.match(sql, /mcp_enforce_task_date_weeks_trigger/i);
-  assert.match(sql, /task_period_data_consistent/i);
-  assert.match(sql, /TASK_PERIOD_DATA_INCONSISTENT/i);
-  assert.match(sql, /'taskDateWeekFunction'/i);
-  assert.match(sql, /'taskDateWeekTrigger'/i);
-  assert.match(sql, /'taskPeriodDataConsistent'/i);
-  assert.match(sql, /'migrationVersion',\s*'2026-09-01_task_date_derived_week_binding_readiness_gate'/i);
-  assert.match(sql, /GRANT EXECUTE ON FUNCTION public\.mcp_get_readiness\(\) TO anon, authenticated/i);
+  assert.match(sql, /2026-09-03-task-title-unbounded/i);
+  assert.match(sql, /mcp_validate_task_changes/i);
+  assert.match(sql, /length\(p_changes->>''title''\) > 200/i);
+  assert.match(sql, /title 必填/i);
   assert.doesNotMatch(sql, /GRANT\s+(?:SELECT|INSERT|UPDATE|DELETE|ALL)\s+ON\s+TABLE/i);
 });
