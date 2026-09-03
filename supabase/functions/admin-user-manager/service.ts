@@ -74,7 +74,7 @@ function parseResetInput(input: unknown): string {
   if (!AUTH_ID_PATTERN.test(authId)) {
     throw new AdminUserError("INVALID_REQUEST", "用户身份标识格式不正确", 400);
   }
-  return authId;
+  return authId.toLowerCase();
 }
 
 export async function createUser(
@@ -149,7 +149,7 @@ export async function resetPassword(
   dependencies: AdminUserDependencies,
 ): Promise<ResetPasswordResult> {
   const authId = parseResetInput(input);
-  if (authId === callerAuthId) {
+  if (authId === callerAuthId.toLowerCase()) {
     throw new AdminUserError(
       "SELF_RESET_NOT_ALLOWED",
       "不能在此处重置当前登录账号的密码",

@@ -88,6 +88,19 @@ Deno.test("handler rejects requests without a bearer token", async () => {
   assertEquals(body.error.code, "AUTH_REQUIRED");
 });
 
+Deno.test("handler rejects an invalid session", async () => {
+  const response = await createHandler({
+    authenticate: async () => {
+      throw new Error("provider detail");
+    },
+  })(createRequest({ action: "reset_password", auth_id: targetAuthId }));
+  const body = await response.json();
+
+  assertEquals(response.status, 401);
+  assertEquals(body.error.code, "AUTH_REQUIRED");
+  assertEquals(JSON.stringify(body).includes("provider detail"), false);
+});
+
 Deno.test("handler rejects authenticated non-admin users", async () => {
   const response = await createHandler({ isAdmin: async () => false })(
     createRequest({
@@ -130,6 +143,53 @@ Deno.test("handler accepts preflight only from an allowed origin", async () => {
     response.headers.get("access-control-allow-origin"),
     allowedOrigin,
   );
+});
+
+Deno.test("handler rejects unsupported HTTP methods", async () => {
+  const response = await createHandler()(
+    new Request(
+      "https://project.supabase.co/functions/v1/admin-user-manager",
+      { method: "GET", headers: { Authorization: "Bearer valid-token" } },
+    ),
+  );
+  const body = await response.json();
+
+  assertEquals(response.status, 405);
+  assertEquals(body.error.code, "METHOD_NOT_ALLOWED");
+});
+
+Deno.test("handler rejects malformed JSON", async () => {
+  const response = await createHandler()(
+    new Request(
+      "https://project.supabase.co/functions/v1/admin-user-manager",
+      {
+        method: "POST",
+        headers: {
+          Authorization: "Bearer valid-token",
+          "Content-Type": "application/json",
+        },
+        body: "{",
+      },
+    ),
+  );
+  const body = await response.json();
+
+  assertEquals(response.status, 400);
+  assertEquals(body.error.code, "INVALID_REQUEST");
+});
+
+Deno.test("handler resets a bound target user", async () => {
+  const response = await createHandler()(createRequest({
+    action: "reset_password",
+    auth_id: targetAuthId,
+  }));
+  const body = await response.json();
+
+  assertEquals(response.status, 200);
+  assertEquals(body.data, {
+    authId: targetAuthId,
+    temporaryPassword: "888888",
+  });
 });
 
 Deno.test("handler rejects unknown actions with a stable error code", async () => {

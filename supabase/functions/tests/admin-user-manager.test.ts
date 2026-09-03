@@ -214,6 +214,20 @@ Deno.test("resetPassword rejects self reset", async () => {
   );
 });
 
+Deno.test("resetPassword rejects self reset regardless of UUID casing", async () => {
+  const dependencies = createFakeDependencies();
+
+  await expectAdminError(
+    () =>
+      resetPassword(
+        { auth_id: callerAuthId.toUpperCase() },
+        callerAuthId,
+        dependencies,
+      ),
+    "SELF_RESET_NOT_ALLOWED",
+  );
+});
+
 Deno.test("resetPassword maps Auth failures to a stable error", async () => {
   const dependencies = createFakeDependencies({
     updateAuthPassword: async () => {

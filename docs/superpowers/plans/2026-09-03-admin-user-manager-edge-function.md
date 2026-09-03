@@ -17,7 +17,7 @@
 - Create: `supabase/functions/admin-user-manager/service.ts`
 - Test: `supabase/functions/tests/admin-user-manager.test.ts`
 
-- [ ] **Step 1: Write failing service tests**
+- [x] **Step 1: Write failing service tests**
 
 Cover successful creation, duplicate usernames, invalid departments, Auth creation failure, business insert compensation, compensation failure, successful reset, missing targets, self-reset, and Auth update failure. Use an in-memory dependency object and assert stable `AdminUserError.code` values.
 
@@ -37,7 +37,7 @@ Deno.test("deletes a newly-created auth user when the business insert fails", as
 });
 ```
 
-- [ ] **Step 2: Run tests and verify failure**
+- [x] **Step 2: Run tests and verify failure**
 
 Run:
 
@@ -47,7 +47,7 @@ npx --yes deno@2.9.6 test supabase/functions/tests/admin-user-manager.test.ts --
 
 Expected: failure because contracts and service modules do not exist.
 
-- [ ] **Step 3: Implement contracts and validation**
+- [x] **Step 3: Implement contracts and validation**
 
 Define `AdminUserError`, stable error codes, `CreateUserInput`, response types, and validators. Normalize usernames to lowercase and accept only `^[a-z0-9._-]{1,64}$`; accept roles `Admin`, `Manager`, and `Employee`; validate names, departments, actions, and UUIDs.
 
@@ -64,7 +64,7 @@ export class AdminUserError extends Error {
 }
 ```
 
-- [ ] **Step 4: Implement create and reset services**
+- [x] **Step 4: Implement create and reset services**
 
 Use dependency interfaces for all network and database calls. Create Auth first, insert `public.users` second, and delete Auth on insert failure. Reset only an Auth ID bound to `public.users` and reject the caller's own Auth ID.
 
@@ -81,11 +81,11 @@ export interface AdminUserDependencies {
 }
 ```
 
-- [ ] **Step 5: Run service tests**
+- [x] **Step 5: Run service tests**
 
 Run the Deno test command. Expected: all service cases pass.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add supabase/functions/admin-user-manager supabase/functions/tests/admin-user-manager.test.ts
@@ -100,7 +100,7 @@ git commit -m "feat: 实现管理员边缘函数业务逻辑"
 - Create: `supabase/config.toml`
 - Modify: `supabase/functions/tests/admin-user-manager.test.ts`
 
-- [ ] **Step 1: Add handler tests**
+- [x] **Step 1: Add handler tests**
 
 Test CORS preflight, rejected origins, unsupported methods, missing bearer tokens, invalid sessions, non-admin callers, malformed JSON, both valid actions, sanitized internal errors, and request IDs.
 
@@ -113,15 +113,15 @@ const response = await handler(new Request("https://example.test", {
 assertEquals(response.status, 401);
 ```
 
-- [ ] **Step 2: Implement handler**
+- [x] **Step 2: Implement handler**
 
 Create a `createAdminUserHandler()` factory. Allow requests without an Origin for controlled CLI checks, require configured origins for browser requests, parse Bearer JWTs, authenticate the caller, call `isAdmin`, dispatch actions, and return stable JSON envelopes.
 
-- [ ] **Step 3: Implement Supabase runtime adapter**
+- [x] **Step 3: Implement Supabase runtime adapter**
 
 Read `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, and `ADMIN_ALLOWED_ORIGINS`. Build a caller-scoped client for `auth.getUser()` and `rpc('is_admin')`, and a service-role client for Auth Admin and table operations. Never log environment values or raw provider errors.
 
-- [ ] **Step 4: Configure JWT verification**
+- [x] **Step 4: Configure JWT verification**
 
 ```toml
 project_id = "ai-xing"
@@ -130,7 +130,7 @@ project_id = "ai-xing"
 verify_jwt = true
 ```
 
-- [ ] **Step 5: Run tests and type checks**
+- [x] **Step 5: Run tests and type checks**
 
 ```powershell
 npx --yes deno@2.9.6 fmt --check supabase/functions/admin-user-manager supabase/functions/tests/admin-user-manager.test.ts
@@ -140,7 +140,7 @@ npx --yes deno@2.9.6 test supabase/functions/tests/admin-user-manager.test.ts --
 
 Expected: all commands pass.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add supabase/config.toml supabase/functions/admin-user-manager supabase/functions/tests/admin-user-manager.test.ts
@@ -154,7 +154,7 @@ git commit -m "feat: 加固管理员边缘函数入口"
 - Modify: `.env.example`
 - Test: `local-test-files` is not used; validation runs against source and build output.
 
-- [ ] **Step 1: Replace Flask administrator branches**
+- [x] **Step 1: Replace Flask administrator branches**
 
 Keep `chatWithAI()` and `postToRest()` for AI. Make both administrator methods invoke `admin-user-manager` directly and normalize the function envelope.
 
@@ -168,11 +168,11 @@ const invokeAdminUserManager = async <T>(body: Record<string, unknown>): Promise
 };
 ```
 
-- [ ] **Step 2: Document environment ownership**
+- [x] **Step 2: Document environment ownership**
 
 Keep the existing public Supabase variables. Explain in `.env.example` that `VITE_BACKEND_TARGET` and `VITE_BACKEND_API_BASE_URL` affect AI only and administrator actions always use Edge Function.
 
-- [ ] **Step 3: Verify source contract**
+- [x] **Step 3: Verify source contract**
 
 ```powershell
 rg -n "admin-user-manager" services/backendGateway.ts
@@ -181,7 +181,7 @@ rg -n "/api/admin/users" services/backendGateway.ts
 
 Expected: the first command finds both administrator actions; the second has no output.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add services/backendGateway.ts .env.example
@@ -195,7 +195,7 @@ git commit -m "feat: 管理员操作切换边缘函数"
 - Modify: `hooks/useAppActions.ts`
 - Modify: `components/UserView.tsx`
 
-- [ ] **Step 1: Add a persisted-user store action**
+- [x] **Step 1: Add a persisted-user store action**
 
 Add `acceptPersistedUser(user)` that upserts the same user into `users` and `lastSavedUsers` without changing `dirtyDomains` or clearing pre-existing user edits.
 
@@ -206,15 +206,15 @@ acceptPersistedUser: (user) => set((state) => ({
 })),
 ```
 
-- [ ] **Step 2: Expose the action through `useAppActions`**
+- [x] **Step 2: Expose the action through `useAppActions`**
 
 Call the store action and synchronize `stateRef`, without setting the user domain dirty.
 
-- [ ] **Step 3: Update `UserView`**
+- [x] **Step 3: Update `UserView`**
 
 After Edge success, construct the new `User` with empty permissions, `rowVersion: 0`, and call `acceptPersistedUser`. Remove the extra `setUsers()` and `setIsDirty(true)` calls from the create path. Leave normal user editing behavior unchanged.
 
-- [ ] **Step 4: Run TypeScript validation**
+- [x] **Step 4: Run TypeScript validation**
 
 ```powershell
 npm run lint:app
@@ -222,7 +222,7 @@ npm run lint:app
 
 Expected: exit code 0.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add store/useAppStore.ts hooks/useAppActions.ts components/UserView.tsx
@@ -238,23 +238,23 @@ git commit -m "fix: 同步已创建用户保存基线"
 - Modify: `local-test-files/generate_deployment_doc.py`
 - Regenerate: `docs/AI-Xing正式服部署步骤-简版.docx`
 
-- [ ] **Step 1: Correct the Edge Function specification**
+- [x] **Step 1: Correct the Edge Function specification**
 
 Replace stale paths and `role: User`, mark the function implemented, document stable errors, compensation, JWT verification, CORS, and deployment order.
 
-- [ ] **Step 2: Correct Flask ownership documentation**
+- [x] **Step 2: Correct Flask ownership documentation**
 
 State that Flask handles AI only; administrator endpoints remain temporarily for rollback and must be removed with the Flask service-role secret after formal acceptance.
 
-- [ ] **Step 3: Update deployment instructions**
+- [x] **Step 3: Update deployment instructions**
 
 Add Edge Function deployment before frontend deployment. State that frontend environment has no administrator-specific variable and that AI Flask variables do not control user administration.
 
-- [ ] **Step 4: Regenerate and structurally inspect the Word guide**
+- [x] **Step 4: Regenerate and structurally inspect the Word guide**
 
 Use the bundled document runtime, then confirm the DOCX ZIP is valid and contains `admin-user-manager`, `ADMIN_ALLOWED_ORIGINS`, and the Edge deployment sequence.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add docs/admin-user-manager-edge-function-spec.md docs/flask-edge-compatible-backend-analysis.md docs/production-deployment-quick-guide.md docs/AI-Xing正式服部署步骤-简版.docx
@@ -266,7 +266,7 @@ git commit -m "docs: 更新边缘函数部署说明"
 **Files:**
 - Verify all changed files.
 
-- [ ] **Step 1: Run all deterministic checks**
+- [x] **Step 1: Run all deterministic checks**
 
 ```powershell
 npx --yes deno@2.9.6 fmt --check supabase/functions/admin-user-manager supabase/functions/tests/admin-user-manager.test.ts
@@ -279,7 +279,7 @@ git diff --check
 
 Expected: every command exits 0.
 
-- [ ] **Step 2: Inspect the production bundle**
+- [x] **Step 2: Inspect the production bundle**
 
 ```powershell
 rg -n "admin-user-manager" dist/assets
@@ -288,7 +288,7 @@ rg -n "/api/admin/users" dist/assets
 
 Expected: Edge function name is present; Flask administrator paths are absent.
 
-- [ ] **Step 3: Review repository status**
+- [x] **Step 3: Review repository status**
 
 Only intended source, tests, documentation, and the pre-existing local artifacts may remain. No `.env`, secret, access token, build output, cache, or temporary file is staged.
 

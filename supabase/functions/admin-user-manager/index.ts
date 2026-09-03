@@ -41,6 +41,10 @@ function loadConfiguration(): RuntimeConfiguration {
   };
 }
 
+function escapeIlikePattern(value: string): string {
+  return value.replace(/[\\%_]/g, "\\$&");
+}
+
 function createRuntimeDependencies(
   configuration: RuntimeConfiguration,
 ): AdminUserHandlerDependencies {
@@ -61,7 +65,7 @@ function createRuntimeDependencies(
       const { data, error } = await serviceClient
         .from("users")
         .select("id")
-        .ilike("username", username)
+        .ilike("username", escapeIlikePattern(username))
         .maybeSingle();
       if (error) throw error;
       return data ? { id: data.id } : null;
