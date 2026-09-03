@@ -5,7 +5,7 @@ import {
   getWorkspace, updateStrategy, saveDepartmentsAtomically, saveProcessesAtomically,
   saveUsersAtomically, saveSystemRolesAtomically, saveBusinessesAtomically, saveAISettings
 } from '@/data';
-import { ProcessDefinition, ProcessHistory } from '@/types';
+import { ProcessDefinition, ProcessHistory, User } from '@/types';
 import { useTaskActions } from '@/hooks/useTaskActions';
 import { getUserFacingError } from '@/utils/userFacingError';
 import { getPrimaryManagedDepartmentId, isAdminUser, isManagerUser } from '@/utils/permissions';
@@ -190,6 +190,11 @@ export const useAppActions = () => {
     syncStateRef();
   };
 
+  const acceptPersistedUser = (user: User) => {
+    store.acceptPersistedUser(user);
+    syncStateRef();
+  };
+
   const handleSetSystemRoles = (newRoles: any[]) => {
     store.setSystemRoles(newRoles);
     store.setIsDirty(true);
@@ -351,6 +356,7 @@ export const useAppActions = () => {
     executeAtomicOperation,
     handleSetDepartments,
     handleSetUsers,
+    acceptPersistedUser,
     handleSetSystemRoles,
     handleSetAISettings,
     submitAISettings,

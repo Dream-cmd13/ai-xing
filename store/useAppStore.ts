@@ -78,6 +78,7 @@ export interface AppStoreState extends AppState {
   // Action wrappers
   setDepartments: (departments: Department[]) => void;
   setUsers: (users: User[]) => void;
+  acceptPersistedUser: (user: User) => void;
   setSystemRoles: (roles: SystemRole[]) => void;
   setAISettings: (settings: AISettings) => void;
   setBusinesses: (businesses: BusinessDefinition[]) => void;
@@ -188,6 +189,15 @@ export const useAppStore = create<AppStoreState>((set) => ({
     dirtyDomains: Array.from(new Set([...state.dirtyDomains, 'users'])),
     isDirty: true
   })),
+  acceptPersistedUser: (user) => set((state) => {
+    const upsertUser = (users: User[]) => users.some((current) => current.id === user.id)
+      ? users.map((current) => current.id === user.id ? user : current)
+      : [...users, user];
+    return {
+      users: upsertUser(state.users),
+      lastSavedUsers: upsertUser(state.lastSavedUsers)
+    };
+  }),
   setSystemRoles: (systemRoles) => set((state) => ({
     systemRoles,
     dirtyDomains: Array.from(new Set([...state.dirtyDomains, 'systemRoles'])),

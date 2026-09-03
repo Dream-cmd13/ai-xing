@@ -27,7 +27,8 @@ const UserView: React.FC = () => {
   const permissions = usePermissions('user');
   const { 
     handleSave, 
-    handleSetDepartments: setDepartments, handleSetUsers: setUsers, 
+    handleSetDepartments: setDepartments, handleSetUsers: setUsers,
+    acceptPersistedUser,
     handleSetSystemRoles: setSystemRoles, handleSetAISettings: setAISettings, 
     handleSetBusinesses: setBusinesses, setProcessData, updateProcessProps, 
     addProcess, deleteProcessFn: deleteProcess, publishProcess, rollbackProcess, 
@@ -125,7 +126,9 @@ const UserView: React.FC = () => {
       setShowAlert(true);
       return;
     }
-    const exists = state.users.find(u => u.username === newUsername);
+    const normalizedUsername = newUsername.trim().toLowerCase();
+    const normalizedName = newName.trim();
+    const exists = state.users.find(u => u.username.toLowerCase() === normalizedUsername);
     if (exists) {
       setAlertMessage('该账号已存在，请使用其他账号');
       setShowAlert(true);
@@ -134,8 +137,8 @@ const UserView: React.FC = () => {
 
     try {
       const data = await createAdminUser({
-        username: newUsername,
-        name: newName,
+        username: normalizedUsername,
+        name: normalizedName,
         role: newRole,
         departmentId: newDeptId || undefined
       });
@@ -143,16 +146,18 @@ const UserView: React.FC = () => {
       const newUser: User = { 
         id: data.userId, 
         auth_id: data.authId,
-        username: newUsername, 
-        name: newName, 
+        username: normalizedUsername,
+        name: normalizedName,
         role: newRole,
         departmentId: newDeptId || undefined,
-        padPermissions: [] 
+        padPermissions: [],
+        reviews: {},
+        systemRoleIds: [],
+        customPermissions: {},
+        rowVersion: 0
       };
-      
-      const updatedUsers = [...state.users, newUser];
-      setUsers(updatedUsers);
-      setIsDirty(true);
+
+      acceptPersistedUser(newUser);
       
       setNewName(''); setNewUsername(''); setNewDeptId('');
       setAlertMessage('用户创建成功！');

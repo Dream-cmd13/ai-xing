@@ -1,3 +1,5 @@
+import { FunctionsHttpError } from "@supabase/supabase-js";
+
 import { supabase } from "../supabase";
 
 type BackendTarget = "flask" | "edge";
@@ -71,6 +73,28 @@ const normalizeErrorMessage = (payload: SuccessEnvelope<unknown> | null, fallbac
   return fallback;
 };
 
+const getFunctionErrorMessage = async (
+  error: unknown,
+  payload: SuccessEnvelope<unknown> | null,
+  fallback: string
+): Promise<string> => {
+  const payloadMessage = normalizeErrorMessage(payload, "");
+  if (payloadMessage) return payloadMessage;
+
+  if (error instanceof FunctionsHttpError && error.context instanceof Response) {
+    const responsePayload = (await error.context.clone().json().catch(() => null)) as
+      | SuccessEnvelope<unknown>
+      | null;
+    const responseMessage = normalizeErrorMessage(responsePayload, "");
+    if (responseMessage) return responseMessage;
+  }
+
+  if (error instanceof Error && error.message && !(error instanceof FunctionsHttpError)) {
+    return error.message;
+  }
+  return fallback;
+};
+
 const ensureBackendBaseUrl = () => {
   if (!backendBaseUrl) {
     throw new Error("缺少后端地址配置，请设置 VITE_BACKEND_API_BASE_URL。");
@@ -114,31 +138,23 @@ export const chatWithAI = async (payload: AIChatPayload): Promise<AIChatResult> 
 export const createAdminUser = async (
   payload: CreateAdminUserPayload
 ): Promise<AdminUserResponse> => {
-  if (backendTarget === "edge") {
-    const { data, error } = await supabase.functions.invoke("admin-user-manager", {
-      body: { action: "create_user", ...payload },
-    });
-    if (error || !data?.success) {
-      throw new Error(error?.message || data?.error?.message || data?.error || "创建用户失败");
-    }
-    return data.data;
+  const { data, error } = await supabase.functions.invoke("admin-user-manager", {
+    body: { action: "create_user", ...payload },
+  });
+  if (error || !data?.success || !data?.data) {
+    throw new Error(await getFunctionErrorMessage(error, data, "创建用户失败"));
   }
-
-  return postToRest<AdminUserResponse>("/api/admin/users", payload);
+  return data.data;
 };
 
 export const resetAdminUserPassword = async (
   authId: string
 ): Promise<ResetPasswordResponse> => {
-  if (backendTarget === "edge") {
-    const { data, error } = await supabase.functions.invoke("admin-user-manager", {
-      body: { action: "reset_password", auth_id: authId },
-    });
-    if (error || !data?.success) {
-      throw new Error(error?.message || data?.error?.message || data?.error || "重置密码失败");
-    }
-    return data.data;
+  const { data, error } = await supabase.functions.invoke("admin-user-manager", {
+    body: { action: "reset_password", auth_id: authId },
+  });
+  if (error || !data?.success || !data?.data) {
+    throw new Error(await getFunctionErrorMessage(error, data, "重置密码失败"));
   }
-
-  return postToRest<ResetPasswordResponse>("/api/admin/users/reset-password", { authId });
+  return data.data;
 };
