@@ -1,0 +1,42 @@
+{
+  "version": "5",
+  "specifiers": {
+    "jsr:@std/assert@1.0.14": "1.0.14",
+    "jsr:@std/internal@^1.0.10": "1.0.14"
+  },
+  "jsr": {
+    "@std/assert@1.0.14": {
+      "integrity": "68d0d4a43b365abc927f45a9b85c639ea18a9fab96ad92281e493e4ed84abaa4",
+      "dependencies": [
+        "jsr:@std/internal"
+      ]
+    },
+    "@std/internal@1.0.14": {
+      "integrity": "291516b3d4c35024d6ffbc0a9df5bf4c64116e05b50012cf846710152d2ffdf7"
+    }
+  },
+  "workspace": {
+    "packageJson": {
+      "dependencies": [
+        "npm:@supabase/supabase-js@^2.105.4",
+        "npm:@types/node@^22.14.0",
+        "npm:@vitejs/plugin-react@5",
+        "npm:autoprefixer@^10.5.0",
+        "npm:clsx@^2.1.1",
+        "npm:dotenv@^17.4.2",
+        "npm:lucide-react@0.562",
+        "npm:motion@^12.38.0",
+        "npm:pinyin-pro@^3.28.1",
+        "npm:postcss@^8.5.15",
+        "npm:react-dom@^19.2.3",
+        "npm:react-router-dom@7.18.2",
+        "npm:react@^19.2.3",
+        "npm:tailwind-merge@^3.5.0",
+        "npm:tailwindcss@^3.4.19",
+        "npm:typescript@~5.8.2",
+        "npm:vite@^6.2.0",
+        "npm:zustand@^5.0.12"
+      ]
+    }
+  }
+}
