@@ -17,7 +17,7 @@ const taskIdSchema = z.string().trim().min(1).max(128);
 const recordSchema = z.record(z.string(), z.unknown());
 const weekSchema = z.string().regex(/^\d{4}-W(?:0[1-9]|[1-4]\d|5[0-3])$/);
 const taskPayloadShape = {
-  title: z.string().trim().min(1).max(200).optional(),
+  title: z.string().trim().min(1).optional(),
   departmentId: z.string().trim().min(1).max(128).optional(),
   ownerId: z.string().trim().min(1).max(128).optional(),
   ownerName: z.object({ name: z.string().trim().min(1).max(128), departmentName: z.string().trim().min(1).max(128).optional() }).optional(),
@@ -83,7 +83,7 @@ function createPayload(args = {}, context = {}, { defaultPeriod = false, nowMs =
 function validateTaskPayload(payload) {
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) throw rejectInvalid();
   for (const key of Object.keys(payload)) if (!taskPayloadKeys.has(key) && key !== 'status') throw rejectInvalid();
-  if (typeof payload.title !== 'string' || payload.title.trim().length === 0 || payload.title.length > 200) throw rejectInvalid();
+  if (typeof payload.title !== 'string' || payload.title.trim().length === 0) throw rejectInvalid();
   if (payload.status !== 'draft') throw rejectInvalid();
   if (payload.priority !== undefined && !['high', 'medium', 'low'].includes(payload.priority)) throw rejectInvalid();
   if (payload.alignedKrId !== undefined && !parseReviewSlot(payload.alignedKrId, payload.id).ok) throw rejectInvalid();
@@ -146,7 +146,7 @@ function validateTaskChanges(changes, { allowOwnerChange = false } = {}) {
   ]) validateAliasPair(changes, camelKey, snakeKey);
 
   if (hasKey(changes, 'title')
-    && (typeof changes.title !== 'string' || changes.title.trim().length === 0 || changes.title.length > 200)) {
+    && (typeof changes.title !== 'string' || changes.title.trim().length === 0)) {
     throw rejectInvalid();
   }
   if (hasKey(changes, 'priority') && !['high', 'medium', 'low'].includes(changes.priority)) throw rejectInvalid();

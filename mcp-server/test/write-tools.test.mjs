@@ -422,7 +422,13 @@ test('update tools reject invalid field values before the repository', async () 
     assert.equal(result.isError, true);
     assert.equal(jsonContent(result).code, 'INVALID_ARGUMENT');
   }
-  assert.equal(repository.calls.some(([name]) => name === 'prepareUpdate'), false);
+  const callsBeforeLongTitle = repository.calls.length;
+  const longTitle = await tools.get('prepare_update_pad_task').handler({
+    taskId: 'task-1', changes: { title: '长'.repeat(201) },
+  });
+  assert.equal(longTitle.isError, false);
+  assert.equal(repository.calls.length, callsBeforeLongTitle + 1);
+  assert.equal(repository.calls.at(-1)[0], 'prepareUpdate');
 });
 
 test('tool descriptions require requestId reuse for logical retries', () => {

@@ -590,13 +590,13 @@ test('date-derived task week contract enforces the invariant at the database bou
   assert.doesNotMatch(sql, /GRANT\s+(?:SELECT|INSERT|UPDATE|DELETE|ALL)\s+ON\s+TABLE/i);
 });
 
-test('task title migration removes only the upper bound and publishes the new release', async () => {
-  const sql = await migration('2026-09-03_mcp_task_title_unbounded.sql');
+test('task title follow-up migration removes the remaining upper bound and repairs readiness', async () => {
+  const sql = await migration('2026-09-04_mcp_task_title_contract_fix.sql');
 
   assertTransactional(sql);
   assert.match(sql, new RegExp(EXPECTED_MANIFEST_DIGEST));
-  assert.match(sql, /2026-09-03-task-title-unbounded/i);
-  assert.match(sql, /mcp_validate_task_changes/i);
+  assert.match(sql, /2026-09-04-task-title-unbounded/i);
+  assert.match(sql, /mcp_validate_task_changes_impl_date_weeks_20260901/i);
   assert.match(sql, /length\(p_changes->>''title''\) > 200/i);
   assert.match(sql, /title 必填/i);
   assert.doesNotMatch(sql, /GRANT\s+(?:SELECT|INSERT|UPDATE|DELETE|ALL)\s+ON\s+TABLE/i);
