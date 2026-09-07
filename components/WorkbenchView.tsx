@@ -14,6 +14,7 @@ import { ensureTaskTargetWeeks } from '@/utils/taskPeriods.js';
 import { createTaskOkrGroups, getWeekDateRange } from '@/utils/taskOkrOptions';
 import { getUserFacingError } from '@/utils/userFacingError';
 import { canAssignTaskOwner, canManageTask, canViewTask, getAssignableTaskOwners, isAdminUser } from '@/utils/permissions';
+import { isTaskActiveOnShanghaiDay } from '@/utils/reviewPeriodConsistency.js';
 
 const WorkbenchView: React.FC = () => {
   const state = useAppStore();
@@ -233,12 +234,7 @@ const WorkbenchView: React.FC = () => {
   }, [state.tasks, currentUser.id]);
 
   const todayTasks = useMemo(() => {
-    return allMyTasks.filter(t => {
-      if (!t.startDate || !t.dueDate) return false;
-      const start = new Date(t.startDate);
-      const due = new Date(t.dueDate);
-      return today >= start && today <= due;
-    });
+    return allMyTasks.filter(task => isTaskActiveOnShanghaiDay(task, today.getTime()));
   }, [allMyTasks, today]);
 
   const thisWeekTasks = useMemo(() => {

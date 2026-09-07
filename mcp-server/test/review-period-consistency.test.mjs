@@ -5,6 +5,7 @@ import {
   deriveTaskWeeksFromDateRange,
   getTaskPeriodConsistency,
   getTaskWeekDisplay,
+  isTaskActiveOnShanghaiDay,
   normalizeTaskPeriodFromDates,
 } from '../../utils/reviewPeriodConsistency.js';
 import { taskPeriodVectors } from './fixtures/task-period-vectors.mjs';
@@ -36,6 +37,20 @@ test('browser rejects incomplete, reversed, invalid and overlong date ranges', (
   assert.throws(() => deriveTaskWeeksFromDateRange(Number.NaN, Date.now()), /有效时间戳/);
   assert.throws(() => deriveTaskWeeksFromDateRange(Date.UTC(2026, 0, 2), Date.UTC(2026, 0, 1)), /不得晚于/);
   assert.throws(() => deriveTaskWeeksFromDateRange(Date.UTC(2025, 0, 1), Date.UTC(2026, 0, 15)), /53/);
+});
+
+test('browser treats task ranges as inclusive Asia/Shanghai calendar days', () => {
+  const task = {
+    startDate: Date.parse('2026-09-07T12:00:00.000Z'),
+    dueDate: Date.parse('2026-09-13T12:00:00.000Z'),
+  };
+
+  assert.equal(isTaskActiveOnShanghaiDay(task, Date.parse('2026-09-07T01:00:00.000Z')), true);
+  assert.equal(isTaskActiveOnShanghaiDay(task, Date.parse('2026-09-13T15:59:59.999Z')), true);
+  assert.equal(isTaskActiveOnShanghaiDay(task, Date.parse('2026-09-06T15:59:59.999Z')), false);
+  assert.equal(isTaskActiveOnShanghaiDay(task, Date.parse('2026-09-13T16:00:00.000Z')), false);
+  assert.equal(isTaskActiveOnShanghaiDay({ startDate: null, dueDate: task.dueDate }, task.startDate), false);
+  assert.equal(isTaskActiveOnShanghaiDay({ startDate: Number.NaN, dueDate: task.dueDate }, task.startDate), false);
 });
 
 test('consistency requires stored weeks to exactly equal date-derived weeks', () => {

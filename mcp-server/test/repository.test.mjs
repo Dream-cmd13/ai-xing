@@ -257,13 +257,19 @@ test('always gets the personal workbench for the authenticated business user', a
 });
 
 test('groups only today, current-week and next-week tasks and allows overlap', async () => {
-  const now = Date.UTC(2026, 11, 31, 4);
+  const now = Date.parse('2026-09-07T01:00:00.000Z');
   const currentWeekId = getCurrentIsoWeekPeriod(now).weekId;
   const nextWeekId = getCurrentIsoWeekPeriod(now + (7 * 24 * 60 * 60 * 1000)).weekId;
   const fake = fakeSupabase({
     'rpc:get_my_workbench_tasks': {
       data: [
-        { id: 'today-week', owner_id: 'user-1', start_date: now - 1000, due_date: now + 1000, target_weeks: [currentWeekId] },
+        {
+          id: 'today-week',
+          owner_id: 'user-1',
+          start_date: Date.parse('2026-09-07T12:00:00.000Z'),
+          due_date: Date.parse('2026-09-13T12:00:00.000Z'),
+          target_weeks: [currentWeekId],
+        },
         { id: 'next-week', owner_id: 'user-1', target_weeks: [nextWeekId] },
         { id: 'history', owner_id: 'user-1', target_weeks: ['2025-W01'] },
       ],

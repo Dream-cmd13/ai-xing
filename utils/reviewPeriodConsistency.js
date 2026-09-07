@@ -38,6 +38,21 @@ const getShanghaiBusinessDay = (value) => {
   };
 };
 
+export const isTaskActiveOnShanghaiDay = (task, now = Date.now()) => {
+  if (task?.startDate === null || task?.startDate === undefined
+    || task?.dueDate === null || task?.dueDate === undefined) {
+    return false;
+  }
+  try {
+    const start = getShanghaiBusinessDay(task.startDate);
+    const due = getShanghaiBusinessDay(task.dueDate);
+    const current = getShanghaiBusinessDay(now);
+    return start.epochDay <= current.epochDay && current.epochDay <= due.epochDay;
+  } catch {
+    return false;
+  }
+};
+
 const isoWeekFromEpochDay = (epochDay) => {
   const date = new Date(epochDay * DAY_MS);
   const isoDay = date.getUTCDay() || 7;

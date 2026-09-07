@@ -1,5 +1,5 @@
 import { AppError } from '../errors.mjs';
-import { getCurrentIsoWeekPeriod } from '../task-period-defaults.mjs';
+import { getCurrentIsoWeekPeriod, isTaskActiveOnShanghaiDay } from '../task-period-defaults.mjs';
 import {
   MAX_VISIBLE_TASK_SCAN,
   assertResult,
@@ -556,11 +556,10 @@ export function createTaskReadRepository({
           );
         }
         const rows = assertResult(result);
-        const isToday = (row) => {
-          const start = row?.start_date ?? row?.startDate;
-          const due = row?.due_date ?? row?.dueDate;
-          return Number.isFinite(start) && Number.isFinite(due) && todayMs >= start && todayMs <= due;
-        };
+        const isToday = (row) => isTaskActiveOnShanghaiDay({
+          startDate: row?.start_date ?? row?.startDate,
+          dueDate: row?.due_date ?? row?.dueDate,
+        }, todayMs);
         const hasWeek = (row, weekId) => {
           const weeks = row?.target_weeks ?? row?.targetWeeks;
           return Array.isArray(weeks) && weeks.includes(weekId);

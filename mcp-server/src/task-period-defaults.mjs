@@ -27,6 +27,21 @@ function shanghaiDateParts(nowMs) {
   };
 }
 
+export function isTaskActiveOnShanghaiDay(task, nowMs = Date.now()) {
+  if (task?.startDate === null || task?.startDate === undefined
+    || task?.dueDate === null || task?.dueDate === undefined) {
+    return false;
+  }
+  try {
+    const start = shanghaiDateParts(task.startDate);
+    const due = shanghaiDateParts(task.dueDate);
+    const current = shanghaiDateParts(nowMs);
+    return start.epochDay <= current.epochDay && current.epochDay <= due.epochDay;
+  } catch {
+    return false;
+  }
+}
+
 function isoWeekForDate({ year, month, day }) {
   const date = new Date(Date.UTC(year, month - 1, day));
   const isoDay = date.getUTCDay() || 7;

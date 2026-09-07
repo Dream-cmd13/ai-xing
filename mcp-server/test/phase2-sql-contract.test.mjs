@@ -594,10 +594,27 @@ test('task title follow-up migration removes the remaining upper bound and repai
   const sql = await migration('2026-09-04_mcp_task_title_contract_fix.sql');
 
   assertTransactional(sql);
-  assert.match(sql, new RegExp(EXPECTED_MANIFEST_DIGEST));
+  assert.match(sql, /80eff4b39e6f90e90738613401edcb7199f2098c0b64ab359899ea47657f4c98/);
   assert.match(sql, /2026-09-04-task-title-unbounded/i);
   assert.match(sql, /mcp_validate_task_changes_impl_date_weeks_20260901/i);
   assert.match(sql, /length\(p_changes->>''title''\) > 200/i);
   assert.match(sql, /title 必填/i);
+  assert.doesNotMatch(sql, /GRANT\s+(?:SELECT|INSERT|UPDATE|DELETE|ALL)\s+ON\s+TABLE/i);
+});
+
+test('workbench today migration compares inclusive Asia/Shanghai calendar days', async () => {
+  const sql = await migration('2026-09-07_workbench_shanghai_calendar_day.sql');
+
+  assertTransactional(sql);
+  assert.match(sql, /CREATE OR REPLACE FUNCTION public\.mcp_get_personal_workbench_page\s*\(/i);
+  assert.match(sql, /to_timestamp\(start_date \/ 1000\.0\) AT TIME ZONE 'Asia\/Shanghai'/i);
+  assert.match(sql, /to_timestamp\(due_date \/ 1000\.0\) AT TIME ZONE 'Asia\/Shanghai'/i);
+  assert.match(sql, /clock_timestamp\(\) AT TIME ZONE 'Asia\/Shanghai'/i);
+  assert.doesNotMatch(sql, /v_now BETWEEN start_date AND due_date/i);
+  assert.match(sql, /REVOKE ALL ON FUNCTION public\.mcp_get_personal_workbench_page[\s\S]+FROM PUBLIC, anon, authenticated, service_role/i);
+  assert.match(sql, /GRANT EXECUTE ON FUNCTION public\.mcp_get_personal_workbench_page[\s\S]+TO authenticated/i);
+  assert.match(sql, /2026-09-07-workbench-shanghai-day/i);
+  assert.match(sql, new RegExp(EXPECTED_MANIFEST_DIGEST));
+  assert.match(sql, /MCP_RELEASE_CONTRACT_UPDATE_FAILED/i);
   assert.doesNotMatch(sql, /GRANT\s+(?:SELECT|INSERT|UPDATE|DELETE|ALL)\s+ON\s+TABLE/i);
 });

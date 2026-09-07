@@ -8,6 +8,7 @@ import {
   fillTaskPeriodFromTargetWeeks,
   getCurrentIsoWeekPeriod,
   getIsoWeekRange,
+  isTaskActiveOnShanghaiDay,
 } from '../src/task-period-defaults.mjs';
 import { AppError } from '../src/errors.mjs';
 import { taskPeriodVectors } from './fixtures/task-period-vectors.mjs';
@@ -55,6 +56,20 @@ test('handles an ISO week-year boundary using the Shanghai date', () => {
     startDate: Date.UTC(2025, 11, 29, 12),
     dueDate: Date.UTC(2026, 0, 4, 12),
   });
+});
+
+test('MCP treats task ranges as inclusive Asia/Shanghai calendar days', () => {
+  const task = {
+    startDate: Date.parse('2026-09-07T12:00:00.000Z'),
+    dueDate: Date.parse('2026-09-13T12:00:00.000Z'),
+  };
+
+  assert.equal(isTaskActiveOnShanghaiDay(task, Date.parse('2026-09-07T01:00:00.000Z')), true);
+  assert.equal(isTaskActiveOnShanghaiDay(task, Date.parse('2026-09-13T15:59:59.999Z')), true);
+  assert.equal(isTaskActiveOnShanghaiDay(task, Date.parse('2026-09-06T15:59:59.999Z')), false);
+  assert.equal(isTaskActiveOnShanghaiDay(task, Date.parse('2026-09-13T16:00:00.000Z')), false);
+  assert.equal(isTaskActiveOnShanghaiDay({ startDate: null, dueDate: task.dueDate }, task.startDate), false);
+  assert.equal(isTaskActiveOnShanghaiDay({ startDate: Number.NaN, dueDate: task.dueDate }, task.startDate), false);
 });
 
 test('fills the whole task period only when all three fields are absent', () => {
