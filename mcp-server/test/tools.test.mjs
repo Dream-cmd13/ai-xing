@@ -53,6 +53,17 @@ test('registers the phase-one read-only tools plus nested department people and 
   }
 });
 
+test('declares every production branch field in department OKR and task search output schemas', () => {
+  const tools = captureTools(fakeRepository());
+  const departmentOkrOutput = tools.get('get_department_okrs').definition.outputSchema;
+  assert.ok('limit' in departmentOkrOutput);
+
+  const searchOutput = tools.get('search_pad_tasks').definition.outputSchema;
+  for (const key of ['departmentId', 'departmentName', 'scope', 'user']) {
+    assert.ok(key in searchOutput, `search_pad_tasks output schema is missing ${key}`);
+  }
+});
+
 test('declares bounded pagination and weekly input schemas', () => {
   const tools = captureTools(fakeRepository());
   const weekly = tools.get('get_department_weekly_pad').definition.inputSchema;

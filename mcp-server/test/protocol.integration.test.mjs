@@ -42,7 +42,31 @@ test('official MCP client initializes, lists fifteen tools, calls one and termin
   const repository = {
     getOrganizationInfo: async () => ({ strategy: null, departments: [], businesses: [] }),
     getDepartmentWeeklyPad: async (args) => ({ ...args, tasks: [] }),
-    searchPadTasks: async (args) => ({ ...args, tasks: [], total: 0, hasMore: false }),
+    searchPadTasks: async ({ departmentId, departmentName, scope, userName, limit, offset }) => {
+      const page = {
+        tasks: [], offset, limit, total: 0, hasMore: false, nextCursor: null, truncated: false,
+      };
+      if (userName) {
+        return {
+          user: {
+            name: userName,
+            role: 'Employee',
+            departmentId: 'dept-1',
+            departmentName: departmentName ?? '部门一',
+          },
+          ...page,
+        };
+      }
+      if (departmentId || departmentName) {
+        return {
+          departmentId: departmentId ?? 'dept-1',
+          departmentName: departmentName ?? '部门一',
+          scope: scope === 'auto' ? 'subtree' : scope,
+          ...page,
+        };
+      }
+      return page;
+    },
     getPersonalWorkbench: async ({ limit }) => ({
       userId: 'user-1', limit, todayTasks: [], thisWeekTasks: [], nextWeekTasks: [], tasks: [],
       pageInfo: {
@@ -63,8 +87,8 @@ test('official MCP client initializes, lists fifteen tools, calls one and termin
         }],
       }],
     }),
-    getDepartmentOkrs: async ({ year, period }) => ({
-      year, period: period ?? null, departmentCount: 1, hasMore: false,
+    getDepartmentOkrs: async ({ year, period, limit }) => ({
+      year, period: period ?? null, departmentCount: 1, hasMore: false, limit,
       departments: [{
         id: 'dept-1', name: '部门一', managerName: '张三', parentName: null,
         periods: { Annual: [{ id: 'okr-1', objective: '年度目标', keyResults: ['KR一'], krCount: 1, truncated: false, krTasks: [] }] },
@@ -153,10 +177,26 @@ test('official MCP client initializes, lists fifteen tools, calls one and termin
 
   const departmentOkrs = await client.callTool({
     name: 'get_department_okrs',
-    arguments: { departmentId: 'dept-1', year: 2026, period: 'Annual' },
+    arguments: { departmentId: 'dept-1', year: 2026, period: 'Annual', limit: 5 },
   });
   assert.equal(departmentOkrs.isError, false);
   assert.equal(departmentOkrs.structuredContent.departments[0].periods.Annual[0].objective, '年度目标');
+  assert.equal(departmentOkrs.structuredContent.limit, 5);
+
+  const departmentTasks = await client.callTool({
+    name: 'search_pad_tasks',
+    arguments: { departmentId: 'dept-1', scope: 'subtree', limit: 5 },
+  });
+  assert.equal(departmentTasks.isError, false);
+  assert.equal(departmentTasks.structuredContent.departmentId, 'dept-1');
+  assert.equal(departmentTasks.structuredContent.scope, 'subtree');
+
+  const userTasks = await client.callTool({
+    name: 'search_pad_tasks',
+    arguments: { userName: '张三', departmentName: '部门一', relation: 'owner', limit: 5 },
+  });
+  assert.equal(userTasks.isError, false);
+  assert.equal(userTasks.structuredContent.user.name, '张三');
 
   const prepared = await client.callTool({
     name: 'prepare_create_pad_task',
