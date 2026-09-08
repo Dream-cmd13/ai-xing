@@ -1,6 +1,7 @@
 import * as z from 'zod/v4';
 
 import { toPublicError } from './errors.mjs';
+import { readToolOutputSchemas } from './read-tool-output-schemas.mjs';
 
 const readOnlyAnnotations = Object.freeze({
   readOnlyHint: true,
@@ -12,11 +13,6 @@ const readOnlyAnnotations = Object.freeze({
 const limit50 = z.number().int().min(1).max(50).default(20);
 const limit20 = z.number().int().min(1).max(20).default(20);
 const cursorSchema = z.string().trim().min(1).max(512).optional();
-const recordSchema = z.record(z.string(), z.unknown());
-const taskListOutput = {
-  tasks: z.array(recordSchema),
-};
-
 const TEXT_MAX_BYTES = 48 * 1024;
 const MAX_TEXT_STRING_LENGTH = 320;
 const MAX_SIPOC_STRING_LENGTH = 160;
@@ -352,11 +348,7 @@ export function registerReadTools(server, repository) {
       title: '读取组织信息',
       description: '读取当前账号有权限查看的组织、战略和业务定义。',
       inputSchema: {},
-      outputSchema: {
-        strategy: recordSchema.nullable(),
-        departments: z.array(recordSchema),
-        businesses: z.array(recordSchema),
-      },
+      outputSchema: readToolOutputSchemas.getOrganizationInfo,
       annotations: readOnlyAnnotations,
     },
     safeHandler('组织信息读取完成。', () => repository.getOrganizationInfo(), compactOrganization),
@@ -375,13 +367,7 @@ export function registerReadTools(server, repository) {
         cursorName: z.string().max(128).optional(),
         cursorId: z.string().max(128).optional(),
       },
-      outputSchema: {
-        departmentId: z.string(),
-        departmentName: z.string().nullable(),
-        scope: z.enum(['exact', 'subtree']),
-        people: z.array(recordSchema),
-        hasMore: z.boolean(),
-      },
+      outputSchema: readToolOutputSchemas.getDepartmentPeople,
       annotations: readOnlyAnnotations,
     },
     safeHandler('部门人员读取完成。', (args) => repository.getDepartmentPeople(args), compactDepartmentPeople),
@@ -400,17 +386,7 @@ export function registerReadTools(server, repository) {
         limit: limit50,
         cursor: cursorSchema,
       },
-      outputSchema: {
-        departmentId: z.string(),
-        departmentName: z.string().optional(),
-        scope: z.enum(['auto', 'exact', 'subtree']).optional(),
-        weekId: z.string(),
-        limit: z.number(),
-        hasMore: z.boolean(),
-        nextCursor: z.string().nullable(),
-        truncated: z.boolean(),
-        ...taskListOutput,
-      },
+      outputSchema: readToolOutputSchemas.getDepartmentWeeklyPad,
       annotations: readOnlyAnnotations,
     },
     safeHandler(
@@ -447,15 +423,7 @@ export function registerReadTools(server, repository) {
         offset: z.number().int().min(0).max(1000).default(0),
         cursor: cursorSchema,
       },
-      outputSchema: {
-        ...taskListOutput,
-        offset: z.number(),
-        limit: z.number(),
-        total: z.number().nullable(),
-        hasMore: z.boolean(),
-        nextCursor: z.string().nullable(),
-        truncated: z.boolean(),
-      },
+      outputSchema: readToolOutputSchemas.searchPadTasks,
       annotations: readOnlyAnnotations,
     },
     safeHandler('PAD 任务搜索完成。', (args) => repository.searchPadTasks(args), (data) => compactTaskList(data, {
@@ -481,14 +449,7 @@ export function registerReadTools(server, repository) {
         limit: limit50,
         offset: z.number().int().min(0).max(1000).default(0),
       },
-      outputSchema: {
-        weekId: z.string(),
-        groups: z.array(recordSchema),
-        total: z.number(),
-        limit: z.number(),
-        offset: z.number(),
-        hasMore: z.boolean(),
-      },
+      outputSchema: readToolOutputSchemas.getWeeklyReviewGaps,
       annotations: readOnlyAnnotations,
     },
     safeHandler('周复盘缺口读取完成。', (args) => repository.getWeeklyReviewGaps(args), compactReviewGaps),
@@ -503,11 +464,7 @@ export function registerReadTools(server, repository) {
         year: z.number().int().min(2000).max(3000).optional().describe('目标年份，默认当前年'),
         includeTasks: z.boolean().optional().describe('是否附带每个 KR 绑定的任务，默认 true'),
       },
-      outputSchema: {
-        year: z.number().nullable(),
-        okrCount: z.number(),
-        okrs: z.array(recordSchema),
-      },
+      outputSchema: readToolOutputSchemas.getCompanyOkrs,
       annotations: readOnlyAnnotations,
     },
     safeHandler('公司 OKR 读取完成。', (args) => repository.getCompanyOkrs(args), compactCompanyOkrs),
@@ -527,13 +484,7 @@ export function registerReadTools(server, repository) {
         includeTasks: z.boolean().optional().describe('是否附带每个 KR 绑定的任务，默认 true'),
         limit: limit50,
       },
-      outputSchema: {
-        year: z.number().nullable(),
-        period: z.string().nullable(),
-        departmentCount: z.number(),
-        hasMore: z.boolean(),
-        departments: z.array(recordSchema),
-      },
+      outputSchema: readToolOutputSchemas.getDepartmentOkrs,
       annotations: readOnlyAnnotations,
     },
     safeHandler(
@@ -554,21 +505,7 @@ export function registerReadTools(server, repository) {
         thisWeekCursor: cursorSchema,
         nextWeekCursor: cursorSchema,
       },
-      outputSchema: {
-        userId: z.string(),
-        limit: z.number(),
-        currentWeekId: z.string().optional(),
-        nextWeekId: z.string().optional(),
-        todayTasks: z.array(recordSchema),
-        thisWeekTasks: z.array(recordSchema),
-        nextWeekTasks: z.array(recordSchema),
-        pageInfo: z.object({
-          today: z.object({ hasMore: z.boolean(), nextCursor: z.string().nullable(), truncated: z.boolean() }),
-          thisWeek: z.object({ hasMore: z.boolean(), nextCursor: z.string().nullable(), truncated: z.boolean() }),
-          nextWeek: z.object({ hasMore: z.boolean(), nextCursor: z.string().nullable(), truncated: z.boolean() }),
-        }),
-        ...taskListOutput,
-      },
+      outputSchema: readToolOutputSchemas.getPersonalWorkbench,
       annotations: readOnlyAnnotations,
     },
     safeHandler('个人工作台读取完成。', (args) => {
@@ -590,10 +527,7 @@ export function registerReadTools(server, repository) {
         departmentId: z.string().trim().min(1).max(128).optional(),
         limit: limit20,
       },
-      outputSchema: {
-        limit: z.number(),
-        processes: z.array(recordSchema),
-      },
+      outputSchema: readToolOutputSchemas.getProcessSipoc,
       annotations: readOnlyAnnotations,
     },
     safeHandler('流程 SIPOC 读取完成。', (args) => repository.getProcessSipoc(args), compactProcessList),
