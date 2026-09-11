@@ -57,6 +57,14 @@ function identityRepository() {
     async resolveUsers({ users }) {
       return { users: users.map((user) => ({ userId: `${user.name}-id`, name: user.name, role: 'Employee', departmentId: 'dept-x', departmentName: user.departmentName ?? '研发部' })), requested: users };
     },
+    async resolveDepartment({ name, id }) {
+      const departments = new Map([
+        ['IT部', 'dept-it'],
+        ['研发部', 'dept-rd'],
+      ]);
+      const resolvedId = name ? departments.get(name) : id;
+      return { id: resolvedId, name: name ?? 'IT部', scope: 'exact', ids: [resolvedId] };
+    },
   };
 }
 
@@ -143,6 +151,44 @@ test('prepare resolves names once and returns canonical IDs without writing', as
   assert.deepEqual(updatePreview.changes, { participantIds: ['李四-id'] });
 });
 
+test('prepare resolves a department name to a canonical department ID without writing', async () => {
+  const fake = fakeSupabase();
+  const value = createWriteRepository({
+    createUserClient: () => fake.client,
+    getContext: () => ({ userId: 'admin', accessToken: 'jwt-admin' }),
+    requestTimeoutMs: 1000,
+    identityRepository: identityRepository(),
+  });
+
+  const result = await value.prepareCreatePadTask({
+    payload: { title: '管理员任务', departmentName: 'IT部', ownerId: 'admin' },
+  });
+
+  assert.deepEqual(result.payload, {
+    title: '管理员任务', departmentId: 'dept-it', ownerId: 'admin',
+  });
+  assert.deepEqual(result.identity.department, { id: 'dept-it', name: 'IT部' });
+  assert.equal(fake.calls.some((call) => call[0] === 'rpc'), false);
+});
+
+test('prepare rejects conflicting department ID and department name', async () => {
+  const fake = fakeSupabase();
+  const value = createWriteRepository({
+    createUserClient: () => fake.client,
+    getContext: () => ({ userId: 'admin', accessToken: 'jwt-admin' }),
+    requestTimeoutMs: 1000,
+    identityRepository: identityRepository(),
+  });
+
+  await assert.rejects(
+    value.prepareCreatePadTask({
+      payload: { title: '冲突任务', departmentId: 'dept-rd', departmentName: 'IT部' },
+    }),
+    (error) => error.code === 'INVALID_ARGUMENT',
+  );
+  assert.equal(fake.calls.some((call) => call[0] === 'rpc'), false);
+});
+
 test('prepare rejects conflicting ID and name references before any write RPC', async () => {
   const fake = fakeSupabase();
   const value = createWriteRepository({
@@ -219,6 +265,27 @@ test('commit methods call the matching RPC with the authenticated user context',
     p_request_id: 'request-2',
   });
   assert.deepEqual(repo.tokens, ['jwt-1', 'jwt-1', 'jwt-1', 'jwt-1']);
+});
+
+test('commitCreatePadTask uses the existing scoped RPC for a canonical department ID', async () => {
+  const fake = fakeSupabase({
+    'rpc:mcp_create_pad_task_scoped': {
+      data: { replayed: false, task: { id: 'task-scoped-1', departmentId: 'dept-it', rowVersion: 0 }, rowVersion: 0 },
+      error: null,
+    },
+  });
+  const repo = repository(fake, { userId: 'admin', accessToken: 'jwt-admin' });
+
+  await repo.value.commitCreatePadTask({
+    payload: { title: '管理员任务', departmentId: 'dept-it', ownerId: 'admin' },
+    requestId: 'request-admin-scoped-1',
+  });
+
+  const call = fake.calls.find((entry) => entry[0] === 'rpc');
+  assert.equal(call[1], 'mcp_create_pad_task_scoped');
+  assert.deepEqual(call[2].p_task, {
+    title: '管理员任务', department_id: 'dept-it', owner_id: 'admin', status: 'draft',
+  });
 });
 
 test('participant-only and approver-only updates use the scoped permission RPC', async () => {
@@ -336,6 +403,7 @@ test('maps a missing review-sync RPC to a stable configuration error', async () 
     repo.value.commitUpdatePadTask({
       taskId: 'task-1',
       changes: { task_review: '新成果' },
+      reviewWriteMode: 'task_and_department',
       reviewPeriodKey: '2026-W34',
       reviewKey: 'objective-1',
       krIndex: 0,

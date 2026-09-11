@@ -1,13 +1,13 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../store/useAuthStore';
 
-import { ShieldCheck, Loader2 as Spinner } from 'lucide-react';
+import { AlertCircle, ShieldCheck, Loader2 as Spinner } from 'lucide-react';
 import PageToast from './PageToast';
 import { usePageToast } from '../hooks/usePageToast';
 import { cn } from '../utils/cn';
 import { supabase } from '../supabase';
-import { getUserFacingError } from '../utils/userFacingError';
+import { getLoginUserFacingError } from '../utils/userFacingError';
 
 const MOBILE_LOGIN_PATTERN = /^1\d{10}$/;
 
@@ -16,6 +16,8 @@ const LoginView: React.FC = () => {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [loginError, setLoginError] = useState('');
+  const passwordInputRef = useRef<HTMLInputElement>(null);
   const { toastState, showToast, clearToast } = usePageToast();
 
   const { isAuthenticated } = useAuthStore();
@@ -29,16 +31,23 @@ const LoginView: React.FC = () => {
 
   useEffect(() => {
     clearToast();
+    setLoginError('');
   }, [clearToast, username, password]);
+
+  useEffect(() => {
+    if (loginError && !isLoading) passwordInputRef.current?.focus();
+  }, [isLoading, loginError]);
 
   const handleLogin = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     
     if (!username.trim() || !password.trim()) {
-      showToast('请输入用户名和密码', 'error');
+      setLoginError('请输入用户名和密码');
       return;
     }
 
+    clearToast();
+    setLoginError('');
     setIsLoading(true);
     
     try {
@@ -50,15 +59,17 @@ const LoginView: React.FC = () => {
       const { data: authData, error: authError } = await supabase.auth.signInWithPassword(credential);
 
       if (authError) {
-        showToast(getUserFacingError(authError, '登录失败，请检查账号或密码后重试'), 'error');
+        setLoginError(getLoginUserFacingError(authError));
         return;
       }
 
       if (authData.user) {
         showToast('登录成功，正在初始化数据...', 'success');
+      } else {
+        setLoginError('登录失败，请稍后重试');
       }
-    } catch (error: any) {
-      showToast(getUserFacingError(error, '登录失败，请稍后重试'), 'error');
+    } catch (error: unknown) {
+      setLoginError(getLoginUserFacingError(error));
     } finally {
       setIsLoading(false);
     }
@@ -83,8 +94,9 @@ const LoginView: React.FC = () => {
         
         <form onSubmit={handleLogin} className="space-y-4">
           <div className="p-3 bg-slate-50 border border-slate-100 rounded-2xl focus-within:border-brand-500 focus-within:ring-1 focus-within:ring-brand-500 transition-all">
-            <label className="text-[10px] font-black uppercase text-slate-400 block mb-1">登录账号</label>
+            <label htmlFor="login-username" className="text-[10px] font-black uppercase text-slate-400 block mb-1">登录账号</label>
             <input 
+              id="login-username"
               type="text" 
               autoComplete="username"
               className="w-full bg-transparent text-sm font-bold outline-none text-slate-700 placeholder:text-slate-300" 
@@ -92,11 +104,15 @@ const LoginView: React.FC = () => {
               value={username} 
               onChange={e => setUsername(e.target.value)} 
               disabled={isLoading}
+              aria-invalid={!!loginError}
+              aria-describedby={loginError ? 'login-form-error' : undefined}
             />
           </div>
           <div className="p-3 bg-slate-50 border border-slate-100 rounded-2xl focus-within:border-brand-500 focus-within:ring-1 focus-within:ring-brand-500 transition-all">
-            <label className="text-[10px] font-black uppercase text-slate-400 block mb-1">登录密码</label>
+            <label htmlFor="login-password" className="text-[10px] font-black uppercase text-slate-400 block mb-1">登录密码</label>
             <input 
+              id="login-password"
+              ref={passwordInputRef}
               type="password"  
               autoComplete="current-password"
               className="w-full bg-transparent text-sm font-bold outline-none text-slate-700 placeholder:text-slate-300" 
@@ -104,8 +120,22 @@ const LoginView: React.FC = () => {
               value={password} 
               onChange={e => setPassword(e.target.value)} 
               disabled={isLoading}
+              aria-invalid={!!loginError}
+              aria-describedby={loginError ? 'login-form-error' : undefined}
             />
           </div>
+
+          {loginError && (
+            <div
+              id="login-form-error"
+              role="alert"
+              aria-live="assertive"
+              className="flex items-start gap-2 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-bold text-red-700"
+            >
+              <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+              <span>{loginError}</span>
+            </div>
+          )}
 
           <button 
             type="submit"

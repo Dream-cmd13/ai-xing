@@ -13,6 +13,7 @@ const DEFAULT_MESSAGES = Object.freeze({
   MCP_VALIDATION: '数据库拒绝了无效的任务数据。',
   TASK_PERIOD_MISMATCH: 'targetWeeks 与任务日期派生周不一致。',
   RPC_NOT_CONFIGURED: '所需数据库接口尚未启用，请先完成当前版本迁移后重试。',
+  DEPARTMENT_REQUIRED: '当前账号没有默认部门，创建任务时必须指定 departmentId 或 departmentName。',
   USER_NOT_FOUND: '未找到匹配的用户，请检查姓名和部门名称。',
   USER_NAME_AMBIGUOUS: '姓名存在同名用户，请补充部门名称。',
   DEPARTMENT_NOT_FOUND: '未找到匹配的部门，请检查部门名称。',

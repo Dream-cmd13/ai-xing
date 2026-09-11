@@ -93,6 +93,7 @@ test('prepare review update derives the only target week and captures the depart
     changes: { taskReview: '新实际成果', taskReviewScore: 90 },
   });
 
+  assert.equal(result.reviewWrite.mode, 'task_and_department');
   assert.equal(result.reviewSync.periodKey, '2026-W34');
   assert.equal(result.reviewSync.departmentId, 'dept-1');
   assert.equal(result.reviewSync.expectedRowVersion, 7);
@@ -100,6 +101,53 @@ test('prepare review update derives the only target week and captures the depart
   assert.equal(result.reviewSync.krIndex, 0);
   assert.deepEqual(result.reviewSync.before, { evaluation: '旧实际成果', score: 60 });
   assert.deepEqual(result.reviewSync.after, { evaluation: '新实际成果', score: 90 });
+});
+
+test('prepare review update uses task-only mode when the department period is missing', async () => {
+  const fake = fakeSupabase({
+    tasks: { data: task, error: null },
+    departments: { data: { id: 'dept-1', reviews: {}, row_version: 7 }, error: null },
+  });
+
+  const result = await repository(fake).prepareUpdatePadTask({
+    taskId: 'task-1',
+    changes: { taskReview: '新实际成果', taskReviewScore: 90 },
+  });
+
+  assert.equal(result.reviewWrite.mode, 'task_only');
+  assert.equal(result.reviewWrite.periodKey, '2026-W34');
+  assert.deepEqual(result.reviewWrite.before, { evaluation: '旧实际成果', score: 60 });
+  assert.deepEqual(result.reviewWrite.after, { evaluation: '新实际成果', score: 90 });
+  assert.equal(result.reviewSync, undefined);
+});
+
+test('prepare review update uses task-only mode when the department period is empty', async () => {
+  const fake = fakeSupabase({
+    tasks: { data: task, error: null },
+    departments: { data: { id: 'dept-1', reviews: { '2026-W34': [] }, row_version: 7 }, error: null },
+  });
+
+  const result = await repository(fake).prepareUpdatePadTask({
+    taskId: 'task-1',
+    changes: { taskReview: '新实际成果' },
+  });
+
+  assert.equal(result.reviewWrite.mode, 'task_only');
+  assert.equal(result.reviewSync, undefined);
+});
+
+test('prepare review update still rejects a malformed existing department period', async () => {
+  const fake = fakeSupabase({
+    tasks: { data: task, error: null },
+    departments: { data: { id: 'dept-1', reviews: { '2026-W34': {} }, row_version: 7 }, error: null },
+  });
+
+  await assert.rejects(
+    repository(fake).prepareUpdatePadTask({ taskId: 'task-1', changes: { taskReview: '新实际成果' } }),
+    (error) => error instanceof AppError
+      && error.code === 'INVALID_ARGUMENT'
+      && error.message.includes('复盘周期数据格式错误'),
+  );
 });
 
 test('review preview uses task fields as the final value when the existing card is stale', async () => {
@@ -150,6 +198,7 @@ test('review update commit uses the atomic task-review RPC and carries both vers
   await repo.commitUpdatePadTask({
     taskId: 'task-1',
     changes: { task_review: '新结果', task_review_score: 90 },
+    reviewWriteMode: 'task_and_department',
     reviewPeriodKey: '2026-W34',
     reviewKey: 'objective-1',
     krIndex: 0,
@@ -172,6 +221,38 @@ test('review update commit uses the atomic task-review RPC and carries both vers
   });
 });
 
+test('task-only review commit uses the ordinary task update RPC without department review parameters', async () => {
+  const fake = fakeSupabase({
+    'rpc:mcp_update_pad_task': {
+      data: {
+        replayed: false,
+        task: { id: 'task-1', taskReview: '新结果', taskReviewScore: 90, rowVersion: 4 },
+        rowVersion: 4,
+      },
+      error: null,
+    },
+  });
+  const repo = repository(fake);
+
+  await repo.commitUpdatePadTask({
+    taskId: 'task-1',
+    changes: { task_review: '新结果', task_review_score: 90 },
+    reviewWriteMode: 'task_only',
+    reviewPeriodKey: '2026-W34',
+    expectedRowVersion: 3,
+    requestId: 'request-task-only-review-1',
+  });
+
+  const rpc = fake.calls.find((call) => call[0] === 'rpc');
+  assert.equal(rpc[1], 'mcp_update_pad_task');
+  assert.deepEqual(rpc[2], {
+    p_task_id: 'task-1',
+    p_changes: { task_review: '新结果', task_review_score: 90 },
+    p_expected_row_version: 3,
+    p_request_id: 'request-task-only-review-1',
+  });
+});
+
 test('prepare_update_pad_task exposes the derived review period and department version in its confirmation metadata', async () => {
   const fake = fakeSupabase({
     tasks: { data: task, error: null },
@@ -191,6 +272,47 @@ test('prepare_update_pad_task exposes the derived review period and department v
   assert.equal(result.structuredContent.confirmation.parameterSummary.reviewPeriodKey, '2026-W34');
 });
 
+test('task-only review mode is bound by preview and committed without creating a department review', async () => {
+  const fake = fakeSupabase({
+    tasks: { data: task, error: null },
+    departments: { data: { id: 'dept-1', reviews: {}, row_version: 7 }, error: null },
+    mcp_write_log: { data: null, error: null },
+    'rpc:mcp_update_pad_task': {
+      data: {
+        replayed: false,
+        task: { id: 'task-1', taskReview: '独立任务成果', taskReviewScore: 90, rowVersion: 4 },
+        rowVersion: 4,
+      },
+      error: null,
+    },
+  });
+  const repo = repository(fake);
+  const tools = captureTools(repo, new ConfirmationStore({ ttlMs: 60_000, now: () => 1000 }));
+
+  const preview = await tools.get('prepare_update_pad_task').handler({
+    taskId: 'task-1',
+    changes: { taskReview: '独立任务成果', taskReviewScore: 90 },
+  });
+
+  assert.equal(preview.isError, false);
+  assert.equal(preview.structuredContent.reviewWriteMode, 'task_only');
+  assert.equal(preview.structuredContent.reviewPeriodKey, '2026-W34');
+  assert.match(preview.content[0].text, /^任务复盘更新预览已生成（仅写任务）。/);
+  assert.equal(preview.structuredContent.confirmation.parameterSummary.reviewWriteMode, 'task_only');
+
+  const committed = await tools.get('commit_update_pad_task').handler({
+    taskId: 'task-1',
+    changes: { taskReview: '独立任务成果', taskReviewScore: 90 },
+    expectedRowVersion: 3,
+    confirmationToken: preview.structuredContent.confirmationToken,
+    requestId: 'request-task-only-review-2',
+  });
+
+  assert.equal(committed.isError, false);
+  assert.equal(fake.calls.some((call) => call[0] === 'rpc' && call[1] === 'mcp_save_review_record'), false);
+  assert.equal(fake.calls.some((call) => call[0] === 'rpc' && call[1] === 'mcp_update_pad_task'), true);
+});
+
 test('review confirmation carries department version to the atomic commit and rejects period tampering', async () => {
   const calls = [];
   const repositoryValue = {
@@ -200,6 +322,11 @@ test('review confirmation carries department version to the atomic commit and re
       return {
         current: { id: input.taskId, rowVersion: 3 },
         expectedRowVersion: 3,
+        reviewWrite: {
+          mode: 'task_and_department', departmentId: 'dept-1', periodKey: '2026-W34',
+          reviewKey: 'objective-1', krIndex: 0, expectedRowVersion: 7,
+          before: { evaluation: '旧', score: 60 }, after: { evaluation: '新', score: 90 },
+        },
         reviewSync: {
           departmentId: 'dept-1', periodKey: '2026-W34', reviewKey: 'objective-1', krIndex: 0,
           expectedRowVersion: 7, before: { evaluation: '旧', score: 60 }, after: { evaluation: '新', score: 90 },
@@ -230,6 +357,7 @@ test('review confirmation carries department version to the atomic commit and re
   assert.equal(committed.isError, false);
   assert.deepEqual(calls.find(([name]) => name === 'commit')[1], {
     taskId: 'task-1', changes: { taskReview: '新' }, expectedRowVersion: 3,
+    reviewWriteMode: 'task_and_department',
     reviewPeriodKey: '2026-W34', expectedDepartmentRowVersion: 7,
     reviewKey: 'objective-1', krIndex: 0, requestId: 'request-review-sync-2',
   });

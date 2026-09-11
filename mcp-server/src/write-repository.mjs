@@ -156,17 +156,42 @@ function resolveReviewPeriod(task, requestedPeriod) {
   return weeks[0];
 }
 
-function readReviewSync(department, task, changes, requestedPeriod) {
+function readReviewWrite(department, task, changes, requestedPeriod) {
   const departmentId = department?.id;
   const periodKey = resolveReviewPeriod(task, requestedPeriod);
-  const { reviewKey, krIndex } = reviewSlot(task);
-  const reviews = department?.reviews && typeof department.reviews === 'object'
-    ? department.reviews[periodKey]
-    : null;
-  if (!Array.isArray(reviews) || reviews.length === 0) {
-    throw new AppError('INVALID_ARGUMENT', '目标复盘周期不存在，请先保存该周期复盘记录。');
+  const taskEvaluation = readTaskValue(task, 'taskReview', 'task_review') ?? '';
+  const taskScore = readTaskValue(task, 'taskReviewScore', 'task_review_score') ?? 0;
+  const nextEvaluation = Object.prototype.hasOwnProperty.call(changes, 'taskReview')
+    ? changes.taskReview
+    : Object.prototype.hasOwnProperty.call(changes, 'task_review')
+      ? changes.task_review
+      : taskEvaluation;
+  const nextScore = Object.prototype.hasOwnProperty.call(changes, 'taskReviewScore')
+    ? changes.taskReviewScore
+    : Object.prototype.hasOwnProperty.call(changes, 'task_review_score')
+      ? changes.task_review_score
+      : taskScore;
+  const reviewBase = {
+    departmentId,
+    periodKey,
+    before: { evaluation: taskEvaluation, score: taskScore },
+    after: { evaluation: nextEvaluation ?? '', score: nextScore ?? 0 },
+  };
+  const reviewRoot = department?.reviews;
+  if (reviewRoot !== undefined && reviewRoot !== null
+    && (typeof reviewRoot !== 'object' || Array.isArray(reviewRoot))) {
+    throw new AppError('INVALID_ARGUMENT', '部门复盘数据格式错误，请先修复历史记录。');
   }
-  const latest = reviews[reviews.length - 1] ?? {};
+  const periodReviews = reviewRoot?.[periodKey];
+  if (periodReviews === undefined || periodReviews === null
+    || (Array.isArray(periodReviews) && periodReviews.length === 0)) {
+    return { mode: 'task_only', ...reviewBase };
+  }
+  if (!Array.isArray(periodReviews)) {
+    throw new AppError('INVALID_ARGUMENT', '目标复盘周期数据格式错误，请先修复历史记录。');
+  }
+  const { reviewKey, krIndex } = reviewSlot(task);
+  const latest = periodReviews[periodReviews.length - 1] ?? {};
   if (!latest || typeof latest !== 'object' || Array.isArray(latest)) {
     throw new AppError('INVALID_ARGUMENT', '目标复盘数据格式错误，请先修复历史记录。');
   }
@@ -193,21 +218,10 @@ function readReviewSync(department, task, changes, requestedPeriod) {
       throw new AppError('INVALID_ARGUMENT', `目标 KR 的 ${field} 格式错误，请先修复历史记录。`);
     }
   }
-  const taskEvaluation = readTaskValue(task, 'taskReview', 'task_review') ?? '';
-  const taskScore = readTaskValue(task, 'taskReviewScore', 'task_review_score') ?? 0;
   const oldEvaluation = currentKr?.taskEvaluations?.[task.id] ?? taskEvaluation;
   const oldScore = currentKr?.taskScores?.[task.id] ?? taskScore;
-  const nextEvaluation = Object.prototype.hasOwnProperty.call(changes, 'taskReview')
-    ? changes.taskReview
-    : Object.prototype.hasOwnProperty.call(changes, 'task_review')
-      ? changes.task_review
-      : taskEvaluation;
-  const nextScore = Object.prototype.hasOwnProperty.call(changes, 'taskReviewScore')
-    ? changes.taskReviewScore
-    : Object.prototype.hasOwnProperty.call(changes, 'task_review_score')
-      ? changes.task_review_score
-      : taskScore;
   return {
+    mode: 'task_and_department',
     departmentId,
     periodKey,
     reviewKey,
@@ -223,7 +237,7 @@ function readReviewSync(department, task, changes, requestedPeriod) {
 }
 
 function toDbTaskPayload(payload = {}) {
-  for (const key of ['ownerName', 'participantNames', 'approverNames']) {
+  for (const key of ['departmentName', 'ownerName', 'participantNames', 'approverNames']) {
     if (Object.prototype.hasOwnProperty.call(payload, key)) throw new AppError('INVALID_ARGUMENT');
   }
   const result = {};
@@ -339,9 +353,22 @@ export function createWriteRepository({ createUserClient, getContext, requestTim
     return requireRpcResult(name, result?.data);
   }
 
-  async function resolveTaskUserNames(payload) {
+  async function resolveTaskReferences(payload) {
     const next = structuredClone(payload ?? {});
     const identity = {};
+    if (next.departmentName !== undefined) {
+      if (!identityRepository?.resolveDepartment) throw new AppError('DATA_ACCESS_FAILED');
+      const resolved = await identityRepository.resolveDepartment({
+        name: next.departmentName,
+        scope: 'exact',
+      });
+      if (next.departmentId !== undefined && next.departmentId !== resolved.id) {
+        throw new AppError('INVALID_ARGUMENT');
+      }
+      next.departmentId = resolved.id;
+      identity.department = { id: resolved.id, name: resolved.name };
+      delete next.departmentName;
+    }
     if (next.ownerName !== undefined) {
       if (!identityRepository) throw new AppError('DATA_ACCESS_FAILED');
       const resolved = await identityRepository.resolveUser({ ...next.ownerName, purpose: 'owner' });
@@ -371,7 +398,7 @@ export function createWriteRepository({ createUserClient, getContext, requestTim
 
     async prepareCreatePadTask({ payload }) {
       requireContext(getContext);
-      const resolved = await resolveTaskUserNames(payload);
+      const resolved = await resolveTaskReferences(payload);
       return { payload: resolved.payload, ...(Object.keys(resolved.identity).length ? { identity: resolved.identity } : {}) };
     },
 
@@ -386,41 +413,47 @@ export function createWriteRepository({ createUserClient, getContext, requestTim
     async prepareUpdatePadTask({ taskId, changes, reviewPeriodKey }) {
       return execute('prepare_update_pad_task', async (client) => {
         const current = await readTask(client, taskId);
-        let reviewSync;
+        let reviewWrite;
         if (hasReviewChanges(changes)) {
           const periodKey = resolveReviewPeriod(current, reviewPeriodKey);
           const department = await readDepartment(client, readTaskValue(current, 'departmentId', 'department_id'));
-          reviewSync = readReviewSync(department, current, changes, periodKey);
+          reviewWrite = readReviewWrite(department, current, changes, periodKey);
         }
         if (!hasReviewChanges(changes) && reviewPeriodKey !== undefined) {
           throw new AppError('INVALID_ARGUMENT', '未修改任务复盘字段时不能提供 reviewPeriodKey。');
         }
-        const resolved = await resolveTaskUserNames(changes);
+        const resolved = await resolveTaskReferences(changes);
         return {
           current,
           changes: resolved.payload,
           expectedRowVersion: normalizeRowVersion(current),
           ...(Object.keys(resolved.identity).length ? { identity: resolved.identity } : {}),
-          ...(reviewSync ? { reviewSync } : {}),
+          ...(reviewWrite ? { reviewWrite } : {}),
+          ...(reviewWrite?.mode === 'task_and_department' ? { reviewSync: reviewWrite } : {}),
         };
       });
     },
 
-    async commitUpdatePadTask({ taskId, changes, reviewPeriodKey, expectedRowVersion, expectedDepartmentRowVersion, reviewKey, krIndex, rootId, nodePath, requestId }) {
+    async commitUpdatePadTask({ taskId, changes, reviewWriteMode, reviewPeriodKey, expectedRowVersion, expectedDepartmentRowVersion, reviewKey, krIndex, rootId, nodePath, requestId }) {
       return execute('commit_update_pad_task', (client) => {
         const dbChanges = toDbChanges(changes);
         if (hasReviewChanges(changes)) {
-          return callRpc(client, rootId ? 'mcp_update_pad_task_with_review_sync_scoped' : 'mcp_update_pad_task_with_review_sync', {
-            p_task_id: taskId,
-            p_changes: dbChanges,
-            p_review_period_key: reviewPeriodKey,
-            p_review_key: reviewKey,
-            p_kr_index: krIndex,
-            p_expected_row_version: expectedRowVersion,
-            p_expected_department_row_version: expectedDepartmentRowVersion,
-            p_request_id: requestId,
-            ...(rootId ? { p_department_root_id: rootId, p_department_node_path: nodePath ?? [] } : {}),
-          });
+          if (reviewWriteMode === 'task_and_department') {
+            return callRpc(client, rootId ? 'mcp_update_pad_task_with_review_sync_scoped' : 'mcp_update_pad_task_with_review_sync', {
+              p_task_id: taskId,
+              p_changes: dbChanges,
+              p_review_period_key: reviewPeriodKey,
+              p_review_key: reviewKey,
+              p_kr_index: krIndex,
+              p_expected_row_version: expectedRowVersion,
+              p_expected_department_row_version: expectedDepartmentRowVersion,
+              p_request_id: requestId,
+              ...(rootId ? { p_department_root_id: rootId, p_department_node_path: nodePath ?? [] } : {}),
+            });
+          }
+          if (reviewWriteMode !== 'task_only') {
+            throw new AppError('INVALID_ARGUMENT', '任务复盘写入模式无效，请重新生成预览。');
+          }
         }
         const rpcName = ['owner_id', 'participant_ids', 'approver_ids']
           .some((field) => Object.prototype.hasOwnProperty.call(dbChanges, field))

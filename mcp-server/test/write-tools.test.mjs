@@ -104,6 +104,39 @@ test('prepare_create_pad_task only previews and issues a bound confirmation toke
   assert.equal(confirmationStore.calls[0][1].toolName, 'commit_create_pad_task');
 });
 
+test('admin without a default department must choose a department before preview', async () => {
+  const repository = fakeRepository({
+    getContext: () => ({ userId: 'admin', role: 'Admin', departmentId: null, sessionId: 'session-admin' }),
+  });
+  const confirmationStore = fakeConfirmationStore();
+  const tools = captureTools(repository, confirmationStore);
+
+  const result = await tools.get('prepare_create_pad_task').handler({
+    payload: { title: '管理员任务' },
+  });
+
+  assert.equal(result.isError, true);
+  assert.equal(jsonContent(result).code, 'DEPARTMENT_REQUIRED');
+  assert.equal(repository.calls.length, 0);
+  assert.equal(confirmationStore.calls.length, 0);
+});
+
+test('an explicit department name is not overwritten by the current default department', async () => {
+  const repository = fakeRepository({
+    getContext: () => ({ userId: 'manager-1', role: 'Manager', departmentId: 'dept-parent', sessionId: 'session-manager' }),
+  });
+  const tools = captureTools(repository, fakeConfirmationStore());
+
+  const result = await tools.get('prepare_create_pad_task').handler({
+    payload: { title: '子部门任务', departmentName: '运营部' },
+  });
+
+  assert.equal(result.isError, false);
+  const call = repository.calls.find(([name]) => name === 'prepareCreate');
+  assert.equal(call[1].payload.departmentName, '运营部');
+  assert.equal(Object.prototype.hasOwnProperty.call(call[1].payload, 'departmentId'), false);
+});
+
 test('prepare create rejects a partially explicit date range', async () => {
   const repository = fakeRepository();
   const tools = captureTools(repository, fakeConfirmationStore(), { now: () => Date.parse('2026-08-25T03:00:00.000Z') });
@@ -152,6 +185,26 @@ test('commit_create_pad_task without a confirmation token is rejected', async ()
   assert.equal(repository.calls.some(([name]) => name === 'commitCreate'), false);
 });
 
+test('commit_create_pad_task reuses the prepared payload when only token and requestId are provided', async () => {
+  const repository = fakeRepository();
+  const confirmationStore = new ConfirmationStore({ ttlMs: 60_000, now: () => 1_000 });
+  const tools = captureTools(repository, confirmationStore);
+
+  const preview = await tools.get('prepare_create_pad_task').handler({
+    payload: { title: '只用令牌提交的任务' },
+  });
+  const committed = await tools.get('commit_create_pad_task').handler({
+    confirmationToken: preview.structuredContent.confirmationToken,
+    requestId: 'request-token-only-1',
+  });
+
+  assert.equal(committed.isError, false);
+  const commitCall = repository.calls.find(([name]) => name === 'commitCreate');
+  assert.equal(commitCall[1].payload.title, '只用令牌提交的任务');
+  assert.equal(commitCall[1].payload.ownerId, 'user-1');
+  assert.equal(commitCall[1].payload.departmentId, 'dept-1');
+});
+
 test('submit_pad_task and save_review_record without a token are preview-only', async () => {
   const repository = fakeRepository();
   const confirmationStore = fakeConfirmationStore();
@@ -159,6 +212,7 @@ test('submit_pad_task and save_review_record without a token are preview-only', 
 
   const submit = await tools.get('submit_pad_task').handler({ taskId: 'task-1' });
   const review = await tools.get('save_review_record').handler({
+    reviewScope: 'department_period_summary',
     departmentId: 'dept-1', periodKey: '2026-W34', content: '复盘内容', score: 80,
   });
 
@@ -174,6 +228,7 @@ test('save_review_record rejects task card fields and directs callers to task up
   const tools = captureTools(repository, fakeConfirmationStore());
 
   const result = await tools.get('save_review_record').handler({
+    reviewScope: 'department_period_summary',
     departmentId: 'dept-1',
     periodKey: '2026-W34',
     content: '部门复盘',
@@ -182,6 +237,65 @@ test('save_review_record rejects task card fields and directs callers to task up
 
   assert.equal(result.isError, true);
   assert.equal(jsonContent(result).code, 'INVALID_ARGUMENT');
+  assert.equal(repository.calls.some(([name]) => name === 'prepareReview' || name === 'commitReview'), false);
+});
+
+test('task review updates identify the task review target in the preview', async () => {
+  const repository = fakeRepository();
+  const tools = captureTools(repository, fakeConfirmationStore());
+
+  const result = await tools.get('prepare_update_pad_task').handler({
+    taskId: 'task-1',
+    changes: { taskReview: '已完成客户验收并交付上线' },
+    reviewPeriodKey: '2026-W34',
+  });
+
+  assert.equal(result.isError, false);
+  assert.equal(result.structuredContent.reviewTarget, 'task_review');
+  assert.match(result.content[0].text, /^任务复盘更新预览已生成/);
+});
+
+test('task review tool description does not require a department review record', () => {
+  const tools = captureTools(fakeRepository(), fakeConfirmationStore());
+  const description = tools.get('prepare_update_pad_task').definition.description;
+
+  assert.match(description, /尚未建立部门复盘/);
+  assert.match(description, /仅写任务/);
+  assert.match(description, /不得要求.*先创建部门复盘/);
+});
+
+test('save_review_record requires an explicit department period summary scope', async () => {
+  const repository = fakeRepository();
+  const tools = captureTools(repository, fakeConfirmationStore());
+
+  const result = await tools.get('save_review_record').handler({
+    departmentId: 'dept-1',
+    periodKey: '2026-W34',
+    content: '本周部门总结',
+  });
+
+  assert.equal(result.isError, true);
+  assert.equal(jsonContent(result).code, 'INVALID_ARGUMENT');
+  assert.match(jsonContent(result).message, /明确要求.*部门.*周期.*复盘总结/);
+  assert.equal(repository.calls.some(([name]) => name === 'prepareReview' || name === 'commitReview'), false);
+});
+
+test('save_review_record rejects top-level task review fields before repository access', async () => {
+  const repository = fakeRepository();
+  const tools = captureTools(repository, fakeConfirmationStore());
+
+  const result = await tools.get('save_review_record').handler({
+    reviewScope: 'department_period_summary',
+    departmentId: 'dept-1',
+    periodKey: '2026-W34',
+    content: '任务已经完成客户验收',
+    taskId: 'task-1',
+    actualResult: '已交付',
+  });
+
+  assert.equal(result.isError, true);
+  assert.equal(jsonContent(result).code, 'INVALID_ARGUMENT');
+  assert.match(jsonContent(result).message, /prepare_update_pad_task/);
   assert.equal(repository.calls.some(([name]) => name === 'prepareReview' || name === 'commitReview'), false);
 });
 
@@ -440,6 +554,24 @@ test('tool descriptions require requestId reuse for logical retries', () => {
   }
 });
 
+test('create preview description explains the department requirement', () => {
+  const tools = captureTools(fakeRepository(), fakeConfirmationStore());
+  const description = tools.get('prepare_create_pad_task').definition.description;
+
+  assert.match(description, /departmentId/);
+  assert.match(description, /departmentName/);
+  assert.match(description, /默认部门/);
+});
+
+test('create commit description explains prepared payload reuse', () => {
+  const tools = captureTools(fakeRepository(), fakeConfirmationStore());
+  const description = tools.get('commit_create_pad_task').definition.description;
+
+  assert.match(description, /省略.*payload/);
+  assert.match(description, /复用.*prepare/);
+  assert.match(description, /回传.*必须.*预览一致/);
+});
+
 test('real confirmation store accepts submit and review commits using preview row versions', async () => {
   const repository = fakeRepository();
   const confirmationStore = new ConfirmationStore({ ttlMs: 60_000, now: () => 1_000 });
@@ -455,9 +587,11 @@ test('real confirmation store accepts submit and review commits using preview ro
   assert.equal(submit.structuredContent.executed, true);
 
   const reviewPreview = await tools.get('save_review_record').handler({
+    reviewScope: 'department_period_summary',
     departmentId: 'dept-1', periodKey: '2026-W34', content: '复盘', score: 80,
   });
   const review = await tools.get('save_review_record').handler({
+    reviewScope: 'department_period_summary',
     departmentId: 'dept-1', periodKey: '2026-W34', content: '复盘', score: 80,
     confirmationToken: reviewPreview.structuredContent.confirmationToken,
     requestId: 'request-review-1',
@@ -710,4 +844,78 @@ test('name references are bound in prepare and accepted only when unchanged at c
   });
   assert.equal(changed.isError, true);
   assert.equal(jsonContent(changed).code, 'CONFIRMATION_INVALID');
+});
+
+test('admin department ID selected at preview is reused when commit omits the department', async () => {
+  const calls = [];
+  const repository = fakeRepository({
+    getContext: () => ({ userId: 'admin', role: 'Admin', departmentId: null, sessionId: 'session-admin' }),
+    async prepareCreatePadTask({ payload }) {
+      calls.push(['prepare', payload]);
+      return { payload };
+    },
+    async commitCreatePadTask(input) {
+      calls.push(['commit', input]);
+      return { replayed: false, task: { id: 'task-admin-1', ...input.payload }, rowVersion: 0 };
+    },
+  });
+  const store = new ConfirmationStore({ ttlMs: 60_000, now: () => 1_000 });
+  const tools = captureTools(repository, store);
+
+  const preview = await tools.get('prepare_create_pad_task').handler({
+    payload: { title: '管理员任务', departmentId: 'dept-it' },
+  });
+  const committed = await tools.get('commit_create_pad_task').handler({
+    title: '管理员任务',
+    confirmationToken: preview.structuredContent.confirmationToken,
+    requestId: 'request-admin-dept-1',
+  });
+
+  assert.equal(committed.isError, false);
+  assert.equal(calls.find(([name]) => name === 'commit')[1].payload.departmentId, 'dept-it');
+});
+
+test('admin department name is canonicalized and cannot be changed after preview', async () => {
+  const calls = [];
+  const repository = fakeRepository({
+    getContext: () => ({ userId: 'admin', role: 'Admin', departmentId: null, sessionId: 'session-admin' }),
+    async prepareCreatePadTask({ payload }) {
+      calls.push(['prepare', payload]);
+      const { departmentName, ...rest } = payload;
+      return {
+        payload: { ...rest, departmentId: 'dept-it' },
+        identity: { department: { id: 'dept-it', name: departmentName } },
+      };
+    },
+    async commitCreatePadTask(input) {
+      calls.push(['commit', input]);
+      return { replayed: false, task: { id: 'task-admin-2', ...input.payload }, rowVersion: 0 };
+    },
+  });
+  const store = new ConfirmationStore({ ttlMs: 60_000, now: () => 1_000 });
+  const tools = captureTools(repository, store);
+
+  const preview = await tools.get('prepare_create_pad_task').handler({
+    payload: { title: '名称部门任务', departmentName: 'IT部' },
+  });
+  const token = preview.structuredContent.confirmationToken;
+  const committed = await tools.get('commit_create_pad_task').handler({
+    title: '名称部门任务', departmentName: 'IT部',
+    confirmationToken: token,
+    requestId: 'request-admin-name-1',
+  });
+  assert.equal(committed.isError, false);
+  assert.equal(calls.find(([name]) => name === 'commit')[1].payload.departmentId, 'dept-it');
+
+  const secondPreview = await tools.get('prepare_create_pad_task').handler({
+    payload: { title: '名称部门任务二', departmentName: 'IT部' },
+  });
+  const changed = await tools.get('commit_create_pad_task').handler({
+    title: '名称部门任务二', departmentName: '业务部',
+    confirmationToken: secondPreview.structuredContent.confirmationToken,
+    requestId: 'request-admin-name-2',
+  });
+  assert.equal(changed.isError, true);
+  assert.equal(jsonContent(changed).code, 'CONFIRMATION_INVALID');
+  assert.equal(calls.filter(([name]) => name === 'commit').length, 1);
 });

@@ -3,6 +3,8 @@ import { AppState, User, Department, ProcessDefinition, CompanyStrategy, Busines
 import { isSupabaseConfigured, supabase } from "./supabase";
 import { isMissingTaskReviewColumnError, omitTaskReviewColumns, stripTaskReviewFieldsFromSelect } from "./utils/taskSchemaCompat";
 import { deriveTaskWeeksFromDateRange } from "./utils/reviewPeriodConsistency.js";
+import { buildDepartmentSavePayload } from "./utils/departmentSaveDiff";
+import { isSupabaseNetworkError } from "./utils/supabaseError";
 
 /**
  * StratFlow AI 数据持久化层 (Data Access Layer) - Supabase Relational Version (Single Tenant)
@@ -13,14 +15,8 @@ const handleSupabaseError = (error: any) => {
   const message =
     error?.message ||
     (typeof error === 'string' && error.trim().length > 0 ? error : "未知数据库错误");
-  const isNetworkError = 
-    message.includes('Failed to fetch') || 
-    message.includes('network error') ||
-    error?.name === 'TypeError' ||
-    message.includes('TypeError');
-
-  if (isNetworkError) {
-    throw new Error("网络连接失败或 Supabase URL 配置错误。请检查 VITE_SUPABASE_URL 是否正确，以及网络是否畅通。");
+  if (isSupabaseNetworkError(error)) {
+    throw new Error("网络连接失败，请检查网络是否畅通后重试。");
   }
   throw new Error(message || "未知数据库错误");
 };
@@ -1440,12 +1436,16 @@ export const saveDepartmentsAtomically = async (
 ): Promise<Department[]> => {
   if (!isSupabaseConfigured()) throw new Error("Supabase not configured");
   try {
+    const payload = buildDepartmentSavePayload(
+      nextDepartments ?? [],
+      previousDepartments ?? [],
+    );
     const { data, error } = await supabase.rpc('save_departments_atomic', {
-      p_next_departments: nextDepartments ?? [],
-      p_previous_departments: previousDepartments ?? []
+      p_next_departments: payload.nextDepartments,
+      p_previous_departments: payload.previousDepartments,
     });
     if (error) throw error;
-    return (data || []).map(mapDepartmentRow);
+    return (data || []).map((row) => mapDepartmentRow(row));
   } catch (e) {
     handleSupabaseError(e);
     throw e;

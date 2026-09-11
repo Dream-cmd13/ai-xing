@@ -29,7 +29,7 @@ test('official MCP client initializes, lists fifteen tools, calls one and termin
     async authenticate() {
       this.calls += 1;
       return {
-        userId: 'user-1', role: 'Employee', departmentId: 'dept-1',
+        userId: 'user-1', role: 'Admin', departmentId: null,
         accessToken: 'access-1', refreshToken: 'refresh-1', tokenExpiresAt: Date.now() + 60_000,
       };
     },
@@ -98,7 +98,16 @@ test('official MCP client initializes, lists fifteen tools, calls one and termin
   const writeResults = new Map();
   const createWriteRepository = ({ getContext }) => ({
     getContext,
-    async prepareCreatePadTask({ payload }) { return { payload }; },
+    async prepareCreatePadTask({ payload }) {
+      if (payload.departmentName === '部门一') {
+        const { departmentName, ...rest } = payload;
+        return {
+          payload: { ...rest, departmentId: 'dept-1' },
+          identity: { department: { id: 'dept-1', name: departmentName } },
+        };
+      }
+      return { payload };
+    },
     async lookupWriteResult({ toolName, requestId }) {
       return writeResults.get(`${toolName}:${requestId}`) ?? null;
     },
@@ -154,6 +163,17 @@ test('official MCP client initializes, lists fifteen tools, calls one and termin
     'save_review_record',
   ]);
   assert.equal(tools.tools.filter((tool) => tool.annotations?.readOnlyHint === true).length, 9);
+  const prepareCreate = tools.tools.find((tool) => tool.name === 'prepare_create_pad_task');
+  assert.ok(prepareCreate.inputSchema.properties.payload.properties.departmentName);
+  const prepareUpdate = tools.tools.find((tool) => tool.name === 'prepare_update_pad_task');
+  assert.ok(prepareUpdate.inputSchema.properties.changes.properties.taskReview);
+  assert.ok(prepareUpdate.inputSchema.properties.changes.properties.taskReviewScore);
+  assert.match(prepareUpdate.inputSchema.properties.changes.properties.taskReview.description, /实际成果|实际结果/);
+  assert.equal(prepareUpdate.inputSchema.properties.changes.additionalProperties, false);
+  const saveReview = tools.tools.find((tool) => tool.name === 'save_review_record');
+  assert.ok(saveReview.inputSchema.required.includes('reviewScope'));
+  assert.equal(saveReview.inputSchema.properties.reviewScope.const, 'department_period_summary');
+  assert.match(saveReview.inputSchema.properties.reviewScope.description, /明确.*部门.*周期.*复盘总结/);
 
   const result = await client.callTool({ name: 'get_personal_workbench', arguments: { limit: 5 } });
   assert.equal(result.isError, false);
@@ -200,12 +220,11 @@ test('official MCP client initializes, lists fifteen tools, calls one and termin
 
   const prepared = await client.callTool({
     name: 'prepare_create_pad_task',
-    arguments: { payload: { title: '协议测试任务' } },
+    arguments: { payload: { title: '协议测试任务', departmentName: '部门一' } },
   });
   assert.equal(prepared.isError, false);
   const confirmationToken = prepared.structuredContent.confirmationToken;
   const commitArguments = {
-    title: '协议测试任务',
     confirmationToken,
     requestId: 'protocol-request-1',
   };
@@ -218,7 +237,7 @@ test('official MCP client initializes, lists fifteen tools, calls one and termin
 
   const unused = await client.callTool({
     name: 'prepare_create_pad_task',
-    arguments: { payload: { title: '等待会话撤销的任务' } },
+    arguments: { payload: { title: '等待会话撤销的任务', departmentName: '部门一' } },
   });
   assert.equal(unused.isError, false);
   assert.equal(confirmationStore.size, 1);
