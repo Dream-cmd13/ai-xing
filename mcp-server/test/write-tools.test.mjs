@@ -545,6 +545,37 @@ test('update tools reject invalid field values before the repository', async () 
   assert.equal(repository.calls.at(-1)[0], 'prepareUpdate');
 });
 
+test('review text fields accept more than 2000 characters while plan and action remain bounded', async () => {
+  const repository = fakeRepository();
+  const tools = captureTools(repository, fakeConfirmationStore());
+  const longText = '长'.repeat(2001);
+
+  const create = await tools.get('prepare_create_pad_task').handler({
+    payload: { title: '长预期成果任务', deliverable: longText },
+  });
+  const update = await tools.get('prepare_update_pad_task').handler({
+    taskId: 'task-1', changes: { deliverable: longText, taskReview: longText },
+  });
+  const review = await tools.get('save_review_record').handler({
+    reviewScope: 'department_period_summary',
+    departmentId: 'dept-1', periodKey: '2026-W34', content: longText,
+  });
+  const longPlan = await tools.get('prepare_update_pad_task').handler({
+    taskId: 'task-1', changes: { plan: longText },
+  });
+  const longAction = await tools.get('prepare_update_pad_task').handler({
+    taskId: 'task-1', changes: { action: longText },
+  });
+
+  assert.equal(create.isError, false);
+  assert.equal(update.isError, false);
+  assert.equal(review.isError, false);
+  assert.equal(longPlan.isError, true);
+  assert.equal(longAction.isError, true);
+  assert.equal(jsonContent(longPlan).code, 'INVALID_ARGUMENT');
+  assert.equal(jsonContent(longAction).code, 'INVALID_ARGUMENT');
+});
+
 test('tool descriptions require requestId reuse for logical retries', () => {
   const tools = captureTools(fakeRepository(), fakeConfirmationStore());
 

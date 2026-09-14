@@ -614,7 +614,34 @@ test('workbench today migration compares inclusive Asia/Shanghai calendar days',
   assert.match(sql, /REVOKE ALL ON FUNCTION public\.mcp_get_personal_workbench_page[\s\S]+FROM PUBLIC, anon, authenticated, service_role/i);
   assert.match(sql, /GRANT EXECUTE ON FUNCTION public\.mcp_get_personal_workbench_page[\s\S]+TO authenticated/i);
   assert.match(sql, /2026-09-07-workbench-shanghai-day/i);
+  assert.match(sql, /624c3fdb85ce9702e9d7e64b1b9a38f24fcf76b1ecb280172e97ce448d543a97/);
+  assert.match(sql, /MCP_RELEASE_CONTRACT_UPDATE_FAILED/i);
+  assert.doesNotMatch(sql, /GRANT\s+(?:SELECT|INSERT|UPDATE|DELETE|ALL)\s+ON\s+TABLE/i);
+});
+
+test('review text migration removes only the three approved 2000-character limits', async () => {
+  const sql = await migration('2026-09-14_review_text_unbounded.sql');
+
+  assertTransactional(sql);
+  for (const signature of [
+    'mcp_create_pad_task(jsonb,text)',
+    'mcp_review_sync_scoped_impl_20260901(text,jsonb,text,text,integer,bigint,bigint,text,text,text[])',
+    'mcp_save_review_record_impl_20260826(text,text,jsonb,bigint,text)',
+    'mcp_save_review_record_scoped(text,text,jsonb,bigint,text,text,text[])',
+    'mcp_update_pad_task_impl_20260901(text,jsonb,bigint,text)',
+    'mcp_update_pad_task_with_review_sync_impl_20260827(text,jsonb,text,text,integer,bigint,bigint,text)',
+    'mcp_validate_task_changes_impl_date_weeks_20260901(jsonb,boolean)',
+    'web_submit_department_review_scoped(text,text,jsonb,jsonb,bigint,text,text,text[])',
+  ]) {
+    assert.match(sql, new RegExp(signature.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i'), signature);
+  }
+  assert.match(sql, /MCP_REVIEW_TEXT_PATCH_FAILED/i);
+  assert.match(sql, /MCP_REVIEW_TEXT_POSTCONDITION_FAILED/i);
+  assert.match(sql, /ARRAY\[''plan'', ''action''\]/i);
+  assert.match(sql, /v_key IN \(''plan'', ''action''\)/i);
+  assert.match(sql, /2026-09-14-review-text-unbounded/i);
   assert.match(sql, new RegExp(EXPECTED_MANIFEST_DIGEST));
   assert.match(sql, /MCP_RELEASE_CONTRACT_UPDATE_FAILED/i);
+  assert.doesNotMatch(sql, /(?:ALTER|CREATE|DROP)\s+TABLE|(?:CREATE|DROP)\s+TRIGGER/i);
   assert.doesNotMatch(sql, /GRANT\s+(?:SELECT|INSERT|UPDATE|DELETE|ALL)\s+ON\s+TABLE/i);
 });

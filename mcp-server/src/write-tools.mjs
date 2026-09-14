@@ -34,9 +34,9 @@ const taskPayloadShape = {
   approverNames: z.array(z.object({ name: z.string().trim().min(1).max(128), departmentName: z.string().trim().min(1).max(128).optional() })).max(20).optional(),
   plan: z.string().max(2000).optional(),
   action: z.string().max(2000).optional(),
-  deliverable: z.string().max(2000).optional(),
+  deliverable: z.string().optional(),
 };
-const taskReviewSchema = z.string().max(2000).describe(
+const taskReviewSchema = z.string().describe(
   '具体任务的实际成果、实际结果、完成情况或任务复盘。只写入该任务，不得用于部门周复盘总结。',
 );
 const taskReviewScoreSchema = z.number().int().min(0).max(100).describe(
@@ -63,7 +63,7 @@ const taskChangesSchema = z.object({
   approverNames: z.array(z.object({ name: z.string().trim().min(1).max(128), departmentName: z.string().trim().min(1).max(128).optional() })).max(20).optional(),
   plan: z.string().max(2000).optional(),
   action: z.string().max(2000).optional(),
-  deliverable: z.string().max(2000).optional(),
+  deliverable: z.string().optional(),
   taskReview: taskReviewSchema.optional(),
   task_review: taskReviewSchema.describe('taskReview 的兼容字段；含义相同。').optional(),
   taskReviewScore: taskReviewScoreSchema.optional(),
@@ -146,9 +146,10 @@ function validateTaskPayload(payload) {
     const maximum = key === 'participantNames' ? 50 : 20;
     if (payload[key] !== undefined && (!Array.isArray(payload[key]) || payload[key].length > maximum || payload[key].some((value) => !isUserReference(value)))) throw rejectInvalid();
   }
-  for (const key of ['plan', 'action', 'deliverable']) {
+  for (const key of ['plan', 'action']) {
     if (payload[key] !== undefined && (typeof payload[key] !== 'string' || payload[key].length > 2000)) throw rejectInvalid();
   }
+  if (payload.deliverable !== undefined && typeof payload.deliverable !== 'string') throw rejectInvalid();
   if (payload.startDate !== undefined && (!Number.isSafeInteger(payload.startDate) || payload.startDate < 0)) throw rejectInvalid();
   if (payload.dueDate !== undefined && (!Number.isSafeInteger(payload.dueDate) || payload.dueDate < 0)) throw rejectInvalid();
   if (payload.startDate !== undefined && payload.dueDate !== undefined && payload.dueDate < payload.startDate) throw rejectInvalid();
@@ -241,8 +242,11 @@ function validateTaskChanges(changes, { allowOwnerChange = false } = {}) {
         || changes[key].some((value) => typeof value !== 'string' || !value.trim() || value.length > 128))) throw rejectInvalid();
     }
   }
-  for (const key of ['plan', 'action', 'deliverable', 'taskReview', 'task_review']) {
+  for (const key of ['plan', 'action']) {
     if (hasKey(changes, key) && (typeof changes[key] !== 'string' || changes[key].length > 2000)) throw rejectInvalid();
+  }
+  for (const key of ['deliverable', 'taskReview', 'task_review']) {
+    if (hasKey(changes, key) && typeof changes[key] !== 'string') throw rejectInvalid();
   }
   for (const key of ['taskReviewScore', 'task_review_score']) {
     if (hasKey(changes, key) && (!Number.isSafeInteger(changes[key]) || changes[key] < 0 || changes[key] > 100)) throw rejectInvalid();
@@ -739,7 +743,7 @@ export function registerWriteTools(server, repository, confirmationStore, { now 
     reviewScope: departmentReviewScopeSchema,
     departmentId: z.string().trim().min(1).max(128),
     periodKey: z.string().trim().min(1).max(32),
-    content: z.string().trim().min(1).max(2000).describe('部门周期整体复盘总结；不得填写某一个具体任务的实际成果或结果。'),
+    content: z.string().trim().min(1).describe('部门周期整体复盘总结；不得填写某一个具体任务的实际成果或结果。'),
     score: z.number().int().min(0).max(100).optional(),
     okrDetails: recordSchema.optional(),
     confirmationToken: z.string().min(1).optional(),

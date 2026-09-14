@@ -165,15 +165,24 @@ test('official MCP client initializes, lists fifteen tools, calls one and termin
   assert.equal(tools.tools.filter((tool) => tool.annotations?.readOnlyHint === true).length, 9);
   const prepareCreate = tools.tools.find((tool) => tool.name === 'prepare_create_pad_task');
   assert.ok(prepareCreate.inputSchema.properties.payload.properties.departmentName);
+  assert.equal(prepareCreate.inputSchema.properties.payload.properties.deliverable.maxLength, undefined);
+  assert.equal(prepareCreate.inputSchema.properties.payload.properties.plan.maxLength, 2000);
+  assert.equal(prepareCreate.inputSchema.properties.payload.properties.action.maxLength, 2000);
   const prepareUpdate = tools.tools.find((tool) => tool.name === 'prepare_update_pad_task');
   assert.ok(prepareUpdate.inputSchema.properties.changes.properties.taskReview);
   assert.ok(prepareUpdate.inputSchema.properties.changes.properties.taskReviewScore);
   assert.match(prepareUpdate.inputSchema.properties.changes.properties.taskReview.description, /实际成果|实际结果/);
+  assert.equal(prepareUpdate.inputSchema.properties.changes.properties.taskReview.maxLength, undefined);
+  assert.equal(prepareUpdate.inputSchema.properties.changes.properties.task_review.maxLength, undefined);
+  assert.equal(prepareUpdate.inputSchema.properties.changes.properties.deliverable.maxLength, undefined);
+  assert.equal(prepareUpdate.inputSchema.properties.changes.properties.plan.maxLength, 2000);
+  assert.equal(prepareUpdate.inputSchema.properties.changes.properties.action.maxLength, 2000);
   assert.equal(prepareUpdate.inputSchema.properties.changes.additionalProperties, false);
   const saveReview = tools.tools.find((tool) => tool.name === 'save_review_record');
   assert.ok(saveReview.inputSchema.required.includes('reviewScope'));
   assert.equal(saveReview.inputSchema.properties.reviewScope.const, 'department_period_summary');
   assert.match(saveReview.inputSchema.properties.reviewScope.description, /明确.*部门.*周期.*复盘总结/);
+  assert.equal(saveReview.inputSchema.properties.content.maxLength, undefined);
 
   const result = await client.callTool({ name: 'get_personal_workbench', arguments: { limit: 5 } });
   assert.equal(result.isError, false);

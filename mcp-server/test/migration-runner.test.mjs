@@ -6,11 +6,11 @@ import {
   checksum, MIGRATION_MANIFEST, RELEASE_ID, runMigrations, unwrapTransaction,
 } from '../scripts/migrate.mjs';
 
-test('publishes Shanghai workbench-day migration as the latest release contract', () => {
-  assert.equal(RELEASE_ID, '2026-09-07-workbench-shanghai-day');
+test('publishes unbounded review text migration as the latest release contract', () => {
+  assert.equal(RELEASE_ID, '2026-09-14-review-text-unbounded');
   assert.deepEqual(MIGRATION_MANIFEST.slice(-2), [
-    '2026-09-04_mcp_task_title_contract_fix.sql',
     '2026-09-07_workbench_shanghai_calendar_day.sql',
+    '2026-09-14_review_text_unbounded.sql',
   ]);
 });
 

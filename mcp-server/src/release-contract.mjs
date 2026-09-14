@@ -1,8 +1,8 @@
 // This value changes only when a new release contract is published. The
 // digest covers the ordered transactional manifest, excluding the contract
 // migration itself and deferred indexes.
-export const RELEASE_ID = '2026-09-07-workbench-shanghai-day';
-export const EXPECTED_MANIFEST_DIGEST = '624c3fdb85ce9702e9d7e64b1b9a38f24fcf76b1ecb280172e97ce448d543a97';
+export const RELEASE_ID = '2026-09-14-review-text-unbounded';
+export const EXPECTED_MANIFEST_DIGEST = '02093539289439df2e5081c4208ea41e0528d27b8cbe54b301070c36ab039376';
 
 export function hasExpectedReleaseContract(value) {
   return Boolean(value)
